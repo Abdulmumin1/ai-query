@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.1.0
+
+- minor: Refactor tool definition to use `@tool` decorator and `Field` for parameters, updating examples and adding new tests and agent
+
 ## 1.0.0
 
 - major: Added tool calling support
