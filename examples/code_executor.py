@@ -8,15 +8,20 @@ Demonstrates:
 
 import asyncio
 import io
-import sys
-import traceback
 from contextlib import redirect_stdout, redirect_stderr
-from ai_query import generate_text, google, tool, step_count_is, StepStartEvent, StepFinishEvent
+from ai_query import generate_text, google, tool, Field, step_count_is, StepStartEvent, StepFinishEvent
 
 
 # --- Code Execution Tool ---
 
-def execute_python(code: str):
+@tool(description=(
+    "Execute Python code and return the output. "
+    "Use print() to display results. "
+    "Available: math module, basic builtins (len, range, list, dict, sum, max, min, sorted, etc.)"
+))
+def execute_python(
+    code: str = Field(description="The Python code to execute")
+) -> str:
     """Execute Python code and return the output."""
     print(f"  [Executor] Running code...")
 
@@ -86,26 +91,6 @@ def execute_python(code: str):
         return f"Error: {type(e).__name__}: {e}"
 
 
-code_tool = tool(
-    description=(
-        "Execute Python code and return the output. "
-        "Use print() to display results. "
-        "Available: math module, basic builtins (len, range, list, dict, sum, max, min, sorted, etc.)"
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "code": {
-                "type": "string",
-                "description": "The Python code to execute"
-            }
-        },
-        "required": ["code"]
-    },
-    execute=execute_python
-)
-
-
 # --- Callbacks ---
 
 def on_start(event: StepStartEvent):
@@ -149,7 +134,7 @@ async def main():
                 "Always use print() to display your results clearly."
             ),
             prompt=problem,
-            tools={"execute_python": code_tool},
+            tools={"execute_python": execute_python},
             on_step_start=on_start,
             on_step_finish=on_finish,
             stop_when=step_count_is(4),

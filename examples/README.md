@@ -37,20 +37,31 @@ uv run task_planner.py
 
 ### Tool Calling with Execution Loop
 ```python
+@tool(description="Get the current weather for a location")
+async def get_weather(
+    location: str = Field(description="City name")
+) -> str:
+    return f"Weather in {location}: 72°F, Sunny"
+
 result = await generate_text(
     model=google("gemini-2.0-flash"),
     prompt="What's the weather in Tokyo?",
-    tools={"get_weather": weather_tool},
+    tools={"get_weather": get_weather},
     stop_when=step_count_is(5),
 )
 ```
 
 ### Streaming with Tools
 ```python
+@tool(description="Get top stories from Hacker News")
+async def get_stories(limit: int = Field(default=5)) -> str:
+    # ... implementation ...
+    return "Top stories: ..."
+
 result = stream_text(
     model=google("gemini-2.0-flash"),
     prompt="Summarize the top Hacker News stories",
-    tools={"get_stories": stories_tool},
+    tools={"get_stories": get_stories},
 )
 async for chunk in result.text_stream:
     print(chunk, end="", flush=True)

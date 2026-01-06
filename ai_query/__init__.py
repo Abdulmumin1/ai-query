@@ -18,6 +18,7 @@ from ai_query.types import (
     # Tool types
     Tool,
     tool,
+    Field,
     ToolSet,
     ToolCall,
     ToolResult,
@@ -602,6 +603,7 @@ __all__ = [
     # Tool types
     "Tool",
     "tool",
+    "Field",
     "ToolSet",
     "ToolCall",
     "ToolResult",

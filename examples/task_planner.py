@@ -9,7 +9,7 @@ Demonstrates:
 import asyncio
 import aiohttp
 from datetime import datetime
-from ai_query import generate_text, google, tool, has_tool_call, step_count_is, StepFinishEvent
+from ai_query import generate_text, google, tool, Field, has_tool_call, step_count_is, StepFinishEvent
 
 
 # --- Task State ---
@@ -19,7 +19,10 @@ task_log = []
 
 # --- Tools ---
 
-def add_note(content: str):
+@tool(description="Add a note or observation to the task log.")
+def add_note(
+    content: str = Field(description="The note content")
+) -> str:
     """Add a note to the task log."""
     timestamp = datetime.now().strftime("%H:%M:%S")
     entry = f"[{timestamp}] {content}"
@@ -28,7 +31,10 @@ def add_note(content: str):
     return f"Note added: {content}"
 
 
-async def fetch_data(url: str):
+@tool(description="Fetch data from a URL (API endpoint or webpage).")
+async def fetch_data(
+    url: str = Field(description="The URL to fetch")
+) -> str:
     """Fetch data from a URL."""
     print(f"  [Fetch] {url}")
     try:
@@ -47,7 +53,10 @@ async def fetch_data(url: str):
         return f"Error fetching URL: {e}"
 
 
-def calculate(expression: str):
+@tool(description="Perform a mathematical calculation.")
+def calculate(
+    expression: str = Field(description="Math expression to evaluate")
+) -> str:
     """Perform a calculation."""
     print(f"  [Calculate] {expression}")
     try:
@@ -59,61 +68,15 @@ def calculate(expression: str):
         return f"Error: {e}"
 
 
-def complete_task(summary: str):
+@tool(description="Mark the task as complete. Call this when you have finished the task and have all the information needed.")
+def complete_task(
+    summary: str = Field(description="A summary of what was accomplished")
+) -> str:
     """Mark the task as complete with a summary."""
     timestamp = datetime.now().strftime("%H:%M:%S")
     task_log.append(f"[{timestamp}] COMPLETED: {summary}")
     print(f"  [Complete] Task finished!")
     return f"Task completed. Summary: {summary}"
-
-
-note_tool = tool(
-    description="Add a note or observation to the task log.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "content": {"type": "string", "description": "The note content"}
-        },
-        "required": ["content"]
-    },
-    execute=add_note
-)
-
-fetch_tool = tool(
-    description="Fetch data from a URL (API endpoint or webpage).",
-    parameters={
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "The URL to fetch"}
-        },
-        "required": ["url"]
-    },
-    execute=fetch_data
-)
-
-calc_tool = tool(
-    description="Perform a mathematical calculation.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "expression": {"type": "string", "description": "Math expression to evaluate"}
-        },
-        "required": ["expression"]
-    },
-    execute=calculate
-)
-
-complete_tool = tool(
-    description="Mark the task as complete. Call this when you have finished the task and have all the information needed.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string", "description": "A summary of what was accomplished"}
-        },
-        "required": ["summary"]
-    },
-    execute=complete_task
-)
 
 
 # --- Callback ---
@@ -151,10 +114,10 @@ async def main():
         ),
         prompt=task,
         tools={
-            "add_note": note_tool,
-            "fetch_data": fetch_tool,
-            "calculate": calc_tool,
-            "complete_task": complete_tool,
+            "add_note": add_note,
+            "fetch_data": fetch_data,
+            "calculate": calculate,
+            "complete_task": complete_task,
         },
         on_step_finish=log_progress,
         # Stop when complete_task is called OR after 10 steps (safety limit)
