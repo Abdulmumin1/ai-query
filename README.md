@@ -1,6 +1,6 @@
 # ai-query
 
-A unified Python SDK for querying AI models from multiple providers (OpenAI, Anthropic, Google) with a consistent interface.
+A unified Python SDK for querying AI models from various providers with a consistent interface.
 
 ## Installation
 
@@ -90,13 +90,42 @@ async def main():
 asyncio.run(main())
 ```
 
-### Supported Providers
+### Providers
 
-The library exports factory functions for popular providers:
+The library supports various AI providers through a unified interface. Built-in support is available for:
 
-- `openai("model-name")` (Requires `OPENAI_API_KEY`)
-- `anthropic("model-name")` (Requires `ANTHROPIC_API_KEY`)
-- `google("model-name")` (Requires `GOOGLE_GENERATIVE_AI_API_KEY`)
+*   **OpenAI**: `openai("model-name")`
+*   **Anthropic**: `anthropic("model-name")`
+*   **Google**: `google("model-name")`
+
+#### Configuration
+
+You can configure providers using environment variables (recommended) or by passing credentials directly.
+
+**Using Environment Variables:**
+
+By default, providers look for standard environment variables:
+*   `OPENAI_API_KEY`
+*   `ANTHROPIC_API_KEY`
+*   `GOOGLE_API_KEY`
+
+**Passing API Keys Dynamically:**
+
+You can explicitly pass the API key (and other parameters) when initializing a provider.
+
+```python
+from ai_query import generate_text, google
+
+async def main():
+    # Pass API key directly
+    model = google("gemini-2.0-flash", api_key="your_api_key_here")
+
+    result = await generate_text(
+        model=model,
+        prompt="Explain quantum computing"
+    )
+    print(result.text)
+```
 
 ### Provider-Specific Options
 
