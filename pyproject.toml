@@ -5,6 +5,11 @@ description = "A unified Python SDK for querying AI models from multiple provide
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["aiohttp>=3.9.0"]
+license = { file = "LICENSE" }
+
+[project.urls]
+Homepage = "https://github.com/Abdulmumin1/ai_query"
+Repository = "https://github.com/Abdulmumin1/ai_query"
 
 [build-system]
 requires = ["hatchling"]
