@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, TYPE_CHECKING
 
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, StreamChunk
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, StreamChunk, ToolSet, Usage
 
 
 class BaseProvider(ABC):
@@ -37,6 +38,7 @@ class BaseProvider(ABC):
         *,
         model: str,
         messages: list[Message],
+        tools: ToolSet | None = None,
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> GenerateTextResult:
@@ -45,6 +47,7 @@ class BaseProvider(ABC):
         Args:
             model: The model identifier (without provider prefix).
             messages: List of messages in the conversation.
+            tools: Optional dict of tool definitions for tool calling.
             provider_options: Provider-specific options.
             **kwargs: Additional parameters (max_tokens, temperature, etc.).
 
@@ -59,6 +62,7 @@ class BaseProvider(ABC):
         *,
         model: str,
         messages: list[Message],
+        tools: ToolSet | None = None,
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
@@ -105,3 +109,52 @@ class BaseProvider(ABC):
             data_bytes = await resp.read()
             import base64
             return base64.b64encode(data_bytes).decode(), media_type
+
+    def _parse_sse_line(self, line: bytes | str) -> str | None:
+        """Parse an SSE line and extract the data payload.
+
+        Args:
+            line: Raw SSE line (bytes or str).
+
+        Returns:
+            The data string if line starts with "data: ", None otherwise.
+        """
+        if isinstance(line, bytes):
+            line = line.decode("utf-8")
+        line = line.strip()
+        if not line:
+            return None
+        if line.startswith("data: "):
+            return line[6:]
+        return None
+
+    def _parse_sse_json(self, line: bytes | str) -> dict[str, Any] | None:
+        """Parse an SSE line and decode the JSON payload.
+
+        Args:
+            line: Raw SSE line (bytes or str).
+
+        Returns:
+            Parsed JSON dict, or None if line is not valid SSE data or invalid JSON.
+        """
+        data = self._parse_sse_line(line)
+        if data is None:
+            return None
+        if data == "[DONE]":
+            return None
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            return None
+
+    def _accumulate_usage(self, total: Usage, delta: Usage) -> None:
+        """Accumulate usage statistics in-place.
+
+        Args:
+            total: The running total Usage object (modified in-place).
+            delta: The delta Usage object to add.
+        """
+        total.input_tokens += delta.input_tokens
+        total.output_tokens += delta.output_tokens
+        total.cached_tokens += delta.cached_tokens
+        total.total_tokens += delta.total_tokens
