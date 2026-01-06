@@ -53,6 +53,9 @@ jobs:
           # Run release to update changelog and remove changesets
           uv run semversioner release
 
+          # Generate full changelog
+          uv run semversioner changelog > CHANGELOG.md
+
           # Get the new version
           NEW_VERSION=$(uv run semversioner current-version)
           echo "New version: $NEW_VERSION"
@@ -69,6 +72,22 @@ jobs:
           git commit -m "chore: release ${{ steps.semversioner.outputs.version }}"
           git tag -a "v${{ steps.semversioner.outputs.version }}" -m "Release ${{ steps.semversioner.outputs.version }}"
           git push origin main --follow-tags
+
+      - name: Create GitHub Release
+        if: steps.check_changes.outputs.has_changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.semversioner.outputs.version }}"
+
+          # Extract release notes for the current version
+          # Using python to parse the markdown is more robust than sed
+          python -c "import sys, re; content=open('CHANGELOG.md').read(); match = re.search(r'## ' + re.escape('$VERSION') + r'\n(.*?)(?=\n## |\Z)', content, re.DOTALL); print(match.group(1).strip() if match else 'See CHANGELOG.md for details')" > release_notes.md
+
+          gh release create "v$VERSION" \
+            --title "ai_query@$VERSION" \
+            --notes-file release_notes.md \
+            --generate-notes
 
       - name: Build
         if: steps.check_changes.outputs.has_changes == 'true'
