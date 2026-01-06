@@ -8,12 +8,15 @@ Demonstrates:
 
 import asyncio
 import aiohttp
-from ai_query import generate_text, google, tool, step_count_is, StepStartEvent, StepFinishEvent
+from ai_query import generate_text, google, tool, Field, step_count_is, StepStartEvent, StepFinishEvent
 
 
 # --- Tools ---
 
-async def search_country(name: str):
+@tool(description="Search for a country by name and get detailed information.")
+async def search_country(
+    name: str = Field(description="Country name to search for")
+) -> dict:
     """Search for a country by name."""
     print(f"  [API] Searching for country: {name}")
 
@@ -45,7 +48,10 @@ async def search_country(name: str):
             }
 
 
-async def get_countries_by_region(region: str):
+@tool(description="Get a list of all countries in a region (e.g., 'Europe', 'Asia', 'Africa', 'Americas', 'Oceania').")
+async def get_countries_by_region(
+    region: str = Field(description="The region name")
+) -> dict:
     """Get all countries in a region."""
     print(f"  [API] Getting countries in region: {region}")
 
@@ -69,7 +75,11 @@ async def get_countries_by_region(region: str):
             return {"region": region, "countries": countries, "total": len(data)}
 
 
-async def compare_countries(country1: str, country2: str):
+@tool(description="Compare two countries side by side (population, area, etc.).")
+async def compare_countries(
+    country1: str = Field(description="First country name"),
+    country2: str = Field(description="Second country name")
+) -> dict:
     """Compare two countries side by side."""
     print(f"  [API] Comparing {country1} vs {country2}")
 
@@ -93,44 +103,6 @@ async def compare_countries(country1: str, country2: str):
             return "Could not find one or both countries"
 
         return {"comparison": results}
-
-
-search_tool = tool(
-    description="Search for a country by name and get detailed information.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "Country name to search for"}
-        },
-        "required": ["name"]
-    },
-    execute=search_country
-)
-
-region_tool = tool(
-    description="Get a list of all countries in a region (e.g., 'Europe', 'Asia', 'Africa', 'Americas', 'Oceania').",
-    parameters={
-        "type": "object",
-        "properties": {
-            "region": {"type": "string", "description": "The region name"}
-        },
-        "required": ["region"]
-    },
-    execute=get_countries_by_region
-)
-
-compare_tool = tool(
-    description="Compare two countries side by side (population, area, etc.).",
-    parameters={
-        "type": "object",
-        "properties": {
-            "country1": {"type": "string", "description": "First country name"},
-            "country2": {"type": "string", "description": "Second country name"}
-        },
-        "required": ["country1", "country2"]
-    },
-    execute=compare_countries
-)
 
 
 # --- Callbacks ---
@@ -174,9 +146,9 @@ async def main():
             system="You are a geography expert. Use the available tools to look up accurate country data.",
             prompt=query,
             tools={
-                "search_country": search_tool,
-                "get_countries_by_region": region_tool,
-                "compare_countries": compare_tool,
+                "search_country": search_country,
+                "get_countries_by_region": get_countries_by_region,
+                "compare_countries": compare_countries,
             },
             on_step_start=on_start,
             on_step_finish=on_finish,

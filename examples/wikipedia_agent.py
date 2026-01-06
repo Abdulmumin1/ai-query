@@ -8,12 +8,15 @@ Demonstrates:
 
 import asyncio
 import aiohttp
-from ai_query import generate_text, google, tool, step_count_is, StepFinishEvent
+from ai_query import generate_text, google, tool, Field, step_count_is, StepFinishEvent
 
 
 # --- Tools ---
 
-async def search_wikipedia(query: str):
+@tool(description="Search Wikipedia for articles matching a query. Returns titles and snippets.")
+async def search_wikipedia(
+    query: str = Field(description="The search query")
+) -> str:
     """Search Wikipedia and return article summaries."""
     print(f"  [Wikipedia] Searching: {query}")
     url = "https://en.wikipedia.org/w/api.php"
@@ -43,7 +46,10 @@ async def search_wikipedia(query: str):
             return f"Found {len(results)} articles:\n" + "\n".join(summaries)
 
 
-async def get_wikipedia_summary(title: str):
+@tool(description="Get the full introduction/summary of a specific Wikipedia article by its exact title.")
+async def get_wikipedia_summary(
+    title: str = Field(description="The exact title of the Wikipedia article")
+) -> str:
     """Get the full summary of a Wikipedia article by title."""
     print(f"  [Wikipedia] Getting summary: {title}")
     url = "https://en.wikipedia.org/w/api.php"
@@ -71,31 +77,6 @@ async def get_wikipedia_summary(title: str):
                     extract = extract[:1500] + "..."
                 return f"Wikipedia article '{title}':\n\n{extract}"
             return "No article found."
-
-
-search_tool = tool(
-    description="Search Wikipedia for articles matching a query. Returns titles and snippets.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "The search query"}
-        },
-        "required": ["query"]
-    },
-    execute=search_wikipedia
-)
-
-summary_tool = tool(
-    description="Get the full introduction/summary of a specific Wikipedia article by its exact title.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "The exact title of the Wikipedia article"}
-        },
-        "required": ["title"]
-    },
-    execute=get_wikipedia_summary
-)
 
 
 # --- Callback ---
@@ -127,8 +108,8 @@ async def main():
         ),
         prompt=user_question,
         tools={
-            "search_wikipedia": search_tool,
-            "get_wikipedia_summary": summary_tool,
+            "search_wikipedia": search_wikipedia,
+            "get_wikipedia_summary": get_wikipedia_summary,
         },
         on_step_finish=log_step,
         stop_when=step_count_is(6),

@@ -8,12 +8,15 @@ Demonstrates:
 
 import asyncio
 import aiohttp
-from ai_query import stream_text, google, tool, step_count_is
+from ai_query import stream_text, google, tool, Field, step_count_is
 
 
 # --- Hacker News API Tools ---
 
-async def get_top_stories(limit: int = 5):
+@tool(description="Get the current top stories from Hacker News. Returns title, score, author, and comment count.")
+async def get_top_stories(
+    limit: int = Field(description="Number of stories to fetch (default 5, max 10)", default=5)
+) -> str:
     """Get the top stories from Hacker News."""
     print(f"  [HN] Fetching top {limit} stories...")
 
@@ -51,7 +54,10 @@ async def get_top_stories(limit: int = 5):
         return result
 
 
-async def get_story_details(story_id: int):
+@tool(description="Get detailed information about a specific Hacker News story by its ID.")
+async def get_story_details(
+    story_id: int = Field(description="The Hacker News story ID")
+) -> str:
     """Get detailed information about a specific story."""
     print(f"  [HN] Getting details for story {story_id}...")
 
@@ -78,7 +84,11 @@ async def get_story_details(story_id: int):
             return result
 
 
-async def get_top_comments(story_id: int, limit: int = 3):
+@tool(description="Get the top comments on a Hacker News story.")
+async def get_top_comments(
+    story_id: int = Field(description="The Hacker News story ID"),
+    limit: int = Field(description="Number of comments to fetch (default 3)", default=3)
+) -> str:
     """Get top comments for a story."""
     print(f"  [HN] Getting comments for story {story_id}...")
 
@@ -117,55 +127,6 @@ async def get_top_comments(story_id: int, limit: int = 3):
         return result
 
 
-top_stories_tool = tool(
-    description="Get the current top stories from Hacker News. Returns title, score, author, and comment count.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "description": "Number of stories to fetch (default 5, max 10)"
-            }
-        },
-    },
-    execute=get_top_stories
-)
-
-story_details_tool = tool(
-    description="Get detailed information about a specific Hacker News story by its ID.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "story_id": {
-                "type": "integer",
-                "description": "The Hacker News story ID"
-            }
-        },
-        "required": ["story_id"]
-    },
-    execute=get_story_details
-)
-
-comments_tool = tool(
-    description="Get the top comments on a Hacker News story.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "story_id": {
-                "type": "integer",
-                "description": "The Hacker News story ID"
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Number of comments to fetch (default 3)"
-            }
-        },
-        "required": ["story_id"]
-    },
-    execute=get_top_comments
-)
-
-
 # --- Main ---
 
 async def main():
@@ -186,9 +147,9 @@ async def main():
         system="You are a tech news assistant that helps users explore Hacker News.",
         prompt=prompt,
         tools={
-            "get_top_stories": top_stories_tool,
-            "get_story_details": story_details_tool,
-            "get_top_comments": comments_tool,
+            "get_top_stories": get_top_stories,
+            "get_story_details": get_story_details,
+            "get_top_comments": get_top_comments,
         },
         stop_when=step_count_is(5),
     )

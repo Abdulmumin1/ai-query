@@ -46,43 +46,32 @@ async def main():
 
 ## Tool Calling
 
-Define tools and let the model use them automatically. The library handles the execution loop.
+Define tools and let the model use them automatically. The library handles the execution loop. Tools can be defined using the `@tool` decorator with type hints and the `Field` class for descriptions.
 
 ```python
-from ai_query import generate_text, google, tool, step_count_is
+from ai_query import generate_text, google, tool, Field, step_count_is
 
-# Define tools
-weather_tool = tool(
-    description="Get the current weather for a location",
-    parameters={
-        "type": "object",
-        "properties": {
-            "location": {"type": "string", "description": "City name"}
-        },
-        "required": ["location"]
-    },
-    execute=lambda location: {"temp": 72, "condition": "sunny"}
-)
+# Define tools using decorators
+@tool(description="Get the current weather for a location")
+async def get_weather(
+    location: str = Field(description="City name")
+) -> str:
+    # Function implementation
+    return f"Weather in {location}: 72°F, Sunny"
 
-calculator_tool = tool(
-    description="Perform math calculations",
-    parameters={
-        "type": "object",
-        "properties": {
-            "expression": {"type": "string", "description": "Math expression"}
-        },
-        "required": ["expression"]
-    },
-    execute=lambda expression: {"result": eval(expression)}
-)
+@tool(description="Perform math calculations")
+def calculate(
+    expression: str = Field(description="Math expression")
+) -> str:
+    return str(eval(expression))
 
 async def main():
     result = await generate_text(
         model=google("gemini-2.0-flash"),
         prompt="What's the weather in Paris? Also, what is 25 * 4?",
         tools={
-            "weather": weather_tool,
-            "calculator": calculator_tool
+            "weather": get_weather,
+            "calculator": calculate
         },
         stop_when=step_count_is(5),  # Max 5 model calls
     )
@@ -137,7 +126,7 @@ def on_finish(event: StepFinishEvent):
 result = await generate_text(
     model=google("gemini-2.0-flash"),
     prompt="What's the weather in Tokyo?",
-    tools={"weather": weather_tool},
+    tools={"weather": get_weather},
     on_step_start=on_start,
     on_step_finish=on_finish,
 )

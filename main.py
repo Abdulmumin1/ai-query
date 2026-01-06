@@ -3,13 +3,16 @@
 import asyncio
 import json
 import aiohttp
-from ai_query import generate_text, google, tool, step_count_is, StepFinishEvent
+from ai_query import generate_text, google, tool, Field, step_count_is, StepFinishEvent
 
 
 # --- Tools ---
 
-async def get_crypto_price(coin_id: str = "bitcoin"):
-    """Get the current price of a cryptocurrency in USD."""
+@tool(description="Get the current price of a cryptocurrency (e.g., 'bitcoin', 'ethereum', 'solana') in USD.")
+async def get_crypto_price(
+    coin_id: str = Field(description="The ID of the coin on CoinGecko.", default="bitcoin")
+) -> str:
+    """Fetch live cryptocurrency prices from CoinGecko API."""
     print(f"  [Tool] Fetching price for: {coin_id}")
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
     async with aiohttp.ClientSession() as session:
@@ -20,25 +23,16 @@ async def get_crypto_price(coin_id: str = "bitcoin"):
             price = data.get(coin_id, {}).get("usd")
             return f"The current price of {coin_id} is ${price} USD." if price else f"Coin '{coin_id}' not found."
 
-crypto_tool = tool(
-    description="Get the current price of a cryptocurrency (e.g., 'bitcoin', 'ethereum', 'solana') in USD.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "coin_id": {"type": "string", "description": "The ID of the coin on CoinGecko."}
-        },
-        "required": ["coin_id"]
-    },
-    execute=get_crypto_price
-)
 
-async def get_weather(location: str):
-    """Get the current weather for a location (city name)."""
+@tool(description="Get the current weather for a specific city.")
+async def get_weather(
+    location: str = Field(description="The name of the city.")
+) -> str:
+    """Fetch current weather using Open-Meteo API."""
     print(f"  [Tool] Fetching weather for: {location}")
-    # First, geocode the city name to coordinates using a free service (nominatim)
     geocode_url = f"https://nominatim.openstreetmap.org/search?q={location}&format=json&limit=1"
     headers = {"User-Agent": "ai-query-example/1.0"}
-    
+
     async with aiohttp.ClientSession() as session:
         async with session.get(geocode_url, headers=headers) as resp:
             if resp.status != 200:
@@ -46,11 +40,10 @@ async def get_weather(location: str):
             geo_data = await resp.json()
             if not geo_data:
                 return f"Location '{location}' not found."
-            
+
             lat = geo_data[0]["lat"]
             lon = geo_data[0]["lon"]
-            
-            # Now fetch weather from Open-Meteo
+
             weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
             async with session.get(weather_url) as w_resp:
                 if w_resp.status != 200:
@@ -60,18 +53,6 @@ async def get_weather(location: str):
                 temp = current.get("temperature")
                 wind = current.get("windspeed")
                 return f"Current weather in {location}: {temp}°C with wind speed {wind} km/h."
-
-weather_tool = tool(
-    description="Get the current weather for a specific city.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "location": {"type": "string", "description": "The name of the city."}
-        },
-        "required": ["location"]
-    },
-    execute=get_weather
-)
 
 
 # --- Callbacks ---
@@ -117,8 +98,8 @@ async def main():
             system=system_prompt,
             prompt=user_prompt,
             tools={
-                "get_crypto_price": crypto_tool,
-                "get_weather": weather_tool
+                "get_crypto_price": get_crypto_price,
+                "get_weather": get_weather,
             },
             on_step_finish=on_step_finish,
             stop_when=step_count_is(5)

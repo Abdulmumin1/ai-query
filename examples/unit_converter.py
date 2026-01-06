@@ -7,12 +7,17 @@ Demonstrates:
 """
 
 import asyncio
-from ai_query import generate_text, google, tool, step_count_is
+from ai_query import generate_text, google, tool, Field, step_count_is
 
 
 # --- Conversion Tools ---
 
-def convert_temperature(value: float, from_unit: str, to_unit: str):
+@tool(description="Convert temperature between Celsius, Fahrenheit, and Kelvin.")
+def convert_temperature(
+    value: float = Field(description="The temperature value"),
+    from_unit: str = Field(description="Source unit (celsius/fahrenheit/kelvin)"),
+    to_unit: str = Field(description="Target unit (celsius/fahrenheit/kelvin)")
+) -> str:
     """Convert temperature between Celsius, Fahrenheit, and Kelvin."""
     print(f"  [Convert] {value} {from_unit} -> {to_unit}")
 
@@ -42,7 +47,12 @@ def convert_temperature(value: float, from_unit: str, to_unit: str):
     return f"{value} {from_unit.upper()} = {result:.2f} {unit_name}"
 
 
-def convert_length(value: float, from_unit: str, to_unit: str):
+@tool(description="Convert length between mm, cm, m, km, inches, feet, yards, miles.")
+def convert_length(
+    value: float = Field(description="The length value"),
+    from_unit: str = Field(description="Source unit"),
+    to_unit: str = Field(description="Target unit")
+) -> str:
     """Convert length between various units."""
     print(f"  [Convert] {value} {from_unit} -> {to_unit}")
 
@@ -68,7 +78,12 @@ def convert_length(value: float, from_unit: str, to_unit: str):
     return f"{value} {from_unit} = {result:.4f} {to_unit}"
 
 
-def convert_weight(value: float, from_unit: str, to_unit: str):
+@tool(description="Convert weight between mg, g, kg, ounces, pounds.")
+def convert_weight(
+    value: float = Field(description="The weight value"),
+    from_unit: str = Field(description="Source unit"),
+    to_unit: str = Field(description="Target unit")
+) -> str:
     """Convert weight/mass between various units."""
     print(f"  [Convert] {value} {from_unit} -> {to_unit}")
 
@@ -93,7 +108,12 @@ def convert_weight(value: float, from_unit: str, to_unit: str):
     return f"{value} {from_unit} = {result:.4f} {to_unit}"
 
 
-def convert_currency(amount: float, from_currency: str, to_currency: str):
+@tool(description="Convert currency between major world currencies (USD, EUR, GBP, JPY, etc.). Uses approximate rates.")
+def convert_currency(
+    amount: float = Field(description="The amount to convert"),
+    from_currency: str = Field(description="Source currency code (e.g., USD)"),
+    to_currency: str = Field(description="Target currency code (e.g., EUR)")
+) -> str:
     """Convert currency using approximate rates (for demo purposes)."""
     print(f"  [Convert] {amount} {from_currency} -> {to_currency}")
 
@@ -116,63 +136,6 @@ def convert_currency(amount: float, from_currency: str, to_currency: str):
     return f"{amount} {from_currency} ≈ {result:.2f} {to_currency} (approximate rate)"
 
 
-temp_tool = tool(
-    description="Convert temperature between Celsius, Fahrenheit, and Kelvin.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "value": {"type": "number", "description": "The temperature value"},
-            "from_unit": {"type": "string", "description": "Source unit (celsius/fahrenheit/kelvin)"},
-            "to_unit": {"type": "string", "description": "Target unit (celsius/fahrenheit/kelvin)"}
-        },
-        "required": ["value", "from_unit", "to_unit"]
-    },
-    execute=convert_temperature
-)
-
-length_tool = tool(
-    description="Convert length between mm, cm, m, km, inches, feet, yards, miles.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "value": {"type": "number", "description": "The length value"},
-            "from_unit": {"type": "string", "description": "Source unit"},
-            "to_unit": {"type": "string", "description": "Target unit"}
-        },
-        "required": ["value", "from_unit", "to_unit"]
-    },
-    execute=convert_length
-)
-
-weight_tool = tool(
-    description="Convert weight between mg, g, kg, ounces, pounds.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "value": {"type": "number", "description": "The weight value"},
-            "from_unit": {"type": "string", "description": "Source unit"},
-            "to_unit": {"type": "string", "description": "Target unit"}
-        },
-        "required": ["value", "from_unit", "to_unit"]
-    },
-    execute=convert_weight
-)
-
-currency_tool = tool(
-    description="Convert currency between major world currencies (USD, EUR, GBP, JPY, etc.). Uses approximate rates.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "amount": {"type": "number", "description": "The amount to convert"},
-            "from_currency": {"type": "string", "description": "Source currency code (e.g., USD)"},
-            "to_currency": {"type": "string", "description": "Target currency code (e.g., EUR)"}
-        },
-        "required": ["amount", "from_currency", "to_currency"]
-    },
-    execute=convert_currency
-)
-
-
 # --- Main ---
 
 async def main():
@@ -188,10 +151,10 @@ async def main():
     ]
 
     tools = {
-        "convert_temperature": temp_tool,
-        "convert_length": length_tool,
-        "convert_weight": weight_tool,
-        "convert_currency": currency_tool,
+        "convert_temperature": convert_temperature,
+        "convert_length": convert_length,
+        "convert_weight": convert_weight,
+        "convert_currency": convert_currency,
     }
 
     for q in questions:
