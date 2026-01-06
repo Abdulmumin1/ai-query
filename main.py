@@ -21,40 +21,39 @@ async def main():
     # )
     # print(f"Anthropic: {result.text}")
 
-    # Example 3: Full messages with Google
-    # result = await generate_text(
-    #     model=google("gemini-2.0-flash"),
-    #     messages=[
-    #         {"role": "system", "content": "You are a poet."},
-    #         {"role": "user", "content": "Write a haiku about Python."}
-    #     ]
-    # )
-    # print(f"Google: {result.text}")
-
-    # Example 4: Streaming with Google
+    # Example 3: Streaming with Google + usage access
     print("Streaming from Google Gemini:")
-    async for chunk in stream_text(
+    result = stream_text(
         model=google("gemini-2.0-flash"),
         system="You are a poet.",
-        prompt="Write a 1000 words poem about finding purpose"
-    ):
+        messages=[
+            {"role": "assistant", "content": "hi there"},
+            
+            {"role": "user", "content": [
+                {"type": "text", "text": "Write a poem about a this image."},
+                {"type": "image", "image": "https://lh3.googleusercontent.com/a/ACg8ocLzLlXty_MJI4dr3u4TT-PsH8r86Hj1pTYdIwojTeygFHbPg1Zf=s96-c", "media_type": "image/png"}
+            ]}
+        ]
+    )
+
+    # Stream the text
+    async for chunk in result.text_stream:
         print(chunk, end="", flush=True)
     print("\n")
 
-    # Example 5: Streaming with OpenAI
-    # print("Streaming from OpenAI:")
-    # async for chunk in stream_text(
-    #     model=openai("gpt-4o"),
-    #     prompt="Write a short story about a robot."
-    # ):
-    #     print(chunk, end="", flush=True)
-    # print("\n")
+    # Access usage after streaming completes
+    usage = await result.usage
+    if usage:
+        print(f"Usage: {usage.input_tokens} input, {usage.output_tokens} output, {usage.total_tokens} total")
 
-    # Example 6: Streaming with Anthropic
-    # print("Streaming from Anthropic:")
+    finish_reason = await result.finish_reason
+    print(f"Finish reason: {finish_reason}")
+
+    # Example 4: Direct iteration (simpler, but no usage access)
+    # print("\nDirect streaming:")
     # async for chunk in stream_text(
-    #     model=anthropic("claude-sonnet-4-20250514"),
-    #     prompt="Explain the meaning of life briefly."
+    #     model=google("gemini-2.0-flash"),
+    #     prompt="Say hello in 3 languages."
     # ):
     #     print(chunk, end="", flush=True)
     # print("\n")

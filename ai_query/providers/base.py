@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
-from ai_query.types import GenerateTextResult, Message, ProviderOptions
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, StreamChunk
 
 
 class BaseProvider(ABC):
@@ -61,7 +61,7 @@ class BaseProvider(ABC):
         messages: list[Message],
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[StreamChunk]:
         """Stream text using the provider's API.
 
         Args:
@@ -71,12 +71,13 @@ class BaseProvider(ABC):
             **kwargs: Additional parameters (max_tokens, temperature, etc.).
 
         Yields:
-            Text chunks as they arrive from the API.
+            StreamChunk objects containing text and metadata.
+            The final chunk will have is_final=True with usage and finish_reason.
         """
         pass
         # Make this an async generator
         if False:
-            yield ""
+            yield StreamChunk()
 
     def get_provider_options(
         self, provider_options: ProviderOptions | None
@@ -92,3 +93,15 @@ class BaseProvider(ABC):
         if provider_options is None:
             return {}
         return provider_options.get(self.name, {})
+
+    async def _fetch_resource_as_base64(self, url: str, session: Any) -> tuple[str, str]:
+        """Fetch a resource from URL and return as base64 with media type."""
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise Exception(f"Failed to fetch resource from {url}: {resp.status}")
+            content_type = resp.headers.get("Content-Type", "application/octet-stream")
+            # Extract just the mime type (remove charset etc)
+            media_type = content_type.split(";")[0].strip()
+            data_bytes = await resp.read()
+            import base64
+            return base64.b64encode(data_bytes).decode(), media_type

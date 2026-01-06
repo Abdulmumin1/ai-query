@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator
 import json
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk
 from ai_query.model import LanguageModel
 
 
@@ -67,8 +67,8 @@ class AnthropicProvider(BaseProvider):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.base_url = kwargs.get("base_url", "https://api.anthropic.com")
 
-    def _convert_messages(
-        self, messages: list[Message]
+    async def _convert_messages(
+        self, messages: list[Message], session: aiohttp.ClientSession
     ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Message objects to Anthropic format.
 
@@ -91,26 +91,94 @@ class AnthropicProvider(BaseProvider):
                 # Handle multimodal content
                 content_parts = []
                 for part in msg.content:
-                    if hasattr(part, "text"):
-                        content_parts.append({"type": "text", "text": part.text})
-                    elif hasattr(part, "image"):
-                        image_data = part.image
-                        if isinstance(image_data, bytes):
-                            import base64
+                    # Handle dict-style parts (from user input)
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            content_parts.append({"type": "text", "text": part.get("text", "")})
+                        elif part.get("type") == "image":
+                            image_data = part.get("image")
+                            media_type = part.get("media_type", "image/png")
 
-                            image_data = base64.b64encode(image_data).decode()
-                        content_parts.append(
-                            {
+                            # Handle URL
+                            if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
+                                image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                            elif isinstance(image_data, bytes):
+                                import base64
+                                image_data = base64.b64encode(image_data).decode()
+
+                            content_parts.append({
                                 "type": "image",
                                 "source": {
                                     "type": "base64",
-                                    "media_type": getattr(
-                                        part, "media_type", "image/png"
-                                    ),
+                                    "media_type": media_type,
                                     "data": image_data,
                                 },
-                            }
-                        )
+                            })
+                        elif part.get("type") == "file":
+                            file_data = part.get("data")
+                            media_type = part.get("media_type")
+
+                            # Handle URL
+                            if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
+                                file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                                if not media_type:
+                                    media_type = fetched_type
+                            elif isinstance(file_data, bytes):
+                                import base64
+                                file_data = base64.b64encode(file_data).decode()
+
+                            content_parts.append({
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type or "application/pdf",
+                                    "data": file_data,
+                                },
+                            })
+                    # Handle dataclass-style parts
+                    elif hasattr(part, "text"):
+                        content_parts.append({"type": "text", "text": part.text})
+                    elif hasattr(part, "image"):
+                        image_data = part.image
+                        media_type = getattr(part, "media_type", "image/png")
+
+                        # Handle URL
+                        if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
+                            image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                        elif isinstance(image_data, bytes):
+                            import base64
+                            image_data = base64.b64encode(image_data).decode()
+
+                        content_parts.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_data,
+                            },
+                        })
+                    elif hasattr(part, "data"): # FilePart
+                        file_data = part.data
+                        media_type = getattr(part, "media_type", None)
+
+                        # Handle URL
+                        if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
+                            file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                            if not media_type:
+                                media_type = fetched_type
+                        elif isinstance(file_data, bytes):
+                            import base64
+                            file_data = base64.b64encode(file_data).decode()
+
+                        content_parts.append({
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type or "application/pdf",
+                                "data": file_data,
+                            },
+                        })
+
                 result.append({"role": msg.role, "content": content_parts})
 
         return system_prompt, result
@@ -138,30 +206,30 @@ class AnthropicProvider(BaseProvider):
 
         anthropic_options = self.get_provider_options(provider_options)
 
-        # Convert messages and extract system prompt
-        system_prompt, converted_messages = self._convert_messages(messages)
-
-        # Build request body
-        request_body: dict[str, Any] = {
-            "model": model,
-            "messages": converted_messages,
-            "max_tokens": kwargs.pop("max_tokens", 4096),
-            **kwargs,
-            **anthropic_options,
-        }
-
-        if system_prompt:
-            request_body["system"] = system_prompt
-
-        headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01",
-        }
-
-        url = f"{self.base_url}/v1/messages"
-
         async with aiohttp.ClientSession() as session:
+            # Convert messages and extract system prompt
+            system_prompt, converted_messages = await self._convert_messages(messages, session)
+
+            # Build request body
+            request_body: dict[str, Any] = {
+                "model": model,
+                "messages": converted_messages,
+                "max_tokens": kwargs.pop("max_tokens", 4096),
+                **kwargs,
+                **anthropic_options,
+            }
+
+            if system_prompt:
+                request_body["system"] = system_prompt
+
+            headers = {
+                "x-api-key": self.api_key,
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }
+
+            url = f"{self.base_url}/v1/messages"
+
             async with session.post(url, headers=headers, json=request_body) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
@@ -176,10 +244,14 @@ class AnthropicProvider(BaseProvider):
 
         # Build usage info
         usage_data = response.get("usage", {})
+        input_tokens = usage_data.get("input_tokens", 0)
+        output_tokens = usage_data.get("output_tokens", 0)
+        cached_tokens = usage_data.get("cache_read_input_tokens", 0)
         usage = Usage(
-            prompt_tokens=usage_data.get("input_tokens", 0),
-            completion_tokens=usage_data.get("output_tokens", 0),
-            total_tokens=usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            total_tokens=input_tokens + output_tokens,
         )
 
         return GenerateTextResult(
@@ -197,7 +269,7 @@ class AnthropicProvider(BaseProvider):
         messages: list[Message],
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[StreamChunk]:
         """Stream text using Anthropic API.
 
         Args:
@@ -207,37 +279,40 @@ class AnthropicProvider(BaseProvider):
             **kwargs: Additional params (max_tokens, temperature, etc.).
 
         Yields:
-            Text chunks as they arrive.
+            StreamChunk objects with text and final metadata.
         """
         import aiohttp
 
         anthropic_options = self.get_provider_options(provider_options)
 
-        # Convert messages and extract system prompt
-        system_prompt, converted_messages = self._convert_messages(messages)
-
-        # Build request body with streaming enabled
-        request_body: dict[str, Any] = {
-            "model": model,
-            "messages": converted_messages,
-            "max_tokens": kwargs.pop("max_tokens", 4096),
-            "stream": True,
-            **kwargs,
-            **anthropic_options,
-        }
-
-        if system_prompt:
-            request_body["system"] = system_prompt
-
-        headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01",
-        }
-
-        url = f"{self.base_url}/v1/messages"
-
         async with aiohttp.ClientSession() as session:
+            # Convert messages and extract system prompt
+            system_prompt, converted_messages = await self._convert_messages(messages, session)
+
+            # Build request body with streaming enabled
+            request_body: dict[str, Any] = {
+                "model": model,
+                "messages": converted_messages,
+                "max_tokens": kwargs.pop("max_tokens", 4096),
+                "stream": True,
+                **kwargs,
+                **anthropic_options,
+            }
+
+            if system_prompt:
+                request_body["system"] = system_prompt
+
+            headers = {
+                "x-api-key": self.api_key,
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }
+
+            url = f"{self.base_url}/v1/messages"
+
+            finish_reason = None
+            usage = None
+
             async with session.post(url, headers=headers, json=request_body) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
@@ -262,6 +337,36 @@ class AnthropicProvider(BaseProvider):
                                 if delta.get("type") == "text_delta":
                                     text = delta.get("text", "")
                                     if text:
-                                        yield text
+                                        yield StreamChunk(text=text)
+
+                            # message_delta contains stop_reason
+                            elif event_type == "message_delta":
+                                delta = chunk.get("delta", {})
+                                if delta.get("stop_reason"):
+                                    finish_reason = delta["stop_reason"]
+                                # Usage is in the message_delta
+                                usage_data = chunk.get("usage", {})
+                                if usage_data:
+                                    output_tokens = usage_data.get("output_tokens", 0)
+                                    # We need input tokens from message_start
+                                    if usage:
+                                        usage.output_tokens = output_tokens
+                                        usage.total_tokens = usage.input_tokens + output_tokens
+
+                            # message_start contains input token count
+                            elif event_type == "message_start":
+                                message = chunk.get("message", {})
+                                usage_data = message.get("usage", {})
+                                if usage_data:
+                                    usage = Usage(
+                                        input_tokens=usage_data.get("input_tokens", 0),
+                                        output_tokens=0,
+                                        cached_tokens=usage_data.get("cache_read_input_tokens", 0),
+                                        total_tokens=usage_data.get("input_tokens", 0),
+                                    )
+
                         except json.JSONDecodeError:
                             continue
+
+        # Yield final chunk with metadata
+        yield StreamChunk(is_final=True, usage=usage, finish_reason=finish_reason)

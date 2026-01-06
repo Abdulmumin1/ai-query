@@ -12,6 +12,7 @@ from ai_query.types import (
     ImagePart,
     FilePart,
     Usage,
+    TextStreamResult,
 )
 from ai_query.model import LanguageModel
 from ai_query.providers.base import BaseProvider
@@ -121,7 +122,7 @@ async def generate_text(
     )
 
 
-async def stream_text(
+def stream_text(
     *,
     model: LanguageModel,
     prompt: str | None = None,
@@ -129,11 +130,11 @@ async def stream_text(
     messages: list[Message] | list[dict[str, Any]] | None = None,
     provider_options: ProviderOptions | None = None,
     **kwargs: Any,
-) -> AsyncIterator[str]:
+) -> TextStreamResult:
     """Stream text from an AI model.
 
-    This function streams text chunks as they arrive from the model.
-    It supports the same input modes as generate_text.
+    Returns a TextStreamResult object that provides both the text stream
+    and metadata (usage, finish_reason) after streaming completes.
 
     Args:
         model: A LanguageModel instance created by a provider function
@@ -144,25 +145,24 @@ async def stream_text(
         provider_options: Provider-specific options.
         **kwargs: Additional parameters (max_tokens, temperature, etc.).
 
-    Yields:
-        Text chunks as they arrive from the model.
+    Returns:
+        TextStreamResult with:
+            - text_stream: AsyncIterator yielding text chunks
+            - text: Awaitable for full text after completion
+            - usage: Awaitable for Usage stats after completion
+            - finish_reason: Awaitable for finish reason after completion
 
     Examples:
-        Simple streaming:
-        >>> from ai_query import stream_text, openai
-        >>> async for chunk in stream_text(
-        ...     model=openai("gpt-4"),
-        ...     prompt="Write a short story"
-        ... ):
+        Simple streaming (direct iteration):
+        >>> async for chunk in stream_text(model=openai("gpt-4"), prompt="Hi"):
         ...     print(chunk, end="", flush=True)
 
-        With system prompt:
-        >>> async for chunk in stream_text(
-        ...     model=anthropic("claude-sonnet-4-20250514"),
-        ...     system="You are a storyteller.",
-        ...     prompt="Tell me a tale."
-        ... ):
+        With usage access:
+        >>> result = stream_text(model=google("gemini-2.0-flash"), prompt="Hi")
+        >>> async for chunk in result.text_stream:
         ...     print(chunk, end="", flush=True)
+        >>> usage = await result.usage
+        >>> print(f"Tokens: {usage.total_tokens}")
     """
     # Build messages list
     final_messages: list[Message] = []
@@ -184,14 +184,16 @@ async def stream_text(
     if not final_messages:
         raise ValueError("Either 'prompt' or 'messages' must be provided")
 
-    # Stream using the model's provider
-    async for chunk in model.provider.stream(
+    # Create the stream from the provider
+    stream = model.provider.stream(
         model=model.model_id,
         messages=final_messages,
         provider_options=provider_options,
         **kwargs,
-    ):
-        yield chunk
+    )
+
+    # Return TextStreamResult wrapping the stream
+    return TextStreamResult(stream)
 
 
 __all__ = [
@@ -205,6 +207,7 @@ __all__ = [
     # Types
     "LanguageModel",
     "GenerateTextResult",
+    "TextStreamResult",
     "Message",
     "ProviderOptions",
     "TextPart",

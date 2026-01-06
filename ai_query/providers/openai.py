@@ -5,9 +5,12 @@ from __future__ import annotations
 import os
 from typing import Any, AsyncIterator
 import json
+import base64
+
+import aiohttp
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk
 from ai_query.model import LanguageModel
 
 
@@ -74,7 +77,7 @@ class OpenAIProvider(BaseProvider):
         self.base_url = kwargs.get("base_url", "https://api.openai.com/v1")
         self.organization = kwargs.get("organization")
 
-    def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
+    async def _convert_messages(self, messages: list[Message], session: aiohttp.ClientSession) -> list[dict[str, Any]]:
         """Convert Message objects to OpenAI format."""
         result = []
         for msg in messages:
@@ -84,20 +87,80 @@ class OpenAIProvider(BaseProvider):
                 # Handle multimodal content
                 content_parts = []
                 for part in msg.content:
-                    if hasattr(part, "text"):
+                    # Handle dict-style parts (from user input)
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            content_parts.append({"type": "text", "text": part.get("text", "")})
+                        elif part.get("type") == "image":
+                            image_data = part.get("image")
+                            media_type = part.get("media_type", "image/png")
+
+                            # Handle URL
+                            if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
+                                image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                                image_data = f"data:{media_type};base64,{image_data}"
+                            elif isinstance(image_data, bytes):
+                                image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
+                            elif isinstance(image_data, str) and not image_data.startswith("data:"):
+                                # Assume it's base64 data
+                                image_data = f"data:{media_type};base64,{image_data}"
+
+                            content_parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": image_data},
+                            })
+                        elif part.get("type") == "file":
+                            file_data = part.get("data")
+                            media_type = part.get("media_type")
+
+                            # Handle URL
+                            if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
+                                file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                                if not media_type:
+                                    media_type = fetched_type
+                                file_data = f"data:{media_type};base64,{file_data}"
+                            elif isinstance(file_data, bytes):
+                                file_data = f"data:{media_type};base64,{base64.b64encode(file_data).decode()}"
+
+                            content_parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": file_data}
+                            })
+
+                    # Handle dataclass-style parts
+                    elif hasattr(part, "text"):
                         content_parts.append({"type": "text", "text": part.text})
                     elif hasattr(part, "image"):
                         image_data = part.image
-                        if isinstance(image_data, bytes):
-                            import base64
+                        media_type = getattr(part, "media_type", "image/png")
 
-                            image_data = base64.b64encode(image_data).decode()
-                        content_parts.append(
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_data},
-                            }
-                        )
+                        if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
+                            image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                            image_data = f"data:{media_type};base64,{image_data}"
+                        elif isinstance(image_data, bytes):
+                            image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
+
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": image_data},
+                        })
+                    elif hasattr(part, "data"): # FilePart
+                        file_data = part.data
+                        media_type = getattr(part, "media_type", None)
+
+                        if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
+                            file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                            if not media_type:
+                                media_type = fetched_type
+                            file_data = f"data:{media_type};base64,{file_data}"
+                        elif isinstance(file_data, bytes):
+                            file_data = f"data:{media_type};base64,{base64.b64encode(file_data).decode()}"
+
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": file_data},
+                        })
+
                 result.append({"role": msg.role, "content": content_parts})
         return result
 
@@ -120,17 +183,7 @@ class OpenAIProvider(BaseProvider):
         Returns:
             GenerateTextResult with generated text and metadata.
         """
-        import aiohttp
-
         openai_options = self.get_provider_options(provider_options)
-
-        # Build request parameters
-        request_body: dict[str, Any] = {
-            "model": model,
-            "messages": self._convert_messages(messages),
-            **kwargs,
-            **openai_options,
-        }
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -142,6 +195,17 @@ class OpenAIProvider(BaseProvider):
         url = f"{self.base_url}/chat/completions"
 
         async with aiohttp.ClientSession() as session:
+            # Convert messages and fetch resources if needed
+            converted_messages = await self._convert_messages(messages, session)
+
+            # Build request parameters
+            request_body: dict[str, Any] = {
+                "model": model,
+                "messages": converted_messages,
+                **kwargs,
+                **openai_options,
+            }
+
             async with session.post(url, headers=headers, json=request_body) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
@@ -152,10 +216,12 @@ class OpenAIProvider(BaseProvider):
         choice = response["choices"][0]
         usage = None
         if "usage" in response:
+            usage_data = response["usage"]
             usage = Usage(
-                prompt_tokens=response["usage"]["prompt_tokens"],
-                completion_tokens=response["usage"]["completion_tokens"],
-                total_tokens=response["usage"]["total_tokens"],
+                input_tokens=usage_data.get("prompt_tokens", 0),
+                output_tokens=usage_data.get("completion_tokens", 0),
+                cached_tokens=usage_data.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+                total_tokens=usage_data.get("total_tokens", 0),
             )
 
         return GenerateTextResult(
@@ -173,7 +239,7 @@ class OpenAIProvider(BaseProvider):
         messages: list[Message],
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[StreamChunk]:
         """Stream text using OpenAI API.
 
         Args:
@@ -183,20 +249,9 @@ class OpenAIProvider(BaseProvider):
             **kwargs: Additional params (max_tokens, temperature, etc.).
 
         Yields:
-            Text chunks as they arrive.
+            StreamChunk objects with text and final metadata.
         """
-        import aiohttp
-
         openai_options = self.get_provider_options(provider_options)
-
-        # Build request parameters with streaming enabled
-        request_body: dict[str, Any] = {
-            "model": model,
-            "messages": self._convert_messages(messages),
-            "stream": True,
-            **kwargs,
-            **openai_options,
-        }
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -207,7 +262,24 @@ class OpenAIProvider(BaseProvider):
 
         url = f"{self.base_url}/chat/completions"
 
+        finish_reason = None
+        usage = None
+
         async with aiohttp.ClientSession() as session:
+            # Convert messages and fetch resources if needed
+            converted_messages = await self._convert_messages(messages, session)
+
+            # Build request parameters with streaming enabled
+            # Include stream_options to get usage in streaming response
+            request_body: dict[str, Any] = {
+                "model": model,
+                "messages": converted_messages,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+                **kwargs,
+                **openai_options,
+            }
+
             async with session.post(url, headers=headers, json=request_body) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
@@ -225,9 +297,30 @@ class OpenAIProvider(BaseProvider):
 
                     try:
                         chunk = json.loads(data)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content")
-                        if content:
-                            yield content
+
+                        # Check for usage in the chunk (sent at the end)
+                        if "usage" in chunk and chunk["usage"]:
+                            usage_data = chunk["usage"]
+                            usage = Usage(
+                                input_tokens=usage_data.get("prompt_tokens", 0),
+                                output_tokens=usage_data.get("completion_tokens", 0),
+                                cached_tokens=usage_data.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+                                total_tokens=usage_data.get("total_tokens", 0),
+                            )
+
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            choice = choices[0]
+                            # Check for finish reason
+                            if choice.get("finish_reason"):
+                                finish_reason = choice["finish_reason"]
+
+                            delta = choice.get("delta", {})
+                            content = delta.get("content")
+                            if content:
+                                yield StreamChunk(text=content)
                     except json.JSONDecodeError:
                         continue
+
+        # Yield final chunk with metadata
+        yield StreamChunk(is_final=True, usage=usage, finish_reason=finish_reason)
