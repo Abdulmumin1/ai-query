@@ -85,7 +85,7 @@ jobs:
           python -c "import sys, re; content=open('CHANGELOG.md').read(); match = re.search(r'## ' + re.escape('$VERSION') + r'\n(.*?)(?=\n## |\Z)', content, re.DOTALL); print(match.group(1).strip() if match else 'See CHANGELOG.md for details')" > release_notes.md
 
           gh release create "v$VERSION" \
-            --title "ai_query@$VERSION" \
+            --title "ai-query@$VERSION" \
             --notes-file release_notes.md \
             --generate-notes
 

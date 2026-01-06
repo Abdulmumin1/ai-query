@@ -8,8 +8,8 @@ dependencies = ["aiohttp>=3.9.0"]
 license = { file = "LICENSE" }
 
 [project.urls]
-Homepage = "https://github.com/Abdulmumin1/ai_query"
-Repository = "https://github.com/Abdulmumin1/ai_query"
+Homepage = "https://github.com/Abdulmumin1/ai-query"
+Repository = "https://github.com/Abdulmumin1/ai-query"
 
 [build-system]
 requires = ["hatchling"]
