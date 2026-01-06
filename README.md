@@ -192,3 +192,7 @@ result = await generate_text(
     }
 )
 ```
+
+## Examples
+
+See the [examples/](examples/) folder for agent implementations
