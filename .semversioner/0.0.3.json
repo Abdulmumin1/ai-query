@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "docs: added project urls",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-06T11:21:20+00:00",
+  "version": "0.0.3"
+}

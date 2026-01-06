@@ -1,6 +1,6 @@
 [project]
 name = "ai-query"
-version = "0.0.2"
+version = "0.0.3"
 description = "A unified Python SDK for querying AI models from multiple providers"
 readme = "README.md"
 requires-python = ">=3.13"
