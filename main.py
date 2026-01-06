@@ -1,62 +1,140 @@
-"""Example usage of ai-query library."""
+"""Example of a Real-World Agent using the Google provider."""
 
 import asyncio
+import json
+import aiohttp
+from ai_query import generate_text, google, tool, step_count_is, StepFinishEvent
 
-from ai_query import generate_text, stream_text, openai, anthropic, google
 
+# --- Tools ---
+
+async def get_crypto_price(coin_id: str = "bitcoin"):
+    """Get the current price of a cryptocurrency in USD."""
+    print(f"  [Tool] Fetching price for: {coin_id}")
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return f"Error: Failed to fetch price (Status {resp.status})"
+            data = await resp.json()
+            price = data.get(coin_id, {}).get("usd")
+            return f"The current price of {coin_id} is ${price} USD." if price else f"Coin '{coin_id}' not found."
+
+crypto_tool = tool(
+    description="Get the current price of a cryptocurrency (e.g., 'bitcoin', 'ethereum', 'solana') in USD.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "coin_id": {"type": "string", "description": "The ID of the coin on CoinGecko."}
+        },
+        "required": ["coin_id"]
+    },
+    execute=get_crypto_price
+)
+
+async def get_weather(location: str):
+    """Get the current weather for a location (city name)."""
+    print(f"  [Tool] Fetching weather for: {location}")
+    # First, geocode the city name to coordinates using a free service (nominatim)
+    geocode_url = f"https://nominatim.openstreetmap.org/search?q={location}&format=json&limit=1"
+    headers = {"User-Agent": "ai-query-example/1.0"}
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.get(geocode_url, headers=headers) as resp:
+            if resp.status != 200:
+                return "Error: Geocoding failed."
+            geo_data = await resp.json()
+            if not geo_data:
+                return f"Location '{location}' not found."
+            
+            lat = geo_data[0]["lat"]
+            lon = geo_data[0]["lon"]
+            
+            # Now fetch weather from Open-Meteo
+            weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+            async with session.get(weather_url) as w_resp:
+                if w_resp.status != 200:
+                    return "Error: Weather API failed."
+                w_data = await w_resp.json()
+                current = w_data.get("current_weather", {})
+                temp = current.get("temperature")
+                wind = current.get("windspeed")
+                return f"Current weather in {location}: {temp}°C with wind speed {wind} km/h."
+
+weather_tool = tool(
+    description="Get the current weather for a specific city.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "location": {"type": "string", "description": "The name of the city."}
+        },
+        "required": ["location"]
+    },
+    execute=get_weather
+)
+
+
+# --- Callbacks ---
+
+def on_step_finish(event: StepFinishEvent):
+    """Log the progress of each step in a premium way."""
+    print(f"\n--- Step {event.step_number} ---")
+    
+    if event.step.text:
+        print(f"Thought: {event.step.text.strip()}")
+        
+    if event.step.tool_calls:
+        for tc in event.step.tool_calls:
+            args = json.dumps(tc.arguments)
+            print(f"Action: Call tool '{tc.name}' with arguments {args}")
+            
+    if event.step.tool_results:
+        for tr in event.step.tool_results:
+            print(f"Observation: {tr.result}")
+            
+    if event.usage:
+        print(f"Usage: {event.usage.total_tokens} tokens so far")
+
+
+# --- Main ---
 
 async def main():
-    # Example 1: Simple prompt with OpenAI
-    # result = await generate_text(
-    #     model=openai("gpt-4o"),
-    #     prompt="What is the capital of France?"
-    # )
-    # print(f"OpenAI: {result.text}")
-
-    # Example 2: System prompt + user prompt with Anthropic
-    # result = await generate_text(
-    #     model=anthropic("claude-sonnet-4-20250514"),
-    #     system="You are a helpful assistant. Be concise.",
-    #     prompt="Explain quantum computing in one sentence."
-    # )
-    # print(f"Anthropic: {result.text}")
-
-    # Example 3: Streaming with Google + usage access
-    print("Streaming from Google Gemini:")
-    result = stream_text(
-        model=google("gemini-2.0-flash"),
-        system="You are a poet.",
-        messages=[
-            {"role": "assistant", "content": "hi there"},
-            
-            {"role": "user", "content": [
-                {"type": "text", "text": "give me the test peom from this"},
-                {"type": "file", "data": "https://www.arvindguptatoys.com/arvindgupta/hundred-poems.pdf", "media_type": "application/pdf"}
-            ]}
-        ]
+    print("Initializing Market & Environment Agent (powered by Google Gemini-2.0-Flash)...")
+    
+    model = google("gemini-2.0-flash")
+    
+    system_prompt = (
+        "You are a helpful assistant that can fetch live market data and weather information. "
+        "Use the tools provided to answer the user's questions with real-time data. "
+        "If you need to check multiple things, do them in sequence."
     )
+    
+    user_prompt = "What is the current price of Bitcoin, and what is the weather like in London right now?"
 
-    # Stream the text
-    async for chunk in result.text_stream:
-        print(chunk, end="", flush=True)
-    print("\n")
+    try:
+        result = await generate_text(
+            model=model,
+            system=system_prompt,
+            prompt=user_prompt,
+            tools={
+                "get_crypto_price": crypto_tool,
+                "get_weather": weather_tool
+            },
+            on_step_finish=on_step_finish,
+            stop_when=step_count_is(5)
+        )
 
-    # Access usage after streaming completes
-    usage = await result.usage
-    if usage:
-        print(f"Usage: {usage.input_tokens} input, {usage.output_tokens} output, {usage.total_tokens} total")
-
-    finish_reason = await result.finish_reason
-    print(f"Finish reason: {finish_reason}")
-
-    # Example 4: Direct iteration (simpler, but no usage access)
-    # print("\nDirect streaming:")
-    # async for chunk in stream_text(
-    #     model=google("gemini-2.0-flash"),
-    #     prompt="Say hello in 3 languages."
-    # ):
-    #     print(chunk, end="", flush=True)
-    # print("\n")
+        print("\n" + "="*50)
+        print("FINAL ANSWER")
+        print("="*50)
+        print(result.text)
+        print("="*50)
+        
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\nMake sure GOOGLE_API_KEY is set in your environment.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+{
+  "type": "major",
+  "description": "Added tool calling support"
+}

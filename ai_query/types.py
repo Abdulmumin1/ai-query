@@ -3,11 +3,243 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union, AsyncIterator, Coroutine
+from typing import Any, Literal, Union, AsyncIterator, Callable, Awaitable, TYPE_CHECKING
 
 # Message types
 Role = Literal["system", "user", "assistant", "tool"]
+
+
+# =============================================================================
+# Tool Types
+# =============================================================================
+
+
+@dataclass
+class Tool:
+    """A tool that can be called by the AI model.
+
+    Tools allow the AI to perform actions like fetching data, calling APIs,
+    or executing code. When the AI decides to use a tool, the execute function
+    is called with the parsed arguments.
+
+    Example:
+        >>> weather_tool = tool(
+        ...     description="Get weather for a location",
+        ...     parameters={
+        ...         "type": "object",
+        ...         "properties": {
+        ...             "location": {"type": "string", "description": "City name"}
+        ...         },
+        ...         "required": ["location"]
+        ...     },
+        ...     execute=lambda location: {"temp": 72, "condition": "sunny"}
+        ... )
+    """
+
+    description: str
+    parameters: dict[str, Any]  # JSON Schema
+    execute: Callable[..., Any] | Callable[..., Awaitable[Any]]
+
+    async def run(self, **kwargs: Any) -> Any:
+        """Execute the tool, handling both sync and async functions."""
+        result = self.execute(**kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+
+def tool(
+    *,
+    description: str,
+    parameters: dict[str, Any],
+    execute: Callable[..., Any] | Callable[..., Awaitable[Any]],
+) -> Tool:
+    """Create a tool definition.
+
+    Args:
+        description: What the tool does (sent to the AI model).
+        parameters: JSON Schema defining the tool's input parameters.
+        execute: Function to run when the tool is called. Can be sync or async.
+            Arguments are passed as keyword arguments matching the schema.
+
+    Returns:
+        A Tool instance.
+
+    Example:
+        >>> search_tool = tool(
+        ...     description="Search the web",
+        ...     parameters={
+        ...         "type": "object",
+        ...         "properties": {
+        ...             "query": {"type": "string", "description": "Search query"}
+        ...         },
+        ...         "required": ["query"]
+        ...     },
+        ...     execute=lambda query: {"results": ["result1", "result2"]}
+        ... )
+    """
+    return Tool(description=description, parameters=parameters, execute=execute)
+
+
+# Type alias for a collection of tools
+ToolSet = dict[str, Tool]
+
+
+@dataclass
+class ToolCall:
+    """A tool call made by the AI model."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+    # Provider-specific metadata (e.g., Google's thought_signature)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolResult:
+    """Result from executing a tool."""
+
+    tool_call_id: str
+    tool_name: str
+    result: Any
+    is_error: bool = False
+
+
+@dataclass
+class ToolCallPart:
+    """A tool call content part (for assistant messages)."""
+
+    type: Literal["tool_call"] = "tool_call"
+    tool_call: ToolCall | None = None
+
+
+@dataclass
+class ToolResultPart:
+    """A tool result content part (for tool messages)."""
+
+    type: Literal["tool_result"] = "tool_result"
+    tool_result: ToolResult | None = None
+
+
+# =============================================================================
+# Stop Conditions
+# =============================================================================
+
+
+@dataclass
+class StepResult:
+    """Result from a single step in the generation loop."""
+
+    text: str
+    tool_calls: list[ToolCall]
+    tool_results: list[ToolResult]
+    finish_reason: str | None = None
+
+
+# Type for stop condition functions
+StopCondition = Callable[[list[StepResult]], Union[bool, Awaitable[bool]]]
+
+
+def step_count_is(count: int) -> StopCondition:
+    """Stop when the step count reaches the specified number.
+
+    Args:
+        count: Number of steps after which to stop.
+
+    Returns:
+        A stop condition function.
+
+    Example:
+        >>> result = await generate_text(
+        ...     model=openai("gpt-4"),
+        ...     tools={"search": search_tool},
+        ...     stop_when=step_count_is(5),  # Max 5 iterations
+        ...     prompt="Research this topic"
+        ... )
+    """
+    def condition(steps: list[StepResult]) -> bool:
+        return len(steps) >= count
+
+    return condition
+
+
+def has_tool_call(tool_name: str) -> StopCondition:
+    """Stop when a specific tool is called.
+
+    Args:
+        tool_name: Name of the tool that triggers the stop.
+
+    Returns:
+        A stop condition function.
+
+    Example:
+        >>> result = await generate_text(
+        ...     model=openai("gpt-4"),
+        ...     tools={"search": search_tool, "final_answer": answer_tool},
+        ...     stop_when=has_tool_call("final_answer"),
+        ...     prompt="Research and answer"
+        ... )
+    """
+    def condition(steps: list[StepResult]) -> bool:
+        if not steps:
+            return False
+        last_step = steps[-1]
+        return any(tc.name == tool_name for tc in last_step.tool_calls)
+
+    return condition
+
+
+# =============================================================================
+# Step Callbacks
+# =============================================================================
+
+
+@dataclass
+class StepStartEvent:
+    """Event passed to on_step_start callback.
+
+    Provides context about the step that's about to run, allowing inspection
+    or modification of messages before the model is called.
+
+    Attributes:
+        step_number: The 1-indexed step number (1 for first step, 2 for second, etc.).
+        messages: The current conversation history that will be sent to the model.
+            This list can be modified to alter what the model sees.
+        tools: The available tools for this step, or None if no tools.
+    """
+
+    step_number: int
+    messages: list["Message"]
+    tools: "ToolSet | None"
+
+
+@dataclass
+class StepFinishEvent:
+    """Event passed to on_step_finish callback.
+
+    Provides information about the completed step and accumulated state.
+
+    Attributes:
+        step_number: The 1-indexed step number that just completed.
+        step: The StepResult for this specific step (text, tool_calls, tool_results).
+        text: Accumulated text from all steps so far.
+        usage: Accumulated token usage from all steps so far.
+        steps: List of all StepResults from steps completed so far.
+    """
+
+    step_number: int
+    step: StepResult
+    text: str
+    usage: "Usage"
+    steps: list[StepResult]
+
+
+# Type aliases for step callback functions
+OnStepStart = Callable[[StepStartEvent], Union[None, Awaitable[None]]]
+OnStepFinish = Callable[[StepFinishEvent], Union[None, Awaitable[None]]]
 
 
 @dataclass
@@ -113,6 +345,7 @@ class StreamChunk:
     is_final: bool = False
     usage: Usage | None = None
     finish_reason: str | None = None
+    tool_calls: list[ToolCall] | None = None
 
 
 class TextStreamResult:

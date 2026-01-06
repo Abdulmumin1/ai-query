@@ -10,7 +10,7 @@ import json
 import aiohttp
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart
 from ai_query.model import LanguageModel
 
 
@@ -87,7 +87,10 @@ class GoogleProvider(BaseProvider):
                 continue
 
             # Map roles to Google format
-            role = "user" if msg.role == "user" else "model"
+            if msg.role == "user" or msg.role == "tool":
+                role = "user"
+            else:
+                role = "model"
 
             if isinstance(msg.content, str):
                 contents.append({"role": role, "parts": [{"text": msg.content}]})
@@ -136,6 +139,30 @@ class GoogleProvider(BaseProvider):
                                 }
                             })
                     # Handle dataclass-style parts
+                    elif hasattr(part, "type") and part.type == "tool_call":
+                        # ToolCallPart - convert to functionCall
+                        tc = part.tool_call
+                        if tc:
+                            part_data = {
+                                "functionCall": {
+                                    "name": tc.name,
+                                    "args": tc.arguments,
+                                }
+                            }
+                            # Include thoughtSignature if present (required for Gemini 3)
+                            if tc.metadata and tc.metadata.get("thought_signature"):
+                                part_data["thoughtSignature"] = tc.metadata["thought_signature"]
+                            parts.append(part_data)
+                    elif hasattr(part, "type") and part.type == "tool_result":
+                        # ToolResultPart - convert to functionResponse
+                        tr = part.tool_result
+                        if tr:
+                            parts.append({
+                                "functionResponse": {
+                                    "name": tr.tool_name,
+                                    "response": tr.result if isinstance(tr.result, dict) else {"result": tr.result},
+                                }
+                            })
                     elif hasattr(part, "text"):
                         parts.append({"text": part.text})
                     elif hasattr(part, "image"):
@@ -178,11 +205,23 @@ class GoogleProvider(BaseProvider):
 
         return system_instruction, contents
 
+    def _convert_tools(self, tools: ToolSet) -> list[dict[str, Any]]:
+        """Convert ToolSet to Google function calling format."""
+        function_declarations = []
+        for name, tool in tools.items():
+            function_declarations.append({
+                "name": name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        return [{"functionDeclarations": function_declarations}]
+
     async def generate(
         self,
         *,
         model: str,
         messages: list[Message],
+        tools: ToolSet | None = None,
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> GenerateTextResult:
@@ -247,6 +286,10 @@ class GoogleProvider(BaseProvider):
                 else:
                     request_body["safetySettings"] = safety_settings
 
+            # Add tools if provided
+            if tools:
+                request_body["tools"] = self._convert_tools(tools)
+
             # Only pass through known Google API fields, ignore others
             # (prevents errors from unknown fields like "thinkingConfig")
 
@@ -258,14 +301,27 @@ class GoogleProvider(BaseProvider):
                     raise Exception(f"Google API error ({resp.status}): {error_text}")
                 response = await resp.json()
 
-        # Extract text from response
+        # Extract text and function calls from response
         text = ""
+        tool_calls: list[ToolCall] = []
         candidates = response.get("candidates", [])
         if candidates:
             content = candidates[0].get("content", {})
-            for part in content.get("parts", []):
+            for i, part in enumerate(content.get("parts", [])):
                 if "text" in part:
                     text += part["text"]
+                elif "functionCall" in part:
+                    fc = part["functionCall"]
+                    # Capture thoughtSignature for Gemini 3 models
+                    metadata = {}
+                    if "thoughtSignature" in part:
+                        metadata["thought_signature"] = part["thoughtSignature"]
+                    tool_calls.append(ToolCall(
+                        id=f"call_{i}",  # Google doesn't provide IDs, generate one
+                        name=fc.get("name"),
+                        arguments=fc.get("args", {}),
+                        metadata=metadata,
+                    ))
 
         # Build usage info if available
         usage = None
@@ -283,11 +339,15 @@ class GoogleProvider(BaseProvider):
         if candidates:
             finish_reason = candidates[0].get("finishReason")
 
+        # Build response dict with tool_calls for the execution loop
+        response_with_tools = dict(response)
+        response_with_tools["tool_calls"] = tool_calls
+
         return GenerateTextResult(
             text=text,
             finish_reason=finish_reason,
             usage=usage,
-            response=response,
+            response=response_with_tools,
             provider_metadata={"model": model},
         )
 
@@ -296,6 +356,7 @@ class GoogleProvider(BaseProvider):
         contents: list[dict[str, Any]],
         system_instruction: str | None,
         google_options: dict[str, Any],
+        tools: ToolSet | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Build request body for Google API."""
@@ -338,6 +399,10 @@ class GoogleProvider(BaseProvider):
             else:
                 request_body["safetySettings"] = safety_settings
 
+        # Add tools if provided
+        if tools:
+            request_body["tools"] = self._convert_tools(tools)
+
         return request_body
 
     async def stream(
@@ -345,6 +410,7 @@ class GoogleProvider(BaseProvider):
         *,
         model: str,
         messages: list[Message],
+        tools: ToolSet | None = None,
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
@@ -353,6 +419,7 @@ class GoogleProvider(BaseProvider):
         Args:
             model: Model name (e.g., "gemini-2.0-flash", "gemini-1.5-pro").
             messages: Conversation messages.
+            tools: Optional tool definitions for tool calling.
             provider_options: Google-specific options under "google" key.
             **kwargs: Additional params (max_tokens, temperature, etc.).
 
@@ -369,7 +436,7 @@ class GoogleProvider(BaseProvider):
 
             # Build request body
             request_body = self._build_request_body(
-                contents, system_instruction, google_options, **kwargs
+                contents, system_instruction, google_options, tools=tools, **kwargs
             )
 
             # Use streamGenerateContent endpoint
@@ -377,6 +444,7 @@ class GoogleProvider(BaseProvider):
 
             finish_reason = None
             usage = None
+            tool_calls: list[ToolCall] = []
 
             async with session.post(url, json=request_body) as resp:
                 if resp.status != 200:
@@ -385,37 +453,48 @@ class GoogleProvider(BaseProvider):
 
                 # Process SSE stream
                 async for line in resp.content:
-                    line = line.decode("utf-8").strip()
-                    if not line or not line.startswith("data: "):
+                    chunk = self._parse_sse_json(line)
+                    if chunk is None:
                         continue
 
-                    data = line[6:]
-                    try:
-                        chunk = json.loads(data)
+                    # Check for usage metadata
+                    usage_metadata = chunk.get("usageMetadata", {})
+                    if usage_metadata:
+                        usage = Usage(
+                            input_tokens=usage_metadata.get("promptTokenCount", 0),
+                            output_tokens=usage_metadata.get("candidatesTokenCount", 0),
+                            cached_tokens=usage_metadata.get("cachedContentTokenCount", 0),
+                            total_tokens=usage_metadata.get("totalTokenCount", 0),
+                        )
 
-                        # Check for usage metadata
-                        usage_metadata = chunk.get("usageMetadata", {})
-                        if usage_metadata:
-                            usage = Usage(
-                                input_tokens=usage_metadata.get("promptTokenCount", 0),
-                                output_tokens=usage_metadata.get("candidatesTokenCount", 0),
-                                cached_tokens=usage_metadata.get("cachedContentTokenCount", 0),
-                                total_tokens=usage_metadata.get("totalTokenCount", 0),
-                            )
+                    candidates = chunk.get("candidates", [])
+                    if candidates:
+                        candidate = candidates[0]
+                        # Check for finish reason
+                        if candidate.get("finishReason"):
+                            finish_reason = candidate["finishReason"]
 
-                        candidates = chunk.get("candidates", [])
-                        if candidates:
-                            candidate = candidates[0]
-                            # Check for finish reason
-                            if candidate.get("finishReason"):
-                                finish_reason = candidate["finishReason"]
-
-                            content = candidate.get("content", {})
-                            for part in content.get("parts", []):
-                                if "text" in part:
-                                    yield StreamChunk(text=part["text"])
-                    except json.JSONDecodeError:
-                        continue
+                        content = candidate.get("content", {})
+                        for part in content.get("parts", []):
+                            if "text" in part:
+                                yield StreamChunk(text=part["text"])
+                            elif "functionCall" in part:
+                                fc = part["functionCall"]
+                                # Capture thoughtSignature for Gemini 3 models
+                                metadata = {}
+                                if "thoughtSignature" in part:
+                                    metadata["thought_signature"] = part["thoughtSignature"]
+                                tool_calls.append(ToolCall(
+                                    id=f"call_{len(tool_calls)}",  # Google doesn't provide IDs
+                                    name=fc.get("name"),
+                                    arguments=fc.get("args", {}),
+                                    metadata=metadata,
+                                ))
 
         # Yield final chunk with metadata
-        yield StreamChunk(is_final=True, usage=usage, finish_reason=finish_reason)
+        yield StreamChunk(
+            is_final=True,
+            usage=usage,
+            finish_reason=finish_reason,
+            tool_calls=tool_calls if tool_calls else None
+        )
