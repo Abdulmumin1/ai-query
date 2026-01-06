@@ -9,3 +9,8 @@ dependencies = ["aiohttp>=3.9.0"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "semversioner>=2.0.8",
+]

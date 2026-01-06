@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Refactor providers to use base class fetching and fix OpenAI image fetching"
+}

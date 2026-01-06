@@ -30,8 +30,8 @@ async def main():
             {"role": "assistant", "content": "hi there"},
             
             {"role": "user", "content": [
-                {"type": "text", "text": "Write a poem about a this image."},
-                {"type": "image", "image": "https://lh3.googleusercontent.com/a/ACg8ocLzLlXty_MJI4dr3u4TT-PsH8r86Hj1pTYdIwojTeygFHbPg1Zf=s96-c", "media_type": "image/png"}
+                {"type": "text", "text": "give me the test peom from this"},
+                {"type": "file", "data": "https://www.arvindguptatoys.com/arvindgupta/hundred-poems.pdf", "media_type": "application/pdf"}
             ]}
         ]
     )
