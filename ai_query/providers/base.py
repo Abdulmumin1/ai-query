@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, AsyncIterator
 
 from ai_query.types import GenerateTextResult, Message, ProviderOptions
 
@@ -14,7 +14,7 @@ class BaseProvider(ABC):
     To create a new provider adapter:
     1. Subclass BaseProvider
     2. Implement the `generate` method
-    3. Register your provider using `register_provider`
+    3. Implement the `stream` method for streaming support
     """
 
     # Provider identifier (e.g., "openai", "anthropic", "google")
@@ -52,6 +52,31 @@ class BaseProvider(ABC):
             GenerateTextResult containing the generated text and metadata.
         """
         pass
+
+    @abstractmethod
+    async def stream(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream text using the provider's API.
+
+        Args:
+            model: The model identifier (without provider prefix).
+            messages: List of messages in the conversation.
+            provider_options: Provider-specific options.
+            **kwargs: Additional parameters (max_tokens, temperature, etc.).
+
+        Yields:
+            Text chunks as they arrive from the API.
+        """
+        pass
+        # Make this an async generator
+        if False:
+            yield ""
 
     def get_provider_options(
         self, provider_options: ProviderOptions | None

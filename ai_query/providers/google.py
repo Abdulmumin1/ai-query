@@ -1,16 +1,56 @@
-"""Google (Gemini) provider adapter."""
+"""Google (Gemini) provider adapter using direct HTTP API."""
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, AsyncIterator
+import json
 
 from ai_query.providers.base import BaseProvider
 from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage
+from ai_query.model import LanguageModel
+
+
+# Cached provider instance
+_default_provider: GoogleProvider | None = None
+
+
+def google(
+    model_id: str,
+    *,
+    api_key: str | None = None,
+) -> LanguageModel:
+    """Create a Google (Gemini) language model.
+
+    Args:
+        model_id: The model identifier (e.g., "gemini-2.0-flash", "gemini-1.5-pro").
+        api_key: Google API key. Falls back to GOOGLE_API_KEY env var.
+
+    Returns:
+        A LanguageModel instance for use with generate_text().
+
+    Example:
+        >>> from ai_query import generate_text, google
+        >>> result = await generate_text(
+        ...     model=google("gemini-2.0-flash"),
+        ...     prompt="Hello!"
+        ... )
+    """
+    global _default_provider
+
+    # Create provider with custom settings, or reuse default
+    if api_key:
+        provider = GoogleProvider(api_key=api_key)
+    else:
+        if _default_provider is None:
+            _default_provider = GoogleProvider()
+        provider = _default_provider
+
+    return LanguageModel(provider=provider, model_id=model_id)
 
 
 class GoogleProvider(BaseProvider):
-    """Google (Gemini) provider adapter."""
+    """Google (Gemini) provider adapter using direct HTTP API."""
 
     name = "google"
 
@@ -23,18 +63,7 @@ class GoogleProvider(BaseProvider):
         """
         super().__init__(api_key, **kwargs)
         self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
-
-    def _get_client(self) -> Any:
-        """Get or create Google Generative AI client."""
-        try:
-            from google import genai
-        except ImportError:
-            raise ImportError(
-                "google-genai package is required for Google provider. "
-                "Install it with: pip install google-genai"
-            )
-
-        return genai.Client(api_key=self.api_key)
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     def _convert_messages(
         self, messages: list[Message]
@@ -105,69 +134,201 @@ class GoogleProvider(BaseProvider):
         Returns:
             GenerateTextResult with generated text and metadata.
         """
-        client = self._get_client()
+        import aiohttp
+
         google_options = self.get_provider_options(provider_options)
 
         # Convert messages
         system_instruction, contents = self._convert_messages(messages)
 
         # Build generation config from kwargs
-        from google.genai import types
-
-        generation_config_params: dict[str, Any] = {}
+        generation_config: dict[str, Any] = {}
         if "max_tokens" in kwargs:
-            generation_config_params["max_output_tokens"] = kwargs.pop("max_tokens")
+            generation_config["maxOutputTokens"] = kwargs.pop("max_tokens")
         if "temperature" in kwargs:
-            generation_config_params["temperature"] = kwargs.pop("temperature")
+            generation_config["temperature"] = kwargs.pop("temperature")
         if "top_p" in kwargs:
-            generation_config_params["top_p"] = kwargs.pop("top_p")
+            generation_config["topP"] = kwargs.pop("top_p")
         if "top_k" in kwargs:
-            generation_config_params["top_k"] = kwargs.pop("top_k")
+            generation_config["topK"] = kwargs.pop("top_k")
         if "stop_sequences" in kwargs:
-            generation_config_params["stop_sequences"] = kwargs.pop("stop_sequences")
+            generation_config["stopSequences"] = kwargs.pop("stop_sequences")
 
         # Merge with any generation_config from provider options
         if "generation_config" in google_options:
-            generation_config_params.update(google_options.pop("generation_config"))
+            generation_config.update(google_options.pop("generation_config"))
 
-        # Build request config
-        config: dict[str, Any] = {}
-        if generation_config_params:
-            config.update(generation_config_params)
+        # Build request body
+        request_body: dict[str, Any] = {
+            "contents": contents,
+        }
+
         if system_instruction:
-            config["system_instruction"] = system_instruction
+            request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        if generation_config:
+            request_body["generationConfig"] = generation_config
 
         # Add remaining google options (safety_settings, etc.)
-        config.update(google_options)
+        if "safety_settings" in google_options:
+            # Convert safety settings to proper format
+            safety_settings = google_options.pop("safety_settings")
+            if isinstance(safety_settings, dict):
+                # Convert dict format to list format expected by API
+                request_body["safetySettings"] = [
+                    {"category": k, "threshold": v}
+                    for k, v in safety_settings.items()
+                ]
+            else:
+                request_body["safetySettings"] = safety_settings
 
-        # Make API call
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(**config) if config else None,
-        )
+        # Only pass through known Google API fields, ignore others
+        # (prevents errors from unknown fields like "thinkingConfig")
 
-        # Extract text
-        text = response.text or ""
+        url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Google API error ({resp.status}): {error_text}")
+                response = await resp.json()
+
+        # Extract text from response
+        text = ""
+        candidates = response.get("candidates", [])
+        if candidates:
+            content = candidates[0].get("content", {})
+            for part in content.get("parts", []):
+                if "text" in part:
+                    text += part["text"]
 
         # Build usage info if available
         usage = None
-        if response.usage_metadata:
+        usage_metadata = response.get("usageMetadata", {})
+        if usage_metadata:
             usage = Usage(
-                prompt_tokens=response.usage_metadata.prompt_token_count or 0,
-                completion_tokens=response.usage_metadata.candidates_token_count or 0,
-                total_tokens=response.usage_metadata.total_token_count or 0,
+                prompt_tokens=usage_metadata.get("promptTokenCount", 0),
+                completion_tokens=usage_metadata.get("candidatesTokenCount", 0),
+                total_tokens=usage_metadata.get("totalTokenCount", 0),
             )
 
         # Determine finish reason
         finish_reason = None
-        if response.candidates:
-            finish_reason = str(response.candidates[0].finish_reason)
+        if candidates:
+            finish_reason = candidates[0].get("finishReason")
 
         return GenerateTextResult(
             text=text,
             finish_reason=finish_reason,
             usage=usage,
-            response=response.model_dump() if hasattr(response, "model_dump") else {},
+            response=response,
             provider_metadata={"model": model},
         )
+
+    def _build_request_body(
+        self,
+        contents: list[dict[str, Any]],
+        system_instruction: str | None,
+        google_options: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Build request body for Google API."""
+        # Build generation config from kwargs
+        generation_config: dict[str, Any] = {}
+        if "max_tokens" in kwargs:
+            generation_config["maxOutputTokens"] = kwargs.pop("max_tokens")
+        if "temperature" in kwargs:
+            generation_config["temperature"] = kwargs.pop("temperature")
+        if "top_p" in kwargs:
+            generation_config["topP"] = kwargs.pop("top_p")
+        if "top_k" in kwargs:
+            generation_config["topK"] = kwargs.pop("top_k")
+        if "stop_sequences" in kwargs:
+            generation_config["stopSequences"] = kwargs.pop("stop_sequences")
+
+        # Merge with any generation_config from provider options
+        if "generation_config" in google_options:
+            generation_config.update(google_options.pop("generation_config"))
+
+        # Build request body
+        request_body: dict[str, Any] = {
+            "contents": contents,
+        }
+
+        if system_instruction:
+            request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+
+        if generation_config:
+            request_body["generationConfig"] = generation_config
+
+        # Add safety_settings if provided
+        if "safety_settings" in google_options:
+            safety_settings = google_options.pop("safety_settings")
+            if isinstance(safety_settings, dict):
+                request_body["safetySettings"] = [
+                    {"category": k, "threshold": v}
+                    for k, v in safety_settings.items()
+                ]
+            else:
+                request_body["safetySettings"] = safety_settings
+
+        return request_body
+
+    async def stream(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream text using Google Gemini API.
+
+        Args:
+            model: Model name (e.g., "gemini-2.0-flash", "gemini-1.5-pro").
+            messages: Conversation messages.
+            provider_options: Google-specific options under "google" key.
+            **kwargs: Additional params (max_tokens, temperature, etc.).
+
+        Yields:
+            Text chunks as they arrive.
+        """
+        import aiohttp
+
+        google_options = self.get_provider_options(provider_options)
+
+        # Convert messages
+        system_instruction, contents = self._convert_messages(messages)
+
+        # Build request body
+        request_body = self._build_request_body(
+            contents, system_instruction, google_options, **kwargs
+        )
+
+        # Use streamGenerateContent endpoint
+        url = f"{self.base_url}/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Google API error ({resp.status}): {error_text}")
+
+                # Process SSE stream
+                async for line in resp.content:
+                    line = line.decode("utf-8").strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+
+                    data = line[6:]
+                    try:
+                        chunk = json.loads(data)
+                        candidates = chunk.get("candidates", [])
+                        if candidates:
+                            content = candidates[0].get("content", {})
+                            for part in content.get("parts", []):
+                                if "text" in part:
+                                    yield part["text"]
+                    except json.JSONDecodeError:
+                        continue

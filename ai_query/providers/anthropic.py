@@ -1,16 +1,58 @@
-"""Anthropic provider adapter."""
+"""Anthropic provider adapter using direct HTTP API."""
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, AsyncIterator
+import json
 
 from ai_query.providers.base import BaseProvider
 from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage
+from ai_query.model import LanguageModel
+
+
+# Cached provider instance
+_default_provider: AnthropicProvider | None = None
+
+
+def anthropic(
+    model_id: str,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> LanguageModel:
+    """Create an Anthropic language model.
+
+    Args:
+        model_id: The model identifier (e.g., "claude-sonnet-4-20250514", "claude-3-opus-20240229").
+        api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
+        base_url: Custom base URL for API requests.
+
+    Returns:
+        A LanguageModel instance for use with generate_text().
+
+    Example:
+        >>> from ai_query import generate_text, anthropic
+        >>> result = await generate_text(
+        ...     model=anthropic("claude-sonnet-4-20250514"),
+        ...     prompt="Hello!"
+        ... )
+    """
+    global _default_provider
+
+    # Create provider with custom settings, or reuse default
+    if api_key or base_url:
+        provider = AnthropicProvider(api_key=api_key, base_url=base_url)
+    else:
+        if _default_provider is None:
+            _default_provider = AnthropicProvider()
+        provider = _default_provider
+
+    return LanguageModel(provider=provider, model_id=model_id)
 
 
 class AnthropicProvider(BaseProvider):
-    """Anthropic provider adapter."""
+    """Anthropic provider adapter using direct HTTP API."""
 
     name = "anthropic"
 
@@ -23,23 +65,7 @@ class AnthropicProvider(BaseProvider):
         """
         super().__init__(api_key, **kwargs)
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        self.base_url = kwargs.get("base_url")
-
-    def _get_client(self) -> Any:
-        """Get or create Anthropic client."""
-        try:
-            from anthropic import AsyncAnthropic
-        except ImportError:
-            raise ImportError(
-                "anthropic package is required for Anthropic provider. "
-                "Install it with: pip install anthropic"
-            )
-
-        client_kwargs: dict[str, Any] = {"api_key": self.api_key}
-        if self.base_url:
-            client_kwargs["base_url"] = self.base_url
-
-        return AsyncAnthropic(**client_kwargs)
+        self.base_url = kwargs.get("base_url", "https://api.anthropic.com")
 
     def _convert_messages(
         self, messages: list[Message]
@@ -108,14 +134,15 @@ class AnthropicProvider(BaseProvider):
         Returns:
             GenerateTextResult with generated text and metadata.
         """
-        client = self._get_client()
+        import aiohttp
+
         anthropic_options = self.get_provider_options(provider_options)
 
         # Convert messages and extract system prompt
         system_prompt, converted_messages = self._convert_messages(messages)
 
-        # Build request parameters
-        request_params: dict[str, Any] = {
+        # Build request body
+        request_body: dict[str, Any] = {
             "model": model,
             "messages": converted_messages,
             "max_tokens": kwargs.pop("max_tokens", 4096),
@@ -124,28 +151,117 @@ class AnthropicProvider(BaseProvider):
         }
 
         if system_prompt:
-            request_params["system"] = system_prompt
+            request_body["system"] = system_prompt
 
-        # Make API call
-        response = await client.messages.create(**request_params)
+        headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+
+        url = f"{self.base_url}/v1/messages"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Anthropic API error ({resp.status}): {error_text}")
+                response = await resp.json()
 
         # Extract text from response
         text = ""
-        for block in response.content:
-            if block.type == "text":
-                text += block.text
+        for block in response.get("content", []):
+            if block.get("type") == "text":
+                text += block.get("text", "")
 
         # Build usage info
+        usage_data = response.get("usage", {})
         usage = Usage(
-            prompt_tokens=response.usage.input_tokens,
-            completion_tokens=response.usage.output_tokens,
-            total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+            prompt_tokens=usage_data.get("input_tokens", 0),
+            completion_tokens=usage_data.get("output_tokens", 0),
+            total_tokens=usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0),
         )
 
         return GenerateTextResult(
             text=text,
-            finish_reason=response.stop_reason,
+            finish_reason=response.get("stop_reason"),
             usage=usage,
-            response=response.model_dump(),
-            provider_metadata={"model": response.model, "id": response.id},
+            response=response,
+            provider_metadata={"model": response.get("model"), "id": response.get("id")},
         )
+
+    async def stream(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream text using Anthropic API.
+
+        Args:
+            model: Model name (e.g., "claude-sonnet-4-20250514", "claude-3-opus-20240229").
+            messages: Conversation messages.
+            provider_options: Anthropic-specific options under "anthropic" key.
+            **kwargs: Additional params (max_tokens, temperature, etc.).
+
+        Yields:
+            Text chunks as they arrive.
+        """
+        import aiohttp
+
+        anthropic_options = self.get_provider_options(provider_options)
+
+        # Convert messages and extract system prompt
+        system_prompt, converted_messages = self._convert_messages(messages)
+
+        # Build request body with streaming enabled
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": converted_messages,
+            "max_tokens": kwargs.pop("max_tokens", 4096),
+            "stream": True,
+            **kwargs,
+            **anthropic_options,
+        }
+
+        if system_prompt:
+            request_body["system"] = system_prompt
+
+        headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+
+        url = f"{self.base_url}/v1/messages"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Anthropic API error ({resp.status}): {error_text}")
+
+                # Process SSE stream
+                async for line in resp.content:
+                    line = line.decode("utf-8").strip()
+                    if not line:
+                        continue
+
+                    # Anthropic uses "event:" and "data:" lines
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        try:
+                            chunk = json.loads(data)
+                            event_type = chunk.get("type")
+
+                            # content_block_delta contains the text chunks
+                            if event_type == "content_block_delta":
+                                delta = chunk.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    text = delta.get("text", "")
+                                    if text:
+                                        yield text
+                        except json.JSONDecodeError:
+                            continue

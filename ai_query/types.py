@@ -78,6 +78,15 @@ class GenerateTextResult:
     provider_metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class StreamTextResult:
+    """Final result from stream_text after streaming completes."""
+
+    text: str
+    finish_reason: str | None = None
+    usage: Usage | None = None
+
+
 # Provider options type - allows provider-specific configuration
 # Example: {"google": {"safety_settings": {...}}, "anthropic": {"top_k": 10}}
 ProviderOptions = dict[str, dict[str, Any]]
