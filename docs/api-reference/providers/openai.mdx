@@ -1,0 +1,71 @@
+---
+title: "openai()"
+description: "Create an OpenAI language model"
+---
+
+Factory function to create an OpenAI model instance.
+
+## Signature
+
+```python
+def openai(model_id: str) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The OpenAI model identifier.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for OpenAI.
+
+## Environment
+
+Requires `OPENAI_API_KEY` environment variable.
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gpt-5.2-chat-latest` | GPT-5.2 Flagship - most capable |
+| `gpt-5-mini-20250807` | GPT-5 mini - fast and efficient |
+| `gpt-4.1-2025-04-14` | GPT-4.1 - stable enterprise workhorse |
+| `chatgpt-4o-latest` | GPT-4o (Omni) - multimodal |
+| `gpt-4o-mini` | GPT-4o mini - cost-effective |
+| `o3-2025-04-16` | OpenAI o3 - reasoning model |
+| `o4-mini-2025-04-16` | OpenAI o4-mini - fast reasoning |
+
+## Example
+
+```python
+from ai_query import generate_text, openai
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Hello, world!"
+)
+```
+
+## Provider Options
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Be creative.",
+    provider_options={
+        "openai": {
+            "temperature": 0.9,
+            "max_tokens": 1000,
+            "top_p": 0.95,
+            "frequency_penalty": 0.5,
+            "presence_penalty": 0.5
+        }
+    }
+)
+```

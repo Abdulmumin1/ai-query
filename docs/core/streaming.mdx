@@ -1,0 +1,160 @@
+---
+title: "Streaming"
+description: "Stream AI responses in real-time"
+---
+
+The `stream_text` function enables real-time streaming of AI responses. This provides a better user experience by showing text as it's generated rather than waiting for the complete response.
+
+## Basic Streaming
+
+```python
+import asyncio
+from ai_query import stream_text, google
+
+async def main():
+    result = stream_text(
+        model=google("gemini-2.0-flash"),
+        prompt="Write a short story about a robot."
+    )
+
+    async for chunk in result.text_stream:
+        print(chunk, end="", flush=True)
+
+    print()  # New line at the end
+
+asyncio.run(main())
+```
+
+<Note>
+`stream_text` returns immediately with a `TextStreamResult` object. The actual streaming happens when you iterate over `text_stream`.
+</Note>
+
+## Getting Usage Statistics
+
+Token usage is available after streaming completes:
+
+```python
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Explain machine learning."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+
+# Await usage after streaming
+usage = await result.usage
+print(f"\nTokens: {usage.total_tokens}")
+```
+
+## Streaming with Tools
+
+Combine streaming with tool calling for powerful agentic workflows:
+
+```python
+from ai_query import stream_text, google, tool, Field
+
+@tool(description="Search Wikipedia for information")
+async def search_wikipedia(query: str = Field(description="Search query")) -> str:
+    # Simulated search
+    return f"Wikipedia results for '{query}': ..."
+
+async def main():
+    result = stream_text(
+        model=google("gemini-2.0-flash"),
+        prompt="Search for information about Python programming and summarize it.",
+        tools={"search_wikipedia": search_wikipedia}
+    )
+
+    async for chunk in result.text_stream:
+        print(chunk, end="", flush=True)
+
+asyncio.run(main())
+```
+
+When tools are provided, the streaming handles the full execution loop:
+1. The AI decides to call a tool
+2. The tool executes
+3. The AI receives the result
+4. The AI generates the final response (streamed)
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | `LanguageModel` | The AI model to use |
+| `prompt` | `str` | The user prompt |
+| `messages` | `list[dict]` | Full conversation history |
+| `system` | `str` | System prompt |
+| `tools` | `dict[str, Tool]` | Available tools |
+| `stop_when` | `StopCondition` | Stop condition for tool loops |
+| `on_step_start` | `Callable` | Step start callback |
+| `on_step_finish` | `Callable` | Step finish callback |
+| `provider_options` | `dict` | Provider-specific options |
+
+## TextStreamResult Object
+
+The `stream_text` function returns a `TextStreamResult`:
+
+```python
+result = stream_text(model=google("gemini-2.0-flash"), prompt="Hello")
+
+# Async iterator for text chunks
+async for chunk in result.text_stream:
+    print(chunk, end="")
+
+# Await to get final values
+usage = await result.usage        # Token usage
+text = await result.text          # Complete text (after streaming)
+tool_calls = await result.tool_calls  # Any tool calls made
+```
+
+## Collecting Full Text
+
+If you need the complete text after streaming:
+
+```python
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a poem."
+)
+
+# Stream to console
+async for chunk in result.text_stream:
+    print(chunk, end="")
+
+# Get full text
+full_text = await result.text
+print(f"\n\nFull response ({len(full_text)} chars)")
+```
+
+## Real-time UI Updates
+
+Stream directly to a user interface:
+
+```python
+async def stream_to_ui(prompt: str, update_callback):
+    """Stream AI response to a UI callback."""
+    result = stream_text(
+        model=google("gemini-2.0-flash"),
+        prompt=prompt
+    )
+
+    buffer = ""
+    async for chunk in result.text_stream:
+        buffer += chunk
+        await update_callback(buffer)
+
+    return buffer
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/core/tools">
+    Add function calling to your streams
+  </Card>
+  <Card title="Agents" icon="robot" href="/core/agents">
+    Build agents with streaming output
+  </Card>
+</CardGroup>

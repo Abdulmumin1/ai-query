@@ -1,0 +1,170 @@
+---
+title: "stream_text"
+description: "Stream text responses from AI models in real-time"
+---
+
+Stream text completions from AI models for real-time output.
+
+## Signature
+
+```python
+def stream_text(
+    model: LanguageModel,
+    prompt: str | None = None,
+    messages: list[dict] | list[Message] | None = None,
+    system: str | None = None,
+    tools: dict[str, Tool] | None = None,
+    stop_when: StopCondition | None = None,
+    on_step_start: Callable[[StepStartEvent], None] | None = None,
+    on_step_finish: Callable[[StepFinishEvent], None] | None = None,
+    provider_options: dict | None = None
+) -> TextStreamResult
+```
+
+<Note>
+Unlike `generate_text`, `stream_text` is **not** an async function. It returns immediately with a `TextStreamResult` object. The actual streaming happens when you iterate over `text_stream`.
+</Note>
+
+## Parameters
+
+<ParamField path="model" type="LanguageModel" required>
+  The AI model to use. Create with `openai()`, `anthropic()`, or `google()`.
+</ParamField>
+
+<ParamField path="prompt" type="str">
+  Simple user prompt. Use this for single-turn conversations.
+</ParamField>
+
+<ParamField path="messages" type="list[dict] | list[Message]">
+  Full conversation history as dicts or Message objects. Use instead of `prompt` for multi-turn conversations.
+</ParamField>
+
+<ParamField path="system" type="str">
+  System prompt to set the AI's behavior and context.
+</ParamField>
+
+<ParamField path="tools" type="dict[str, Tool]">
+  Dictionary of tools the AI can call.
+</ParamField>
+
+<ParamField path="stop_when" type="StopCondition">
+  Condition to stop the tool execution loop. Use `step_count_is(n)` or `has_tool_call("name")`.
+</ParamField>
+
+<ParamField path="on_step_start" type="Callable[[StepStartEvent], None]">
+  Callback invoked when each step begins.
+</ParamField>
+
+<ParamField path="on_step_finish" type="Callable[[StepFinishEvent], None]">
+  Callback invoked when each step completes.
+</ParamField>
+
+<ParamField path="provider_options" type="dict">
+  Provider-specific options.
+</ParamField>
+
+## Returns
+
+<ResponseField name="TextStreamResult" type="object">
+  <Expandable title="properties">
+    <ResponseField name="text_stream" type="AsyncIterator[str]">
+      Async iterator yielding text chunks.
+    </ResponseField>
+    <ResponseField name="text" type="Awaitable[str]">
+      The complete text (available after streaming).
+    </ResponseField>
+    <ResponseField name="usage" type="Awaitable[Usage]">
+      Token usage statistics (available after streaming).
+    </ResponseField>
+    <ResponseField name="tool_calls" type="Awaitable[list[ToolCall]]">
+      Tool calls made (available after streaming).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Basic Streaming
+
+```python
+from ai_query import stream_text, google
+
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a short poem."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+### Get Usage After Streaming
+
+```python
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Explain recursion."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="")
+
+# Await usage after streaming completes
+usage = await result.usage
+print(f"\nTokens: {usage.total_tokens}")
+```
+
+### Get Complete Text
+
+```python
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a haiku."
+)
+
+# Stream to output
+async for chunk in result.text_stream:
+    print(chunk, end="")
+
+# Get full text
+full_text = await result.text
+print(f"\n\nLength: {len(full_text)} chars")
+```
+
+### Streaming with Tools
+
+```python
+from ai_query import stream_text, google, tool, Field
+
+@tool(description="Search for information")
+async def search(query: str = Field(description="Query")) -> str:
+    return f"Results for: {query}"
+
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Search for Python tutorials and summarize.",
+    tools={"search": search}
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+### With Callbacks
+
+```python
+from ai_query import stream_text, google, StepFinishEvent
+
+def on_step_done(event: StepFinishEvent):
+    print(f"\n[Step {event.step_number} complete]")
+
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic.",
+    tools=tools,
+    on_step_finish=on_step_done
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="")
+```

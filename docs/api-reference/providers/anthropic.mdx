@@ -1,0 +1,69 @@
+---
+title: "anthropic()"
+description: "Create an Anthropic Claude language model"
+---
+
+Factory function to create an Anthropic Claude model instance.
+
+## Signature
+
+```python
+def anthropic(model_id: str) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The Anthropic model identifier.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for Anthropic.
+
+## Environment
+
+Requires `ANTHROPIC_API_KEY` environment variable.
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `claude-4-5-opus-20251101` | Claude 4.5 Opus - most capable |
+| `claude-4-5-sonnet-20250929` | Claude 4.5 Sonnet - powerful with Thinking mode |
+| `claude-4-5-haiku-20251001` | Claude 4.5 Haiku - fast and efficient |
+| `claude-4-opus-20250514` | Claude 4 Opus - high capability |
+| `claude-4-sonnet-20250514` | Claude 4 Sonnet - balanced |
+| `claude-3-5-sonnet-latest` | Claude 3.5 Sonnet - reliable |
+| `claude-3-5-haiku-latest` | Claude 3.5 Haiku - fastest |
+
+## Example
+
+```python
+from ai_query import generate_text, anthropic
+
+result = await generate_text(
+    model=anthropic("claude-4-5-sonnet-20250929"),
+    prompt="Hello, world!"
+)
+```
+
+## Provider Options
+
+```python
+result = await generate_text(
+    model=anthropic("claude-4-5-sonnet-20250929"),
+    prompt="Be creative.",
+    provider_options={
+        "anthropic": {
+            "temperature": 0.7,
+            "max_tokens": 2000,
+            "top_p": 0.9
+        }
+    }
+)
+```

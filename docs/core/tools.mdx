@@ -1,0 +1,180 @@
+---
+title: "Tools"
+description: "Define tools for AI function calling"
+---
+
+Tools enable AI models to call functions in your code. ai-query provides a type-safe way to define tools using Python decorators and type hints.
+
+## Defining Tools
+
+Use the `@tool` decorator to create a tool from any function:
+
+```python
+from ai_query import tool, Field
+
+@tool(description="Get the current weather for a location")
+async def get_weather(
+    location: str = Field(description="The city name"),
+    unit: str = Field(description="Temperature unit", default="celsius")
+) -> str:
+    # Your implementation here
+    return f"Weather in {location}: 72°F"
+```
+
+## The `@tool` Decorator
+
+The decorator takes a single required parameter:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `description` | `str` | What the tool does (shown to the AI) |
+
+## Parameter Definitions with `Field`
+
+Use `Field` to describe each parameter:
+
+```python
+from ai_query import Field
+
+@tool(description="Search a database")
+async def search(
+    query: str = Field(description="The search query"),
+    limit: int = Field(description="Max results to return", default=10),
+    include_archived: bool = Field(description="Include archived items", default=False)
+) -> str:
+    ...
+```
+
+| Field Argument | Type | Description |
+|----------------|------|-------------|
+| `description` | `str` | Parameter description for the AI |
+| `default` | `Any` | Default value (makes parameter optional) |
+
+## Supported Parameter Types
+
+ai-query supports these Python types:
+
+- `str` - String values
+- `int` - Integer values
+- `float` - Floating point numbers
+- `bool` - Boolean values
+
+## Using Tools with generate_text
+
+Pass tools as a dictionary:
+
+```python
+from ai_query import generate_text, google, tool, Field
+
+@tool(description="Add two numbers")
+async def add(
+    a: int = Field(description="First number"),
+    b: int = Field(description="Second number")
+) -> str:
+    return str(a + b)
+
+@tool(description="Multiply two numbers")
+async def multiply(
+    a: int = Field(description="First number"),
+    b: int = Field(description="Second number")
+) -> str:
+    return str(a * b)
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What is 5 + 3, then multiply the result by 2?",
+    tools={
+        "add": add,
+        "multiply": multiply
+    }
+)
+print(result.text)  # "The result is 16."
+```
+
+## Sync vs Async Tools
+
+Tools can be either synchronous or asynchronous:
+
+```python
+# Async tool (recommended for I/O operations)
+@tool(description="Fetch data from API")
+async def fetch_data(url: str = Field(description="API URL")) -> str:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            return await response.text()
+
+# Sync tool (fine for simple operations)
+@tool(description="Calculate square root")
+def sqrt(n: float = Field(description="Number")) -> str:
+    import math
+    return str(math.sqrt(n))
+```
+
+## Automatic Tool Execution
+
+When you provide tools, ai-query automatically:
+
+1. Sends the tool definitions to the AI
+2. Executes any tools the AI calls
+3. Returns the results to the AI
+4. Repeats until the AI responds without tool calls
+
+```python
+@tool(description="Get stock price")
+async def get_stock_price(symbol: str = Field(description="Stock symbol")) -> str:
+    # Simulated API call
+    prices = {"AAPL": 150.00, "GOOGL": 140.00, "MSFT": 380.00}
+    return f"${prices.get(symbol, 0):.2f}"
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What's the stock price of Apple?",
+    tools={"get_stock_price": get_stock_price}
+)
+
+# The AI called get_stock_price("AAPL") automatically
+print(result.text)  # "Apple (AAPL) is currently trading at $150.00."
+```
+
+## Accessing Tool Calls and Results
+
+Inspect what tools were called:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What's the weather in Tokyo and New York?",
+    tools={"get_weather": get_weather}
+)
+
+# All tool calls made
+for call in result.tool_calls:
+    print(f"Called: {call.name}({call.arguments})")
+
+# All tool results
+for tr in result.tool_results:
+    print(f"Result: {tr.result}")
+```
+
+## Limiting Execution Steps
+
+Control the maximum number of tool execution loops using `stop_when`:
+
+```python
+from ai_query import generate_text, google, step_count_is
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic thoroughly.",
+    tools={"search": search},
+    stop_when=step_count_is(3)  # Stop after 3 steps
+)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agents" icon="robot" href="/core/agents">
+    Build autonomous agents with advanced loop control
+  </Card>
+</CardGroup>

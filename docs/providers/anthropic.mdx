@@ -1,0 +1,113 @@
+---
+title: "Anthropic"
+description: "Use Claude models with ai-query"
+---
+
+The Anthropic provider gives you access to Claude models, known for their strong reasoning capabilities and safety features.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+## Usage
+
+```python
+from ai_query import generate_text, anthropic
+
+result = await generate_text(
+    model=anthropic("claude-4-5-sonnet-20250929"),
+    prompt="Explain the theory of relativity."
+)
+```
+
+## Available Models
+
+| Model | Description |
+|-------|-------------|
+| `claude-4-5-opus-20251101` | Claude 4.5 Opus - most capable |
+| `claude-4-5-sonnet-20250929` | Claude 4.5 Sonnet - powerful with Thinking mode |
+| `claude-4-5-haiku-20251001` | Claude 4.5 Haiku - fast and efficient |
+| `claude-4-opus-20250514` | Claude 4 Opus - high capability |
+| `claude-4-sonnet-20250514` | Claude 4 Sonnet - balanced performance |
+| `claude-3-7-sonnet-20250219` | Claude 3.7 Sonnet - stable |
+| `claude-3-5-sonnet-latest` | Claude 3.5 Sonnet - reliable |
+| `claude-3-5-haiku-latest` | Claude 3.5 Haiku - fastest |
+
+## Provider Options
+
+Customize Anthropic-specific parameters:
+
+```python
+result = await generate_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    prompt="Write a detailed analysis.",
+    provider_options={
+        "anthropic": {
+            "temperature": 0.7,
+            "max_tokens": 2000,
+            "top_p": 0.9
+        }
+    }
+)
+```
+
+### Supported Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `temperature` | `float` | `1.0` | Randomness (0-1) |
+| `max_tokens` | `int` | `4096` | Maximum output tokens |
+| `top_p` | `float` | `1.0` | Nucleus sampling |
+
+## Tool Calling
+
+Claude models support powerful tool calling:
+
+```python
+from ai_query import generate_text, anthropic, tool, Field
+
+@tool(description="Calculate a math expression")
+async def calculate(
+    expression: str = Field(description="Math expression to evaluate")
+) -> str:
+    result = eval(expression)  # Use a safe evaluator in production
+    return str(result)
+
+result = await generate_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    prompt="What is (15 * 8) + (42 / 6)?",
+    tools={"calculate": calculate}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, anthropic
+
+result = stream_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    prompt="Explain quantum entanglement step by step."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## System Prompts
+
+Claude responds well to detailed system prompts:
+
+```python
+result = await generate_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    system="""You are an expert Python developer.
+    Always provide working code examples.
+    Explain your reasoning step by step.""",
+    prompt="How do I implement a binary search tree?"
+)
+```

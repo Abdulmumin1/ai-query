@@ -1,0 +1,160 @@
+---
+title: "generate_text"
+description: "Generate text from AI models with optional tool calling"
+---
+
+The main function for generating text completions from AI models.
+
+## Signature
+
+```python
+async def generate_text(
+    model: LanguageModel,
+    prompt: str | None = None,
+    messages: list[dict] | list[Message] | None = None,
+    system: str | None = None,
+    tools: dict[str, Tool] | None = None,
+    stop_when: StopCondition | None = None,
+    on_step_start: Callable[[StepStartEvent], None] | None = None,
+    on_step_finish: Callable[[StepFinishEvent], None] | None = None,
+    provider_options: dict | None = None
+) -> GenerateTextResult
+```
+
+## Parameters
+
+<ParamField path="model" type="LanguageModel" required>
+  The AI model to use. Create with `openai()`, `anthropic()`, or `google()`.
+</ParamField>
+
+<ParamField path="prompt" type="str">
+  Simple user prompt. Use this for single-turn conversations.
+</ParamField>
+
+<ParamField path="messages" type="list[dict] | list[Message]">
+  Full conversation history as dicts or Message objects. Use instead of `prompt` for multi-turn conversations.
+</ParamField>
+
+<ParamField path="system" type="str">
+  System prompt to set the AI's behavior and context.
+</ParamField>
+
+<ParamField path="tools" type="dict[str, Tool]">
+  Dictionary of tools the AI can call. Keys are tool names.
+</ParamField>
+
+<ParamField path="stop_when" type="StopCondition">
+  Condition to stop the tool execution loop. Use `step_count_is(n)` to stop after n steps, or `has_tool_call("name")` to stop when a specific tool is called.
+</ParamField>
+
+<ParamField path="on_step_start" type="Callable[[StepStartEvent], None]">
+  Callback invoked when each step begins.
+</ParamField>
+
+<ParamField path="on_step_finish" type="Callable[[StepFinishEvent], None]">
+  Callback invoked when each step completes.
+</ParamField>
+
+<ParamField path="provider_options" type="dict">
+  Provider-specific options (temperature, max_tokens, etc.).
+</ParamField>
+
+## Returns
+
+<ResponseField name="GenerateTextResult" type="object">
+  <Expandable title="properties">
+    <ResponseField name="text" type="str">
+      The generated text response.
+    </ResponseField>
+    <ResponseField name="usage" type="Usage">
+      Token usage statistics.
+    </ResponseField>
+    <ResponseField name="tool_calls" type="list[ToolCall]">
+      All tool calls made during execution.
+    </ResponseField>
+    <ResponseField name="tool_results" type="list[ToolResult]">
+      Results from tool executions.
+    </ResponseField>
+    <ResponseField name="steps" type="list[StepResult]">
+      Results from each execution step.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Basic Usage
+
+```python
+from ai_query import generate_text, openai
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="What is Python?"
+)
+print(result.text)
+```
+
+### With System Prompt
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    system="You are a helpful coding assistant.",
+    prompt="How do I read a file in Python?"
+)
+```
+
+### With Tools
+
+```python
+from ai_query import generate_text, google, tool, Field
+
+@tool(description="Get current time")
+def get_time() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat()
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What time is it?",
+    tools={"get_time": get_time}
+)
+```
+
+### With Messages
+
+```python
+from ai_query import generate_text, anthropic
+
+result = await generate_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    messages=[
+        {"role": "user", "content": "My name is Alice."},
+        {"role": "assistant", "content": "Hello Alice!"},
+        {"role": "user", "content": "What's my name?"},
+    ]
+)
+```
+
+### With Stop Condition
+
+```python
+from ai_query import generate_text, google, has_tool_call, step_count_is
+
+# Stop when a specific tool is called
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Complete this task",
+    tools=tools,
+    stop_when=has_tool_call("finish")
+)
+
+# Or stop after N steps
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic",
+    tools=tools,
+    stop_when=step_count_is(5)
+)
+```

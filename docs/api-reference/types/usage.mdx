@@ -1,0 +1,103 @@
+---
+title: "Usage"
+description: "Token usage statistics"
+---
+
+The `Usage` class tracks token consumption for AI requests.
+
+## Definition
+
+```python
+@dataclass
+class Usage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+```
+
+## Fields
+
+<ParamField path="prompt_tokens" type="int">
+  Number of tokens in the input (prompt + messages).
+</ParamField>
+
+<ParamField path="completion_tokens" type="int">
+  Number of tokens in the AI's response.
+</ParamField>
+
+<ParamField path="total_tokens" type="int">
+  Total tokens used (`prompt_tokens + completion_tokens`).
+</ParamField>
+
+## Usage
+
+### From generate_text
+
+```python
+from ai_query import generate_text, openai
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Explain Python in one sentence."
+)
+
+print(f"Input tokens: {result.usage.prompt_tokens}")
+print(f"Output tokens: {result.usage.completion_tokens}")
+print(f"Total tokens: {result.usage.total_tokens}")
+```
+
+### From stream_text
+
+```python
+from ai_query import stream_text, google
+
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a haiku."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="")
+
+# Usage is available after streaming
+usage = await result.usage
+print(f"\nTotal tokens: {usage.total_tokens}")
+```
+
+### Accumulated Usage
+
+When using tools, usage is accumulated across all steps:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic.",
+    tools=tools
+)
+
+# Total usage across all tool execution steps
+print(f"Total tokens: {result.usage.total_tokens}")
+
+# Per-step usage
+for i, step in enumerate(result.steps):
+    print(f"Step {i+1}: {step.usage.total_tokens} tokens")
+```
+
+## Cost Estimation
+
+Use token counts to estimate costs:
+
+```python
+# Example pricing (check provider for current rates)
+PRICE_PER_1K_INPUT = 0.01   # $0.01 per 1K input tokens
+PRICE_PER_1K_OUTPUT = 0.03  # $0.03 per 1K output tokens
+
+def estimate_cost(usage: Usage) -> float:
+    input_cost = (usage.prompt_tokens / 1000) * PRICE_PER_1K_INPUT
+    output_cost = (usage.completion_tokens / 1000) * PRICE_PER_1K_OUTPUT
+    return input_cost + output_cost
+
+result = await generate_text(model=openai("gpt-4o"), prompt="Hello")
+cost = estimate_cost(result.usage)
+print(f"Estimated cost: ${cost:.4f}")
+```

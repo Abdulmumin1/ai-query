@@ -1,0 +1,99 @@
+---
+title: "OpenAI"
+description: "Use OpenAI models with ai-query"
+---
+
+The OpenAI provider gives you access to GPT-5, GPT-4o, and o-series reasoning models through a unified interface.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+## Usage
+
+```python
+from ai_query import generate_text, openai
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Explain machine learning in simple terms."
+)
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gpt-5.2-chat-latest` | GPT-5.2 Flagship - most capable |
+| `gpt-5-mini-20250807` | GPT-5 mini - fast and efficient |
+| `gpt-4.1-2025-04-14` | GPT-4.1 - stable enterprise workhorse |
+| `chatgpt-4o-latest` | GPT-4o (Omni) - multimodal |
+| `gpt-4o-mini` | GPT-4o mini - cost-effective |
+| `o3-2025-04-16` | OpenAI o3 - reasoning model |
+| `o4-mini-2025-04-16` | OpenAI o4-mini - fast reasoning |
+
+## Provider Options
+
+Customize OpenAI-specific parameters:
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Write a creative story.",
+    provider_options={
+        "openai": {
+            "temperature": 0.9,
+            "max_tokens": 1000,
+            "top_p": 0.95,
+            "frequency_penalty": 0.5,
+            "presence_penalty": 0.5
+        }
+    }
+)
+```
+
+### Supported Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `temperature` | `float` | `1.0` | Randomness (0-2) |
+| `max_tokens` | `int` | Model default | Maximum output tokens |
+| `top_p` | `float` | `1.0` | Nucleus sampling |
+| `frequency_penalty` | `float` | `0.0` | Reduce repetition (-2 to 2) |
+| `presence_penalty` | `float` | `0.0` | Encourage new topics (-2 to 2) |
+
+## Tool Calling
+
+OpenAI models have excellent tool calling support:
+
+```python
+from ai_query import generate_text, openai, tool, Field
+
+@tool(description="Search the web")
+async def search(query: str = Field(description="Search query")) -> str:
+    return f"Results for: {query}"
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Search for the latest Python news",
+    tools={"search": search}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, openai
+
+result = stream_text(
+    model=openai("gpt-4o"),
+    prompt="Write a poem about coding."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```

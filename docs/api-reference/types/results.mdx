@@ -1,0 +1,292 @@
+---
+title: "Results"
+description: "Result types returned by ai-query functions"
+---
+
+ai-query returns structured result objects containing the AI response, usage statistics, and tool execution details.
+
+## GenerateTextResult
+
+Returned by `generate_text()`.
+
+```python
+@dataclass
+class GenerateTextResult:
+    text: str
+    usage: Usage
+    tool_calls: list[ToolCall]
+    tool_results: list[ToolResult]
+    steps: list[StepResult]
+```
+
+### Fields
+
+<ParamField path="text" type="str">
+  The final generated text response.
+</ParamField>
+
+<ParamField path="usage" type="Usage">
+  Total token usage across all steps.
+</ParamField>
+
+<ParamField path="tool_calls" type="list[ToolCall]">
+  All tool calls made during execution.
+</ParamField>
+
+<ParamField path="tool_results" type="list[ToolResult]">
+  Results from all tool executions.
+</ParamField>
+
+<ParamField path="steps" type="list[StepResult]">
+  Detailed results from each execution step.
+</ParamField>
+
+### Example
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What's the weather?",
+    tools={"get_weather": get_weather}
+)
+
+print(result.text)              # Final response
+print(result.usage.total_tokens) # Token count
+print(len(result.tool_calls))    # Number of tool calls
+print(len(result.steps))         # Number of steps
+```
+
+---
+
+## TextStreamResult
+
+Returned by `stream_text()`.
+
+```python
+class TextStreamResult:
+    text_stream: AsyncIterator[str]
+    text: Awaitable[str]
+    usage: Awaitable[Usage]
+    tool_calls: Awaitable[list[ToolCall]]
+```
+
+### Fields
+
+<ParamField path="text_stream" type="AsyncIterator[str]">
+  Async iterator that yields text chunks as they arrive.
+</ParamField>
+
+<ParamField path="text" type="Awaitable[str]">
+  The complete text (await after streaming).
+</ParamField>
+
+<ParamField path="usage" type="Awaitable[Usage]">
+  Token usage (await after streaming).
+</ParamField>
+
+<ParamField path="tool_calls" type="Awaitable[list[ToolCall]]">
+  Tool calls made (await after streaming).
+</ParamField>
+
+### Example
+
+```python
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a poem."
+)
+
+# Stream chunks
+async for chunk in result.text_stream:
+    print(chunk, end="")
+
+# Get final values (must await)
+full_text = await result.text
+usage = await result.usage
+```
+
+---
+
+## StepResult
+
+Result from a single execution step in a multi-step tool loop.
+
+```python
+@dataclass
+class StepResult:
+    text: str
+    usage: Usage
+    tool_calls: list[ToolCall]
+    tool_results: list[ToolResult]
+```
+
+### Fields
+
+<ParamField path="text" type="str">
+  Text generated in this step (may be empty if tools were called).
+</ParamField>
+
+<ParamField path="usage" type="Usage">
+  Token usage for this step only.
+</ParamField>
+
+<ParamField path="tool_calls" type="list[ToolCall]">
+  Tool calls made in this step.
+</ParamField>
+
+<ParamField path="tool_results" type="list[ToolResult]">
+  Results from tools called in this step.
+</ParamField>
+
+### Example
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research and summarize.",
+    tools=tools
+)
+
+for i, step in enumerate(result.steps):
+    print(f"Step {i + 1}:")
+    print(f"  Tokens: {step.usage.total_tokens}")
+    print(f"  Tool calls: {len(step.tool_calls)}")
+    if step.text:
+        print(f"  Response: {step.text[:50]}...")
+```
+
+---
+
+## ToolCall
+
+Represents a tool invocation requested by the AI.
+
+```python
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+```
+
+---
+
+## ToolResult
+
+Result from executing a tool.
+
+```python
+@dataclass
+class ToolResult:
+    tool_call_id: str
+    result: str
+```
+
+---
+
+## StepStartEvent / StepFinishEvent
+
+Events passed to step callbacks.
+
+```python
+@dataclass
+class StepStartEvent:
+    step_number: int
+
+@dataclass
+class StepFinishEvent:
+    step_number: int
+    step_result: StepResult
+```
+
+### Example
+
+```python
+def on_finish(event: StepFinishEvent):
+    print(f"Step {event.step_number} used {event.step_result.usage.total_tokens} tokens")
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Do something complex.",
+    tools=tools,
+    on_step_finish=on_finish
+)
+```
+
+---
+
+## Stop Conditions
+
+Stop conditions control when the tool execution loop terminates.
+
+### StopCondition Type
+
+```python
+StopCondition = Callable[[StepResult], bool]
+```
+
+A function that receives the current step result and returns `True` to stop the loop.
+
+### step_count_is
+
+Stop after a specific number of steps.
+
+```python
+from ai_query import step_count_is
+
+# Stop after 5 steps
+stop_when=step_count_is(5)
+```
+
+#### Signature
+
+```python
+def step_count_is(n: int) -> StopCondition
+```
+
+<ParamField path="n" type="int" required>
+  The maximum number of steps to execute.
+</ParamField>
+
+### has_tool_call
+
+Stop when a specific tool is called.
+
+```python
+from ai_query import has_tool_call
+
+# Stop when the "finish" tool is called
+stop_when=has_tool_call("finish")
+```
+
+#### Signature
+
+```python
+def has_tool_call(tool_name: str) -> StopCondition
+```
+
+<ParamField path="tool_name" type="str" required>
+  The name of the tool that triggers the stop.
+</ParamField>
+
+### Example
+
+```python
+from ai_query import generate_text, google, step_count_is, has_tool_call
+
+# Stop after 5 steps
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic.",
+    tools=tools,
+    stop_when=step_count_is(5)
+)
+
+# Or stop when a specific tool is called
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Complete the task.",
+    tools={"work": work, "finish": finish},
+    stop_when=has_tool_call("finish")
+)
+```

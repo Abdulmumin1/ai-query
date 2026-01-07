@@ -1,0 +1,151 @@
+---
+title: "Tool"
+description: "Define tools for AI function calling"
+---
+
+Tools enable AI models to call functions in your code. ai-query provides the `@tool` decorator and `Field` helper for type-safe tool definitions.
+
+## The @tool Decorator
+
+```python
+from ai_query import tool, Field
+
+@tool(description="Description shown to the AI")
+async def my_tool(
+    param1: str = Field(description="What this parameter does"),
+    param2: int = Field(description="Another parameter", default=10)
+) -> str:
+    return "result"
+```
+
+### Decorator Parameters
+
+<ParamField path="description" type="str" required>
+  A description of what the tool does. This is shown to the AI to help it decide when to use the tool.
+</ParamField>
+
+## The Field Helper
+
+```python
+from ai_query import Field
+
+Field(description="...", default=None)
+```
+
+### Field Parameters
+
+<ParamField path="description" type="str" required>
+  Description of the parameter shown to the AI.
+</ParamField>
+
+<ParamField path="default" type="Any">
+  Default value. If provided, the parameter becomes optional.
+</ParamField>
+
+## Supported Types
+
+| Type | Description |
+|------|-------------|
+| `str` | String values |
+| `int` | Integer values |
+| `float` | Floating point numbers |
+| `bool` | Boolean values |
+
+## Examples
+
+### Simple Tool
+
+```python
+from ai_query import tool, Field
+
+@tool(description="Add two numbers together")
+def add(
+    a: int = Field(description="First number"),
+    b: int = Field(description="Second number")
+) -> str:
+    return str(a + b)
+```
+
+### Async Tool
+
+```python
+import aiohttp
+from ai_query import tool, Field
+
+@tool(description="Fetch a webpage")
+async def fetch_url(
+    url: str = Field(description="The URL to fetch")
+) -> str:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            return await response.text()
+```
+
+### Optional Parameters
+
+```python
+@tool(description="Search a database")
+async def search(
+    query: str = Field(description="Search query"),
+    limit: int = Field(description="Max results", default=10),
+    include_archived: bool = Field(description="Include archived", default=False)
+) -> str:
+    # limit and include_archived have defaults
+    ...
+```
+
+### Using Tools
+
+```python
+from ai_query import generate_text, google
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What is 5 + 3?",
+    tools={"add": add}  # Pass as dict
+)
+```
+
+## Related Types
+
+### ToolCall
+
+Represents a tool invocation by the AI:
+
+```python
+@dataclass
+class ToolCall:
+    id: str           # Unique call ID
+    name: str         # Tool name
+    arguments: dict   # Arguments passed
+```
+
+### ToolResult
+
+Result from tool execution:
+
+```python
+@dataclass
+class ToolResult:
+    tool_call_id: str  # Matches ToolCall.id
+    result: str        # The result string
+```
+
+## Accessing Tool Calls
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Calculate 10 * 5",
+    tools={"multiply": multiply}
+)
+
+# See what tools were called
+for call in result.tool_calls:
+    print(f"Called: {call.name}")
+    print(f"Args: {call.arguments}")
+
+# See tool results
+for tr in result.tool_results:
+    print(f"Result: {tr.result}")
+```
