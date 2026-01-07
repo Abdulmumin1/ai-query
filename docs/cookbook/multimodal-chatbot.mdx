@@ -1,0 +1,257 @@
+---
+title: "Multimodal Chatbot"
+description: "Handle images and files in conversations"
+---
+
+Build a chatbot that can analyze images, PDFs, and other files alongside text.
+
+## Basic Multimodal Chatbot
+
+```python
+import asyncio
+import base64
+from ai_query import generate_text, google
+
+class MultimodalChatbot:
+    def __init__(self, model, system_prompt: str = None):
+        self.model = model
+        self.system_prompt = system_prompt
+        self.messages: list[dict] = []
+
+    async def chat(
+        self,
+        text: str,
+        image_path: str | None = None,
+        image_url: str | None = None
+    ) -> str:
+        # Build content
+        if image_path:
+            with open(image_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode()
+            content = [
+                {"type": "text", "text": text},
+                {"type": "image", "image": image_data, "media_type": "image/png"}
+            ]
+        elif image_url:
+            content = [
+                {"type": "text", "text": text},
+                {"type": "image", "image": image_url}
+            ]
+        else:
+            content = text
+
+        self.messages.append({"role": "user", "content": content})
+
+        result = await generate_text(
+            model=self.model,
+            system=self.system_prompt,
+            messages=self.messages
+        )
+
+        self.messages.append({"role": "assistant", "content": result.text})
+        return result.text
+
+async def main():
+    bot = MultimodalChatbot(
+        model=google("gemini-2.5-flash"),
+        system_prompt="You are a helpful assistant that can analyze images."
+    )
+
+    # Analyze an image file
+    response = await bot.chat("What's in this image?", image_path="photo.jpg")
+    print(response)
+
+    # Follow-up question (remembers the image)
+    response = await bot.chat("What colors do you see?")
+    print(response)
+
+    # Analyze image from URL
+    response = await bot.chat(
+        "Describe this image.",
+        image_url="https://example.com/image.jpg"
+    )
+    print(response)
+
+asyncio.run(main())
+```
+
+## PDF Analysis Chatbot
+
+```python
+import asyncio
+import base64
+from ai_query import generate_text, google
+
+class PDFChatbot:
+    def __init__(self, model):
+        self.model = model
+        self.messages: list[dict] = []
+
+    async def load_pdf(self, pdf_path: str, question: str) -> str:
+        """Load a PDF and ask a question about it."""
+        with open(pdf_path, "rb") as f:
+            pdf_data = base64.b64encode(f.read()).decode()
+
+        content = [
+            {"type": "text", "text": question},
+            {"type": "file", "data": pdf_data, "media_type": "application/pdf"}
+        ]
+
+        self.messages.append({"role": "user", "content": content})
+
+        result = await generate_text(
+            model=self.model,
+            messages=self.messages
+        )
+
+        self.messages.append({"role": "assistant", "content": result.text})
+        return result.text
+
+    async def ask(self, question: str) -> str:
+        """Ask follow-up questions about the loaded document."""
+        self.messages.append({"role": "user", "content": question})
+
+        result = await generate_text(
+            model=self.model,
+            messages=self.messages
+        )
+
+        self.messages.append({"role": "assistant", "content": result.text})
+        return result.text
+
+async def main():
+    bot = PDFChatbot(google("gemini-2.5-pro"))
+
+    # Load PDF and ask initial question
+    response = await bot.load_pdf("report.pdf", "Summarize the key findings.")
+    print(response)
+
+    # Follow-up questions
+    response = await bot.ask("What were the main conclusions?")
+    print(response)
+
+    response = await bot.ask("Any recommendations mentioned?")
+    print(response)
+
+asyncio.run(main())
+```
+
+## Multi-Image Comparison
+
+```python
+import asyncio
+import base64
+from ai_query import generate_text, anthropic
+
+async def compare_images(image_paths: list[str], question: str) -> str:
+    """Compare multiple images."""
+    content = [{"type": "text", "text": question}]
+
+    for path in image_paths:
+        with open(path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode()
+        content.append({
+            "type": "image",
+            "image": image_data,
+            "media_type": "image/png"
+        })
+
+    result = await generate_text(
+        model=anthropic("claude-4-5-sonnet-20250929"),
+        messages=[{"role": "user", "content": content}]
+    )
+
+    return result.text
+
+async def main():
+    response = await compare_images(
+        ["before.png", "after.png"],
+        "Compare these two images. What changed?"
+    )
+    print(response)
+
+asyncio.run(main())
+```
+
+## Screenshot Debug Helper
+
+```python
+import asyncio
+import base64
+from ai_query import generate_text, google
+
+async def debug_screenshot(
+    screenshot_path: str,
+    error_log: str | None = None
+) -> str:
+    """Analyze a screenshot and optional error log for debugging."""
+    content = [{"type": "text", "text": "Help me debug this issue."}]
+
+    # Add screenshot
+    with open(screenshot_path, "rb") as f:
+        screenshot_data = base64.b64encode(f.read()).decode()
+    content.append({
+        "type": "image",
+        "image": screenshot_data,
+        "media_type": "image/png"
+    })
+
+    # Add error log if provided
+    if error_log:
+        content.append({
+            "type": "file",
+            "data": error_log,
+            "media_type": "text/plain"
+        })
+
+    result = await generate_text(
+        model=google("gemini-2.5-pro"),
+        system="You are a debugging expert. Analyze the screenshot and logs to identify issues.",
+        messages=[{"role": "user", "content": content}]
+    )
+
+    return result.text
+
+async def main():
+    # Read error log
+    with open("error.log") as f:
+        error_log = f.read()
+
+    response = await debug_screenshot("error_screenshot.png", error_log)
+    print(response)
+
+asyncio.run(main())
+```
+
+## Image URL Support
+
+Images can be provided as URLs instead of base64:
+
+```python
+import asyncio
+from ai_query import generate_text, google
+
+async def analyze_url_image(url: str, question: str) -> str:
+    result = await generate_text(
+        model=google("gemini-2.5-flash"),
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": question},
+                    {"type": "image", "image": url}
+                ]
+            }
+        ]
+    )
+    return result.text
+
+async def main():
+    response = await analyze_url_image(
+        "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg",
+        "What species is this insect?"
+    )
+    print(response)
+
+asyncio.run(main())
+```

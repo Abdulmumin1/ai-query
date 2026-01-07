@@ -1,0 +1,226 @@
+---
+title: "Chatbot"
+description: "Build a conversational chatbot with message history"
+---
+
+A complete chatbot implementation that maintains conversation history across multiple turns.
+
+## Basic Chatbot
+
+```python
+import asyncio
+from ai_query import generate_text, google
+
+class Chatbot:
+    def __init__(self, model, system_prompt: str = None):
+        self.model = model
+        self.system_prompt = system_prompt
+        self.messages: list[dict] = []
+
+    async def chat(self, user_input: str) -> str:
+        # Add user message to history
+        self.messages.append({"role": "user", "content": user_input})
+
+        # Generate response
+        result = await generate_text(
+            model=self.model,
+            system=self.system_prompt,
+            messages=self.messages
+        )
+
+        # Add assistant response to history
+        self.messages.append({"role": "assistant", "content": result.text})
+
+        return result.text
+
+    def clear_history(self):
+        """Clear conversation history."""
+        self.messages = []
+
+async def main():
+    bot = Chatbot(
+        model=google("gemini-2.5-flash"),
+        system_prompt="You are a helpful assistant. Be concise."
+    )
+
+    # Multi-turn conversation
+    print(await bot.chat("Hi! I'm learning Python."))
+    print(await bot.chat("What should I learn first?"))
+    print(await bot.chat("Can you give me an example?"))
+
+asyncio.run(main())
+```
+
+## Streaming Chatbot
+
+For real-time responses, use streaming:
+
+```python
+import asyncio
+from ai_query import stream_text, google
+
+class StreamingChatbot:
+    def __init__(self, model, system_prompt: str = None):
+        self.model = model
+        self.system_prompt = system_prompt
+        self.messages: list[dict] = []
+
+    async def chat(self, user_input: str) -> str:
+        self.messages.append({"role": "user", "content": user_input})
+
+        result = stream_text(
+            model=self.model,
+            system=self.system_prompt,
+            messages=self.messages
+        )
+
+        # Stream chunks to console
+        full_response = ""
+        async for chunk in result.text_stream:
+            print(chunk, end="", flush=True)
+            full_response += chunk
+
+        print()  # Newline after response
+
+        self.messages.append({"role": "assistant", "content": full_response})
+        return full_response
+
+async def main():
+    bot = StreamingChatbot(
+        model=google("gemini-2.5-flash"),
+        system_prompt="You are a helpful assistant."
+    )
+
+    while True:
+        user_input = input("\nYou: ")
+        if user_input.lower() in ["quit", "exit"]:
+            break
+        print("\nAssistant: ", end="")
+        await bot.chat(user_input)
+
+asyncio.run(main())
+```
+
+## Chatbot with Tools
+
+Add tool calling capabilities to your chatbot:
+
+```python
+import asyncio
+from ai_query import generate_text, google, tool, Field, step_count_is
+
+@tool(description="Get current weather for a city")
+async def get_weather(city: str = Field(description="City name")) -> str:
+    # Simulated weather API
+    return f"Weather in {city}: 22°C, sunny"
+
+@tool(description="Search the web")
+async def search(query: str = Field(description="Search query")) -> str:
+    # Simulated search
+    return f"Search results for '{query}': ..."
+
+class ToolChatbot:
+    def __init__(self, model, system_prompt: str = None):
+        self.model = model
+        self.system_prompt = system_prompt
+        self.messages: list[dict] = []
+        self.tools = {
+            "get_weather": get_weather,
+            "search": search,
+        }
+
+    async def chat(self, user_input: str) -> str:
+        self.messages.append({"role": "user", "content": user_input})
+
+        result = await generate_text(
+            model=self.model,
+            system=self.system_prompt,
+            messages=self.messages,
+            tools=self.tools,
+            stop_when=step_count_is(5)
+        )
+
+        self.messages.append({"role": "assistant", "content": result.text})
+        return result.text
+
+async def main():
+    bot = ToolChatbot(
+        model=google("gemini-2.5-flash"),
+        system_prompt="You are a helpful assistant with access to weather and search tools."
+    )
+
+    print(await bot.chat("What's the weather in Tokyo?"))
+    print(await bot.chat("Search for Python tutorials"))
+
+asyncio.run(main())
+```
+
+## Managing Conversation Length
+
+Long conversations can exceed token limits. Use a sliding window:
+
+```python
+class ChatbotWithLimit:
+    def __init__(self, model, system_prompt: str = None, max_messages: int = 20):
+        self.model = model
+        self.system_prompt = system_prompt
+        self.messages: list[dict] = []
+        self.max_messages = max_messages
+
+    async def chat(self, user_input: str) -> str:
+        self.messages.append({"role": "user", "content": user_input})
+
+        # Trim to last N messages
+        if len(self.messages) > self.max_messages:
+            self.messages = self.messages[-self.max_messages:]
+
+        result = await generate_text(
+            model=self.model,
+            system=self.system_prompt,
+            messages=self.messages
+        )
+
+        self.messages.append({"role": "assistant", "content": result.text})
+        return result.text
+```
+
+## Conversation Persistence
+
+Save and load conversations:
+
+```python
+import json
+
+class PersistentChatbot:
+    def __init__(self, model, system_prompt: str = None):
+        self.model = model
+        self.system_prompt = system_prompt
+        self.messages: list[dict] = []
+
+    async def chat(self, user_input: str) -> str:
+        self.messages.append({"role": "user", "content": user_input})
+
+        result = await generate_text(
+            model=self.model,
+            system=self.system_prompt,
+            messages=self.messages
+        )
+
+        self.messages.append({"role": "assistant", "content": result.text})
+        return result.text
+
+    def save(self, filepath: str):
+        """Save conversation to file."""
+        with open(filepath, "w") as f:
+            json.dump({
+                "system_prompt": self.system_prompt,
+                "messages": self.messages
+            }, f, indent=2)
+
+    def load(self, filepath: str):
+        """Load conversation from file."""
+        with open(filepath) as f:
+            data = json.load(f)
+            self.system_prompt = data.get("system_prompt")
+            self.messages = data.get("messages", [])
+```

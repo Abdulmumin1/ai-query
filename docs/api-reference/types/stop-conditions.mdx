@@ -1,0 +1,181 @@
+---
+title: "Stop Conditions"
+description: "Control when tool execution loops terminate"
+---
+
+Stop conditions determine when the agent's tool execution loop should stop. Use them with the `stop_when` parameter in `generate_text` and `stream_text`.
+
+## StopCondition Type
+
+```python
+StopCondition = Callable[[StepResult], bool]
+```
+
+A stop condition is a function that receives the current step result and returns `True` to stop the loop, or `False` to continue.
+
+## Built-in Stop Conditions
+
+### step_count_is
+
+Stop after a specific number of steps.
+
+```python
+from ai_query import step_count_is
+```
+
+#### Signature
+
+```python
+def step_count_is(n: int) -> StopCondition
+```
+
+<ParamField path="n" type="int" required>
+  The maximum number of steps to execute before stopping.
+</ParamField>
+
+#### Example
+
+```python
+from ai_query import generate_text, google, step_count_is
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic thoroughly.",
+    tools={"search": search, "analyze": analyze},
+    stop_when=step_count_is(5)  # Stop after 5 steps
+)
+```
+
+---
+
+### has_tool_call
+
+Stop when a specific tool is called.
+
+```python
+from ai_query import has_tool_call
+```
+
+#### Signature
+
+```python
+def has_tool_call(tool_name: str) -> StopCondition
+```
+
+<ParamField path="tool_name" type="str" required>
+  The name of the tool that triggers the stop.
+</ParamField>
+
+#### Example
+
+```python
+from ai_query import generate_text, google, has_tool_call, tool, Field
+
+@tool(description="Mark the task as complete")
+async def finish(summary: str = Field(description="Summary")) -> str:
+    return f"Done: {summary}"
+
+@tool(description="Do some work")
+async def work(task: str = Field(description="Task")) -> str:
+    return f"Completed: {task}"
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Complete these tasks, then call finish.",
+    tools={"work": work, "finish": finish},
+    stop_when=has_tool_call("finish")  # Stop when finish is called
+)
+```
+
+## Custom Stop Conditions
+
+You can create custom stop conditions by defining a function that matches the `StopCondition` signature:
+
+```python
+from ai_query import generate_text, google
+from ai_query.types import StepResult
+
+def stop_on_error(step: StepResult) -> bool:
+    """Stop if any tool result contains an error."""
+    for result in step.tool_results:
+        if "error" in result.result.lower():
+            return True
+    return False
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Process this data.",
+    tools=tools,
+    stop_when=stop_on_error
+)
+```
+
+### Combining Conditions
+
+Create compound stop conditions:
+
+```python
+def stop_on_finish_or_max_steps(max_steps: int, finish_tool: str):
+    """Stop on finish tool OR after max steps."""
+    step_counter = [0]  # Use list for mutable closure
+
+    def condition(step: StepResult) -> bool:
+        step_counter[0] += 1
+
+        # Check if finish tool was called
+        for call in step.tool_calls:
+            if call.name == finish_tool:
+                return True
+
+        # Check step count
+        return step_counter[0] >= max_steps
+
+    return condition
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Complete the task.",
+    tools=tools,
+    stop_when=stop_on_finish_or_max_steps(10, "finish")
+)
+```
+
+## Usage Pattern
+
+The `stop_when` parameter accepts any `StopCondition`:
+
+```python
+from ai_query import generate_text, stream_text, google, step_count_is, has_tool_call
+
+# With generate_text
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="...",
+    tools=tools,
+    stop_when=step_count_is(5)
+)
+
+# With stream_text
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="...",
+    tools=tools,
+    stop_when=has_tool_call("done")
+)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use a stop condition with tools">
+    When providing tools, always include a `stop_when` condition to prevent infinite loops. Either use `step_count_is(n)` for bounded execution or `has_tool_call("finish")` for explicit completion.
+  </Accordion>
+
+  <Accordion title="Design a completion tool">
+    For complex agents, create a dedicated "finish" or "complete" tool that the AI calls when done. Use `has_tool_call("finish")` to stop the loop.
+  </Accordion>
+
+  <Accordion title="Combine with callbacks for monitoring">
+    Use `on_step_finish` alongside stop conditions to monitor progress and debug agent behavior.
+  </Accordion>
+</AccordionGroup>

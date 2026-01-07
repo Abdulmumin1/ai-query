@@ -1,0 +1,172 @@
+---
+title: "Conversations"
+description: "Build multi-turn conversations with message history"
+---
+
+The `messages` parameter enables multi-turn conversations by providing the full conversation history to the AI.
+
+## Basic Multi-turn Conversation
+
+```python
+from ai_query import generate_text, google
+
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    messages=[
+        {"role": "user", "content": "My name is Alice."},
+        {"role": "assistant", "content": "Hello Alice! Nice to meet you."},
+        {"role": "user", "content": "What's my name?"},
+    ]
+)
+print(result.text)  # "Your name is Alice."
+```
+
+## Message Structure
+
+Messages use a simple dict structure with `role` and `content`:
+
+```python
+# Simple text message
+{"role": "user", "content": "Hello!"}
+
+# Multimodal message with images or files
+{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "What's in this image?"},
+        {"type": "image", "image": image_data, "media_type": "image/png"}
+    ]
+}
+```
+
+### Roles
+
+| Role | Description |
+|------|-------------|
+| `user` | Messages from the user |
+| `assistant` | Messages from the AI |
+| `tool` | Tool execution results |
+
+## System Instructions
+
+Use the `system` parameter to set the AI's behavior:
+
+```python
+from ai_query import generate_text, anthropic
+
+result = await generate_text(
+    model=anthropic("claude-4-5-sonnet-20250929"),
+    system="You are a Python tutor. Explain concepts simply.",
+    messages=[
+        {"role": "user", "content": "How do I read a file?"},
+    ]
+)
+```
+
+For single-turn queries, use the `prompt` shorthand:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    system="You are a Python tutor.",
+    prompt="How do I read a file?"
+)
+```
+
+## Streaming Conversations
+
+Use `stream_text` for real-time responses:
+
+```python
+from ai_query import stream_text, google
+
+result = stream_text(
+    model=google("gemini-2.5-flash"),
+    system="You are a storyteller.",
+    messages=[
+        {"role": "user", "content": "Tell me a story about a dragon."},
+    ]
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## Multimodal Content
+
+Send images and files in conversations. The `image` field accepts **base64-encoded data** or a **URL**.
+
+```python
+from ai_query import generate_text, google
+import base64
+
+with open("photo.jpg", "rb") as f:
+    image_data = base64.b64encode(f.read()).decode()
+
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image", "image": image_data, "media_type": "image/jpeg"}
+            ]
+        }
+    ]
+)
+```
+
+Image from URL:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image."},
+                {"type": "image", "image": "https://example.com/image.jpg"}
+            ]
+        }
+    ]
+)
+```
+
+## prompt vs messages
+
+| Use `prompt` when... | Use `messages` when... |
+|---------------------|------------------------|
+| Single-turn Q&A | Multi-turn conversations |
+| Simple queries | Need conversation history |
+| Quick prototyping | Building chatbots |
+
+```python
+# Single turn - use prompt
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    prompt="What is 2 + 2?"
+)
+
+# Multi-turn - use messages
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    messages=[
+        {"role": "user", "content": "Remember: my favorite color is blue."},
+        {"role": "assistant", "content": "Got it! Your favorite color is blue."},
+        {"role": "user", "content": "What's my favorite color?"},
+    ]
+)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Chatbot" icon="comments" href="/cookbook/chatbot">
+    Build a complete chatbot with message history
+  </Card>
+  <Card title="Multimodal Chatbot" icon="image" href="/cookbook/multimodal-chatbot">
+    Handle images and files in conversations
+  </Card>
+</CardGroup>

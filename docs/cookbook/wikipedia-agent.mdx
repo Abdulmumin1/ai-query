@@ -1,0 +1,149 @@
+---
+title: "Wikipedia Agent"
+description: "Research agent that searches and summarizes Wikipedia"
+---
+
+This example demonstrates building a research agent that can search Wikipedia and summarize articles.
+
+## Features
+
+- Async tool for Wikipedia API calls
+- Multi-step research workflow
+- Streaming output for real-time feedback
+
+## Complete Code
+
+```python
+import asyncio
+import aiohttp
+from ai_query import stream_text, google, tool, Field
+
+@tool(description="Search Wikipedia for articles matching a query")
+async def search_wikipedia(
+    query: str = Field(description="The search query")
+) -> str:
+    """Search Wikipedia and return article titles."""
+    url = "https://en.wikipedia.org/w/api.php"
+    params = {
+        "action": "query",
+        "list": "search",
+        "srsearch": query,
+        "format": "json",
+        "srlimit": 5
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as response:
+            data = await response.json()
+            results = data.get("query", {}).get("search", [])
+
+            if not results:
+                return f"No results found for '{query}'"
+
+            titles = [r["title"] for r in results]
+            return f"Found articles: {', '.join(titles)}"
+
+@tool(description="Get the content of a Wikipedia article")
+async def get_article(
+    title: str = Field(description="The exact article title")
+) -> str:
+    """Fetch the introduction of a Wikipedia article."""
+    url = "https://en.wikipedia.org/w/api.php"
+    params = {
+        "action": "query",
+        "titles": title,
+        "prop": "extracts",
+        "exintro": True,
+        "explaintext": True,
+        "format": "json"
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as response:
+            data = await response.json()
+            pages = data.get("query", {}).get("pages", {})
+
+            for page in pages.values():
+                extract = page.get("extract", "")
+                if extract:
+                    # Truncate to avoid token limits
+                    return extract[:2000]
+
+            return f"Could not find article: {title}"
+
+async def main():
+    print("Wikipedia Research Agent")
+    print("=" * 40)
+
+    result = stream_text(
+        model=google("gemini-2.0-flash"),
+        system="""You are a research assistant. When asked about a topic:
+        1. Search Wikipedia for relevant articles
+        2. Read the most relevant article(s)
+        3. Provide a comprehensive summary""",
+        prompt="Tell me about the history of Python programming language",
+        tools={
+            "search_wikipedia": search_wikipedia,
+            "get_article": get_article
+        }
+    )
+
+    async for chunk in result.text_stream:
+        print(chunk, end="", flush=True)
+
+    usage = await result.usage
+    print(f"\n\n[Tokens used: {usage.total_tokens}]")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## How It Works
+
+1. **User asks a question** - "Tell me about the history of Python"
+
+2. **AI searches Wikipedia** - Calls `search_wikipedia("Python programming language")`
+
+3. **AI reads articles** - Calls `get_article("Python (programming language)")`
+
+4. **AI summarizes** - Generates a comprehensive response based on the article content
+
+## Sample Output
+
+```
+Wikipedia Research Agent
+========================================
+Let me research that for you...
+
+Python is a high-level, general-purpose programming language created by
+Guido van Rossum and first released in 1991. Here's a summary of its history:
+
+**Origins (late 1980s)**
+Python was conceived in the late 1980s by Guido van Rossum at Centrum
+Wiskunde & Informatica (CWI) in the Netherlands as a successor to the
+ABC programming language...
+
+**Key Milestones:**
+- 1991: Python 0.9.0 released
+- 2000: Python 2.0 released with list comprehensions
+- 2008: Python 3.0 released (major revision)
+- 2020: Python 2 officially discontinued
+
+[Tokens used: 1523]
+```
+
+## Customization Ideas
+
+<AccordionGroup>
+  <Accordion title="Add more research tools">
+    Add tools for other APIs like news search, academic papers, or documentation.
+  </Accordion>
+
+  <Accordion title="Save research results">
+    Add a tool to save summaries to files or a database.
+  </Accordion>
+
+  <Accordion title="Interactive mode">
+    Wrap in a loop to allow follow-up questions about the research.
+  </Accordion>
+</AccordionGroup>

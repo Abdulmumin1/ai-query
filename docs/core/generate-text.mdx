@@ -1,0 +1,134 @@
+---
+title: "Generating Text"
+description: "Generate text completions from AI models"
+---
+
+The `generate_text` function is the primary way to generate text using ai-query. It supports simple prompts, multi-turn conversations, tool calling, and automatic execution loops.
+
+## Basic Usage
+
+```python
+import asyncio
+from ai_query import generate_text, openai
+
+async def main():
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="What is the capital of France?"
+    )
+    print(result.text)  # "The capital of France is Paris."
+
+asyncio.run(main())
+```
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | `LanguageModel` | The AI model to use (from `openai()`, `anthropic()`, or `google()`) |
+| `prompt` | `str` | The user prompt (simple string) |
+| `messages` | `list[dict]` | Full conversation history (alternative to `prompt`) |
+| `system` | `str` | System prompt to set context |
+| `tools` | `dict[str, Tool]` | Tools the AI can call |
+| `stop_when` | `StopCondition` | Stop condition for tool loops (e.g., `step_count_is(5)` or `has_tool_call("finish")`) |
+| `on_step_start` | `Callable` | Callback when a step starts |
+| `on_step_finish` | `Callable` | Callback when a step finishes |
+| `provider_options` | `dict` | Provider-specific options |
+
+## Using Messages
+
+For multi-turn conversations, use the `messages` parameter:
+
+```python
+from ai_query import generate_text, anthropic
+
+result = await generate_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    messages=[
+        {"role": "user", "content": "My name is Alice."},
+        {"role": "assistant", "content": "Hello Alice! Nice to meet you."},
+        {"role": "user", "content": "What's my name?"},
+    ]
+)
+print(result.text)  # "Your name is Alice."
+```
+
+## System Prompts
+
+Set the AI's behavior with a system prompt:
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    system="You are a helpful pirate. Always respond in pirate speak.",
+    prompt="How do I write a Python function?"
+)
+```
+
+## Response Object
+
+The `generate_text` function returns a `GenerateTextResult`:
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Hello!"
+)
+
+# The generated text
+print(result.text)
+
+# Token usage
+print(result.usage.prompt_tokens)
+print(result.usage.completion_tokens)
+print(result.usage.total_tokens)
+
+# Tool calls made (if any)
+print(result.tool_calls)
+
+# Results from tool execution (if any)
+print(result.tool_results)
+
+# All steps in multi-turn execution
+print(result.steps)
+```
+
+## Provider Options
+
+Pass provider-specific options:
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Write a creative story.",
+    provider_options={
+        "openai": {
+            "temperature": 0.9,
+            "max_tokens": 500
+        }
+    }
+)
+```
+
+## Error Handling
+
+```python
+try:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Hello!"
+    )
+except Exception as e:
+    print(f"Error: {e}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Streaming" icon="bolt" href="/core/streaming">
+    Stream responses in real-time
+  </Card>
+  <Card title="Tools" icon="wrench" href="/core/tools">
+    Add tool calling capabilities
+  </Card>
+</CardGroup>

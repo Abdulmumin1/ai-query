@@ -1,0 +1,145 @@
+---
+title: "Providers"
+description: "Configure AI providers for your application"
+---
+
+ai-query provides a unified interface for multiple AI providers. Each provider is configured through a simple factory function that returns a `LanguageModel` instance.
+
+## Supported Providers
+
+| Provider | Factory Function | Popular Models |
+|----------|-----------------|----------------|
+| OpenAI | `openai()` | gpt-5.2-chat-latest, gpt-4o, o3-2025-04-16 |
+| Anthropic | `anthropic()` | claude-4-5-sonnet-20250929, claude-4-sonnet-20250514 |
+| Google | `google()` | gemini-3-flash, gemini-2.5-flash, gemini-2.5-pro |
+
+## Configuration
+
+### Environment Variables
+
+Each provider reads its API key from an environment variable:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Google
+export GOOGLE_API_KEY="..."
+```
+
+### Using Providers
+
+Import the provider factory and specify the model:
+
+```python
+from ai_query import openai, anthropic, google
+
+# OpenAI
+model = openai("gpt-4o")
+
+# Anthropic
+model = anthropic("claude-4-5-sonnet-20250929")
+
+# Google
+model = google("gemini-2.5-flash")
+```
+
+## Provider Options
+
+Pass provider-specific options using the `provider_options` parameter:
+
+```python
+from ai_query import generate_text, google
+
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    prompt="Tell me a story",
+    provider_options={
+        "google": {
+            "safety_settings": {
+                "HARM_CATEGORY_VIOLENCE": "BLOCK_NONE"
+            }
+        }
+    }
+)
+```
+
+### OpenAI Options
+
+```python
+provider_options={
+    "openai": {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "frequency_penalty": 0.5,
+        "presence_penalty": 0.5,
+        "max_tokens": 1000
+    }
+}
+```
+
+### Anthropic Options
+
+```python
+provider_options={
+    "anthropic": {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_tokens": 1000
+    }
+}
+```
+
+### Google Options
+
+```python
+provider_options={
+    "google": {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_output_tokens": 1000,
+        "safety_settings": {}
+    }
+}
+```
+
+## Comparing Providers
+
+Run the same prompt across multiple providers:
+
+```python
+import asyncio
+from ai_query import generate_text, openai, anthropic, google
+
+async def compare_providers():
+    prompt = "What is the meaning of life? Answer in one sentence."
+
+    providers = [
+        ("OpenAI", openai("gpt-4o")),
+        ("Anthropic", anthropic("claude-4-5-sonnet-20250929")),
+        ("Google", google("gemini-2.5-flash")),
+    ]
+
+    for name, model in providers:
+        result = await generate_text(model=model, prompt=prompt)
+        print(f"{name}: {result.text}\n")
+
+asyncio.run(compare_providers())
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="brain" href="/providers/openai">
+    OpenAI provider details and models
+  </Card>
+  <Card title="Anthropic" icon="message" href="/providers/anthropic">
+    Anthropic Claude provider details
+  </Card>
+  <Card title="Google" icon="google" href="/providers/google">
+    Google Gemini provider details
+  </Card>
+</CardGroup>

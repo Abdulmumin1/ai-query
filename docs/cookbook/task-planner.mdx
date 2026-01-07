@@ -1,0 +1,185 @@
+---
+title: "Task Planner"
+description: "Multi-step task executor with stop conditions"
+---
+
+This example demonstrates building a task planning agent that breaks down tasks into steps and uses a stop condition to know when it's done.
+
+## Features
+
+- Multi-step task execution
+- `has_tool_call` stop condition
+- Step callbacks for monitoring
+- Explicit completion signaling
+
+## Complete Code
+
+```python
+import asyncio
+from ai_query import (
+    generate_text, google, tool, Field,
+    has_tool_call, StepStartEvent, StepFinishEvent
+)
+
+# Track completed tasks
+completed_tasks = []
+
+@tool(description="Create a detailed plan for accomplishing a goal")
+async def create_plan(
+    goal: str = Field(description="The goal to plan for")
+) -> str:
+    return f"Plan created for: {goal}. Ready to execute steps."
+
+@tool(description="Execute a specific step in the plan")
+async def execute_step(
+    step_name: str = Field(description="Name of the step"),
+    details: str = Field(description="What this step accomplishes")
+) -> str:
+    completed_tasks.append(step_name)
+    return f"Completed: {step_name} - {details}"
+
+@tool(description="Mark the entire task as complete with a summary")
+async def finish_task(
+    summary: str = Field(description="Summary of what was accomplished")
+) -> str:
+    return f"Task completed! Summary: {summary}"
+
+def on_step_start(event: StepStartEvent):
+    print(f"\n🔄 Starting step {event.step_number}...")
+
+def on_step_finish(event: StepFinishEvent):
+    step = event.step_result
+    if step.tool_calls:
+        for call in step.tool_calls:
+            print(f"   ✓ Called: {call.name}")
+
+async def main():
+    print("Task Planner Agent")
+    print("=" * 40)
+
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="""You are a task planner. When given a task:
+        1. Create a plan using create_plan
+        2. Execute each step using execute_step
+        3. When all steps are done, call finish_task with a summary
+
+        Be thorough but efficient. Complete all necessary steps.""",
+        prompt="Plan and execute: Prepare for a job interview at a tech company",
+        tools={
+            "create_plan": create_plan,
+            "execute_step": execute_step,
+            "finish_task": finish_task
+        },
+        stop_when=has_tool_call("finish_task"),
+        on_step_start=on_step_start,
+        on_step_finish=on_step_finish
+    )
+
+    print("\n" + "=" * 40)
+    print("Final Response:")
+    print(result.text)
+    print(f"\nTotal steps: {len(result.steps)}")
+    print(f"Tasks completed: {len(completed_tasks)}")
+    for task in completed_tasks:
+        print(f"  - {task}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## How It Works
+
+1. **Plan Creation** - The AI creates a structured plan for the goal
+
+2. **Step Execution** - Each step is executed using the `execute_step` tool
+
+3. **Stop Condition** - The loop stops when `finish_task` is called
+
+4. **Monitoring** - Callbacks track each step's progress
+
+## Sample Output
+
+```
+Task Planner Agent
+========================================
+
+🔄 Starting step 1...
+   ✓ Called: create_plan
+
+🔄 Starting step 2...
+   ✓ Called: execute_step
+
+🔄 Starting step 3...
+   ✓ Called: execute_step
+
+🔄 Starting step 4...
+   ✓ Called: execute_step
+
+🔄 Starting step 5...
+   ✓ Called: execute_step
+
+🔄 Starting step 6...
+   ✓ Called: finish_task
+
+========================================
+Final Response:
+I've helped you prepare for your tech interview! Here's what we accomplished:
+
+1. Research the company and role
+2. Review common technical interview questions
+3. Practice coding problems
+4. Prepare questions to ask the interviewer
+
+You're ready for your interview. Good luck!
+
+Total steps: 6
+Tasks completed: 4
+  - Research company and role
+  - Review technical questions
+  - Practice coding
+  - Prepare interviewer questions
+```
+
+## Key Concepts
+
+### Stop Conditions
+
+```python
+# Stop when a specific tool is called
+stop_when=has_tool_call("finish_task")
+
+# Or stop after N steps
+stop_when=step_count_is(5)
+```
+
+### Step Callbacks
+
+```python
+def on_step_finish(event: StepFinishEvent):
+    # Access step results
+    step = event.step_result
+
+    # Check what tools were called
+    for call in step.tool_calls:
+        print(f"Called: {call.name}({call.arguments})")
+
+    # Check token usage
+    print(f"Tokens: {step.usage.total_tokens}")
+```
+
+## Customization Ideas
+
+<AccordionGroup>
+  <Accordion title="Add parallel execution">
+    Modify execute_step to handle multiple steps concurrently.
+  </Accordion>
+
+  <Accordion title="Add error recovery">
+    Add a tool for handling failures and retrying steps.
+  </Accordion>
+
+  <Accordion title="Persist task state">
+    Save completed tasks to a database for long-running workflows.
+  </Accordion>
+</AccordionGroup>

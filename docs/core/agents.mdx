@@ -1,0 +1,221 @@
+---
+title: "Agents"
+description: "Build autonomous agents with loop control and callbacks"
+---
+
+ai-query supports building autonomous agents that can execute multiple tool calls in a loop. You can control when the loop stops and monitor each step with callbacks.
+
+## How Agent Loops Work
+
+When you provide tools to `generate_text` or `stream_text`, the function automatically executes an agent loop:
+
+1. Send the prompt and tool definitions to the AI
+2. If the AI calls tools, execute them
+3. Send tool results back to the AI
+4. Repeat until the AI responds without tool calls (or a stop condition is met)
+
+## Stop Conditions
+
+Control when the agent loop terminates using stop conditions.
+
+### Stop After N Steps
+
+Use `step_count_is(n)` to stop after a specific number of steps:
+
+```python
+from ai_query import generate_text, google, step_count_is
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research this topic thoroughly.",
+    tools={"search": search, "analyze": analyze},
+    stop_when=step_count_is(5)  # Stop after 5 steps
+)
+```
+
+### Stop When Tool Is Called
+
+Use `has_tool_call(name)` to stop when a specific tool is called:
+
+```python
+from ai_query import generate_text, google, has_tool_call, tool, Field
+
+@tool(description="Mark the task as complete")
+async def complete_task(
+    result: str = Field(description="The final result")
+) -> str:
+    return f"Task completed: {result}"
+
+@tool(description="Perform a sub-task")
+async def do_work(task: str = Field(description="The task to perform")) -> str:
+    return f"Completed: {task}"
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Complete the following tasks: 1) Research, 2) Analyze, 3) Report",
+    tools={
+        "do_work": do_work,
+        "complete_task": complete_task
+    },
+    stop_when=has_tool_call("complete_task")  # Stop when complete_task is called
+)
+```
+
+## Step Callbacks
+
+Monitor agent execution with callbacks for each step.
+
+### on_step_start
+
+Called when a new step begins:
+
+```python
+from ai_query import generate_text, google, StepStartEvent
+
+def handle_step_start(event: StepStartEvent):
+    print(f"Starting step {event.step_number}")
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Analyze this data.",
+    tools={"analyze": analyze},
+    on_step_start=handle_step_start
+)
+```
+
+### on_step_finish
+
+Called when a step completes:
+
+```python
+from ai_query import generate_text, google, StepFinishEvent
+
+def handle_step_finish(event: StepFinishEvent):
+    print(f"Step {event.step_number} complete")
+    print(f"Tool calls: {len(event.step_result.tool_calls)}")
+    print(f"Tokens used: {event.step_result.usage.total_tokens}")
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Analyze this data.",
+    tools={"analyze": analyze},
+    on_step_finish=handle_step_finish
+)
+```
+
+## Complete Agent Example
+
+Here's a complete example of a task planning agent:
+
+```python
+import asyncio
+from ai_query import (
+    generate_text, google, tool, Field,
+    has_tool_call, StepStartEvent, StepFinishEvent
+)
+
+# Define tools
+@tool(description="Create a plan for a task")
+async def create_plan(
+    task: str = Field(description="The task to plan")
+) -> str:
+    return f"Plan created for: {task}"
+
+@tool(description="Execute a step in the plan")
+async def execute_step(
+    step: str = Field(description="The step to execute")
+) -> str:
+    return f"Executed: {step}"
+
+@tool(description="Mark the entire task as complete")
+async def finish(
+    summary: str = Field(description="Summary of completed work")
+) -> str:
+    return f"Done: {summary}"
+
+# Callbacks
+def on_start(event: StepStartEvent):
+    print(f"\n--- Step {event.step_number} ---")
+
+def on_finish(event: StepFinishEvent):
+    for call in event.step_result.tool_calls:
+        print(f"  Called: {call.name}")
+
+# Run agent
+async def main():
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="You are a task planner. Create a plan, execute each step, then finish.",
+        prompt="Organize a team meeting for next week.",
+        tools={
+            "create_plan": create_plan,
+            "execute_step": execute_step,
+            "finish": finish
+        },
+        stop_when=has_tool_call("finish"),
+        on_step_start=on_start,
+        on_step_finish=on_finish
+    )
+
+    print(f"\nFinal response: {result.text}")
+    print(f"Total steps: {len(result.steps)}")
+
+asyncio.run(main())
+```
+
+## Accessing Step History
+
+The result contains the full history of all steps:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Complete this multi-step task.",
+    tools=tools
+)
+
+for i, step in enumerate(result.steps):
+    print(f"Step {i + 1}:")
+    print(f"  Tool calls: {len(step.tool_calls)}")
+    print(f"  Tokens: {step.usage.total_tokens}")
+```
+
+## Combining with Streaming
+
+Agent loops work with streaming too:
+
+```python
+from ai_query import stream_text, google
+
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Research and summarize this topic.",
+    tools={"search": search},
+    stop_when=step_count_is(3),
+    on_step_finish=lambda e: print(f"Step {e.step_number} done")
+)
+
+# Stream the final response
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use specific stop conditions">
+    Always define a stop condition to prevent infinite loops. Use `has_tool_call("finish")` for task completion or `step_count_is(n)` for bounded execution.
+  </Accordion>
+
+  <Accordion title="Design clear tool contracts">
+    Give each tool a specific, well-defined purpose. The AI performs better when tools have clear boundaries.
+  </Accordion>
+
+  <Accordion title="Include a completion tool">
+    Add a tool like `finish` or `complete_task` that the AI calls when done. This makes the agent's completion explicit.
+  </Accordion>
+
+  <Accordion title="Monitor with callbacks">
+    Use `on_step_start` and `on_step_finish` to log agent activity, especially during development.
+  </Accordion>
+</AccordionGroup>

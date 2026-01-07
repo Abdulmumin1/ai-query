@@ -1,0 +1,142 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "ai-query",
+  "colors": {
+    "primary": "#ed6aff",
+    "light": "#ed6aff",
+    "dark": "#ed6aff"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "index",
+              "quickstart",
+              "providers"
+            ]
+          },
+          {
+            "group": "Core",
+            "pages": [
+              "core/generate-text",
+              "core/conversations",
+              "core/streaming",
+              "core/tools",
+              "core/agents"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "providers/openai",
+              "providers/anthropic",
+              "providers/google"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Functions",
+            "pages": [
+              "api-reference/generate-text",
+              "api-reference/stream-text"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api-reference/types/message",
+              "api-reference/types/tool",
+              "api-reference/types/usage",
+              "api-reference/types/results",
+              "api-reference/types/stop-conditions"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "api-reference/providers/openai",
+              "api-reference/providers/anthropic",
+              "api-reference/providers/google"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Cookbook",
+        "groups": [
+          {
+            "group": "Basics",
+            "pages": [
+              "cookbook/index",
+              "cookbook/chatbot",
+              "cookbook/multimodal-chatbot"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "cookbook/wikipedia-agent",
+              "cookbook/task-planner",
+              "cookbook/code-executor"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/Abdulmumin1/ai-query",
+          "icon": "github"
+        },
+        {
+          "anchor": "PyPI",
+          "href": "https://pypi.org/project/ai-query/",
+          "icon": "python"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/Abdulmumin1/ai-query"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get Started",
+      "href": "/quickstart"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "cursor"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Abdulmumin1/ai-query"
+    }
+  }
+}

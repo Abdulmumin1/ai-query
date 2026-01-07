@@ -1,0 +1,108 @@
+---
+title: "ai-query"
+description: "A unified Python SDK for AI model providers"
+---
+
+**ai-query** is a lightweight, unified Python SDK for querying AI models from multiple providers with a consistent, clean interface.
+
+## Why ai-query?
+
+- **One API, Multiple Providers** - Same interface works with OpenAI, Anthropic, and Google
+- **Powerful Tool Calling** - Type-safe tools with automatic execution loops
+- **Streaming Built-in** - First-class support for streaming responses
+- **Async-First** - Built with asyncio for optimal performance
+- **Minimal Dependencies** - Just `aiohttp`, no heavy frameworks
+
+## Quick Example
+
+```python
+import asyncio
+from ai_query import generate_text, openai
+
+async def main():
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="What is the capital of France?"
+    )
+    print(result.text)
+
+asyncio.run(main())
+```
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Install ai-query and make your first API call in minutes.
+  </Card>
+  <Card
+    title="Providers"
+    icon="server"
+    href="/providers"
+  >
+    Learn how to configure OpenAI, Anthropic, and Google providers.
+  </Card>
+  <Card
+    title="Tool Calling"
+    icon="wrench"
+    href="/core/tools"
+  >
+    Build powerful agents with type-safe tool definitions.
+  </Card>
+  <Card
+    title="Streaming"
+    icon="bolt"
+    href="/core/streaming"
+  >
+    Stream responses for real-time user experiences.
+  </Card>
+</CardGroup>
+
+## Core Concepts
+
+<CardGroup cols={2}>
+  <Card
+    title="Generate Text"
+    icon="message"
+    href="/core/generate-text"
+  >
+    Generate text completions with optional tool calling.
+  </Card>
+  <Card
+    title="Conversations"
+    icon="comments"
+    href="/core/conversations"
+  >
+    Build multi-turn conversations with message history.
+  </Card>
+  <Card
+    title="Agents"
+    icon="robot"
+    href="/core/agents"
+  >
+    Build autonomous agents with loop control and callbacks.
+  </Card>
+  <Card
+    title="Tool Calling"
+    icon="wrench"
+    href="/core/tools"
+  >
+    Give AI the ability to call functions in your code.
+  </Card>
+</CardGroup>
+
+## Cookbook
+
+Explore practical recipes and complete examples.
+
+<Card
+  title="Browse Cookbook"
+  icon="book"
+  href="/cookbook/index"
+>
+  Chatbots, multimodal apps, Wikipedia agent, task planner, and more.
+</Card>

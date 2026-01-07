@@ -1,0 +1,72 @@
+---
+title: "google()"
+description: "Create a Google Gemini language model"
+---
+
+Factory function to create a Google Gemini model instance.
+
+## Signature
+
+```python
+def google(model_id: str) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The Google Gemini model identifier.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for Google.
+
+## Environment
+
+Requires `GOOGLE_API_KEY` environment variable.
+
+```bash
+export GOOGLE_API_KEY="..."
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gemini-3-pro` | Gemini 3 Pro - most capable |
+| `gemini-3-flash` | Gemini 3 Flash - fast and powerful |
+| `gemini-2.5-pro` | Gemini 2.5 Pro - advanced reasoning |
+| `gemini-2.5-flash` | Gemini 2.5 Flash - balanced performance |
+| `gemini-2.5-flash-lite` | Gemini 2.5 Flash-Lite - lightweight |
+| `gemma-3-27b-it` | Gemma 3 (27B) - open weights |
+
+## Example
+
+```python
+from ai_query import generate_text, google
+
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    prompt="Hello, world!"
+)
+```
+
+## Provider Options
+
+```python
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    prompt="Be creative.",
+    provider_options={
+        "google": {
+            "temperature": 0.8,
+            "max_output_tokens": 2000,
+            "top_p": 0.9,
+            "top_k": 40,
+            "safety_settings": {
+                "HARM_CATEGORY_VIOLENCE": "BLOCK_ONLY_HIGH"
+            }
+        }
+    }
+)
+```

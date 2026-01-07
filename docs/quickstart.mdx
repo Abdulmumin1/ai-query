@@ -1,0 +1,147 @@
+---
+title: "Quickstart"
+description: "Get started with ai-query in minutes"
+---
+
+## Installation
+
+Install ai-query using your preferred package manager:
+
+<CodeGroup>
+
+```bash pip
+pip install ai-query
+```
+
+```bash uv
+uv add ai-query
+```
+
+```bash poetry
+poetry add ai-query
+```
+
+</CodeGroup>
+
+
+## Generate Your First Response
+
+Create a simple script to generate text:
+
+```python
+import asyncio
+from ai_query import generate_text, openai
+
+async def main():
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Explain quantum computing in one sentence."
+    )
+    print(result.text)
+    print(f"Tokens used: {result.usage.total_tokens}")
+
+asyncio.run(main())
+```
+
+## Switch Providers Instantly
+
+The same code works with any provider:
+
+<CodeGroup>
+
+```python OpenAI
+from ai_query import generate_text, openai
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Hello, world!"
+)
+```
+
+```python Anthropic
+from ai_query import generate_text, anthropic
+
+result = await generate_text(
+    model=anthropic("claude-sonnet-4-20250514"),
+    prompt="Hello, world!"
+)
+```
+
+```python Google
+from ai_query import generate_text, google
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Hello, world!"
+)
+```
+
+</CodeGroup>
+
+## Add Tools
+
+Give your AI the ability to call functions:
+
+```python
+import asyncio
+from ai_query import generate_text, google, tool, Field
+
+@tool(description="Get the current weather for a location")
+async def get_weather(
+    location: str = Field(description="The city name")
+) -> str:
+    # In a real app, call a weather API
+    return f"The weather in {location} is 72°F and sunny."
+
+async def main():
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        prompt="What's the weather like in Tokyo?",
+        tools={"get_weather": get_weather}
+    )
+    print(result.text)
+
+asyncio.run(main())
+```
+
+The AI will automatically call `get_weather("Tokyo")` and use the result to generate a response.
+
+## Stream Responses
+
+For real-time output, use streaming:
+
+```python
+import asyncio
+from ai_query import stream_text, google
+
+async def main():
+    result = stream_text(
+        model=google("gemini-2.0-flash"),
+        prompt="Write a haiku about programming."
+    )
+
+    async for chunk in result.text_stream:
+        print(chunk, end="", flush=True)
+
+    usage = await result.usage
+    print(f"\n\nTokens: {usage.total_tokens}")
+
+asyncio.run(main())
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Providers" icon="server" href="/providers">
+    Configure and customize AI providers
+  </Card>
+  <Card title="Tool Calling" icon="wrench" href="/core/tools">
+    Build powerful tools with type safety
+  </Card>
+  <Card title="Streaming" icon="bolt" href="/core/streaming">
+    Learn advanced streaming patterns
+  </Card>
+  <Card title="Agents" icon="robot" href="/core/agents">
+    Create autonomous AI agents
+  </Card>
+</CardGroup>
