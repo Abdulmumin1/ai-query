@@ -4,8 +4,14 @@ version = "1.1.0"
 description = "A unified Python SDK for querying AI models from multiple providers"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["aiohttp>=3.9.0"]
+dependencies = [
+    "aiohttp>=3.9.0",
+    "mcp>=1.25.0",
+]
 license = { file = "LICENSE" }
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/Abdulmumin1/ai-query"
@@ -18,4 +24,6 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "semversioner>=2.0.8",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]

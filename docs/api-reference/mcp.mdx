@@ -1,0 +1,191 @@
+---
+title: MCP
+description: MCP (Model Context Protocol) API reference
+---
+
+# MCP API Reference
+
+## Context Managers
+
+### mcp
+
+Connect to a local MCP server using stdio transport.
+
+```python
+from ai_query import mcp
+
+async with mcp(command, *args, env=None) as server:
+    # server.tools is ready to use
+    ...
+```
+
+**Parameters:**
+- `command` (str): Command to run (e.g., "python", "node", "npx")
+- `*args` (str): Arguments for the command
+- `env` (dict[str, str] | None): Environment variables
+
+**Returns:** `MCPServer`
+
+---
+
+### mcp_sse
+
+Connect to a remote MCP server using SSE transport.
+
+```python
+from ai_query import mcp_sse
+
+async with mcp_sse(url, headers=None) as server:
+    ...
+```
+
+**Parameters:**
+- `url` (str): SSE endpoint URL
+- `headers` (dict[str, str] | None): HTTP headers
+
+**Returns:** `MCPServer`
+
+---
+
+### mcp_http
+
+Connect to a remote MCP server using Streamable HTTP transport.
+
+```python
+from ai_query import mcp_http
+
+async with mcp_http(url, headers=None) as server:
+    ...
+```
+
+**Parameters:**
+- `url` (str): HTTP endpoint URL
+- `headers` (dict[str, str] | None): HTTP headers
+
+**Returns:** `MCPServer`
+
+---
+
+## Non-Context Manager Functions
+
+### connect_mcp
+
+```python
+from ai_query import connect_mcp
+
+server = await connect_mcp(command, *args, env=None)
+try:
+    # Use server.tools
+    ...
+finally:
+    await server.close()
+```
+
+---
+
+### connect_mcp_sse
+
+```python
+from ai_query import connect_mcp_sse
+
+server = await connect_mcp_sse(url, headers=None)
+```
+
+---
+
+### connect_mcp_http
+
+```python
+from ai_query import connect_mcp_http
+
+server = await connect_mcp_http(url, headers=None)
+```
+
+---
+
+## Utility Functions
+
+### merge_tools
+
+Combine multiple tool sources into a single ToolSet.
+
+```python
+from ai_query import merge_tools
+
+all_tools = merge_tools(
+    {"local_tool": my_tool},  # ToolSet dict
+    mcp_server1,               # MCPServer
+    mcp_server2,               # MCPServer
+)
+```
+
+**Parameters:**
+- `*tool_sources` (ToolSet | MCPServer): Tool sources to merge
+
+**Returns:** `ToolSet` (dict[str, Tool])
+
+---
+
+## Types
+
+### MCPServer
+
+Represents a connected MCP server.
+
+```python
+@dataclass
+class MCPServer:
+    tools: ToolSet                    # Tools ready for generate_text/stream_text
+    raw_tools: list[dict[str, Any]]   # Raw tool definitions from server
+    transport: TransportType          # "stdio" | "sse" | "streamable_http"
+
+    async def close(self) -> None:
+        """Close the connection."""
+        ...
+```
+
+---
+
+### MCPClient
+
+Low-level client for connecting to MCP servers.
+
+```python
+class MCPClient:
+    async def connect_stdio(self, command, args=None, env=None) -> MCPServer: ...
+    async def connect_sse(self, url, headers=None) -> MCPServer: ...
+    async def connect_http(self, url, headers=None) -> MCPServer: ...
+    async def disconnect(self) -> None: ...
+```
+
+---
+
+### TransportType
+
+```python
+TransportType = Literal["stdio", "sse", "streamable_http"]
+```
+
+---
+
+## Example
+
+```python
+from ai_query import generate_text, openai, mcp, merge_tools, tool, Field
+
+@tool(description="Add two numbers")
+def add(a: int = Field(description="First number"),
+        b: int = Field(description="Second number")) -> int:
+    return a + b
+
+async def main():
+    async with mcp("python", "weather_server.py") as weather:
+        tools = merge_tools({"add": add}, weather)
+
+        result = await generate_text(
+            model=openai("gpt-4o"),
+            prompt="What's 5 + 3? Also, what's the weather in Paris?",
+            tools=tools,
+        )
+        print(result.text)
+```

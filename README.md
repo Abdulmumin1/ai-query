@@ -10,6 +10,14 @@ uv add ai-query
 pip install ai-query
 ```
 
+For MCP (Model Context Protocol) support:
+
+```bash
+uv add ai-query[mcp]
+# or
+pip install ai-query[mcp]
+```
+
 ## Quick Start
 
 ```python
@@ -94,6 +102,123 @@ stop_when=has_tool_call("final_answer")
 
 # Multiple conditions (stops when any is true)
 stop_when=[step_count_is(10), has_tool_call("done")]
+```
+
+## MCP (Model Context Protocol) Support
+
+ai-query supports [MCP](https://modelcontextprotocol.io/) - a standard for AI tool integration. Connect to any MCP server and use its tools seamlessly.
+
+### Transports
+
+| Transport | Function | Use Case |
+|-----------|----------|----------|
+| **stdio** | `mcp()` | Local servers (python, node, npx) |
+| **SSE** | `mcp_sse()` | Remote servers (legacy) |
+| **Streamable HTTP** | `mcp_http()` | Remote servers (recommended) |
+
+### Local MCP Server (stdio)
+
+```python
+from ai_query import generate_text, google, mcp
+
+async def main():
+    # Connect to a local Python MCP server
+    async with mcp("python", "my_server.py") as server:
+        print(f"Available tools: {list(server.tools.keys())}")
+
+        result = await generate_text(
+            model=google("gemini-2.0-flash"),
+            prompt="Calculate 25 * 4",
+            tools=server.tools,
+        )
+        print(result.text)
+```
+
+### Using npx for npm MCP packages
+
+```python
+from ai_query import generate_text, openai, mcp
+
+async with mcp("npx", "-y", "@modelcontextprotocol/server-fetch") as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Fetch and summarize https://example.com",
+        tools=server.tools,
+    )
+```
+
+### Remote MCP Server (SSE)
+
+```python
+from ai_query import generate_text, openai, mcp_sse
+
+async with mcp_sse("http://localhost:8000/sse") as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Hello!",
+        tools=server.tools,
+    )
+
+# With authentication
+async with mcp_sse(
+    "https://api.example.com/mcp/sse",
+    headers={"Authorization": "Bearer token123"}
+) as server:
+    ...
+```
+
+### Remote MCP Server (Streamable HTTP)
+
+```python
+from ai_query import generate_text, openai, mcp_http
+
+async with mcp_http("http://localhost:8000/mcp") as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Hello!",
+        tools=server.tools,
+    )
+```
+
+### Combining Multiple Tool Sources
+
+Use `merge_tools` to combine tools from multiple MCP servers or mix with local tools:
+
+```python
+from ai_query import generate_text, openai, mcp, merge_tools, tool, Field
+
+@tool(description="Calculate math expressions")
+def calculate(expr: str = Field(description="Expression")) -> str:
+    return str(eval(expr))
+
+async with mcp("python", "weather_server.py") as weather:
+    async with mcp("python", "search_server.py") as search:
+        all_tools = merge_tools(
+            {"calculator": calculate},  # Local tool
+            weather,                      # MCP server
+            search,                       # Another MCP server
+        )
+
+        result = await generate_text(
+            model=openai("gpt-4o"),
+            prompt="What's the weather in Tokyo, search for news, and calculate 100/4",
+            tools=all_tools,
+        )
+```
+
+### Manual Connection Management
+
+For long-lived connections, use `connect_mcp`, `connect_mcp_sse`, or `connect_mcp_http`:
+
+```python
+from ai_query import connect_mcp
+
+server = await connect_mcp("python", "server.py")
+try:
+    # Use server.tools for multiple requests...
+    result = await generate_text(...)
+finally:
+    await server.close()
 ```
 
 ## Step Callbacks
@@ -184,4 +309,4 @@ result = await generate_text(
 
 ## Examples
 
-See the [examples/](examples/) folder for agent implementations
+See the [examples/](examples/) folder for agent implementations.
