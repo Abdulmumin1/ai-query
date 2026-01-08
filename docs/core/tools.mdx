@@ -7,7 +7,7 @@ Tools enable AI models to call functions in your code. ai-query provides a type-
 
 ## Defining Tools
 
-Use the `@tool` decorator to create a tool from any function:
+Use the [`@tool`](/api-reference/types/tool) decorator to create a tool from any function:
 
 ```python
 from ai_query import tool, Field
@@ -158,7 +158,7 @@ for tr in result.tool_results:
 
 ## Limiting Execution Steps
 
-Control the maximum number of tool execution loops using `stop_when`:
+Control the maximum number of tool execution loops using [`stop_when`](/api-reference/types/stop-conditions):
 
 ```python
 from ai_query import generate_text, google, step_count_is

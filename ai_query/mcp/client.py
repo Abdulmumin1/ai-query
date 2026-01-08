@@ -122,15 +122,20 @@ class MCPClient:
         self._check_mcp_installed()
 
         from mcp import ClientSession
-        from mcp.client.streamablehttp import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
+        import httpx
 
         self._exit_stack = AsyncExitStack()
 
+        # Create httpx client with headers if provided
+        http_client = httpx.AsyncClient(headers=headers) if headers else None
+
         # Set up Streamable HTTP transport and session
+        # streamable_http_client returns (read_stream, write_stream, get_session_id)
         http_transport = await self._exit_stack.enter_async_context(
-            streamablehttp_client(url, headers=headers)
+            streamable_http_client(url, http_client=http_client)
         )
-        read_stream, write_stream = http_transport
+        read_stream, write_stream, _get_session_id = http_transport
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
         )

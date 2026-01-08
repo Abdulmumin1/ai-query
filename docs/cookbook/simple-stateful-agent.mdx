@@ -1,0 +1,196 @@
+---
+title: "Simple Stateful Agent"
+description: "Build your first stateful agent with persistent state"
+---
+
+Learn to build a basic stateful agent that maintains state across interactions.
+
+## What You'll Build
+
+A simple counter agent that remembers its count even after restarts.
+
+## Prerequisites
+
+```bash
+pip install ai-query
+```
+
+## Step 1: Create a Basic Agent
+
+The simplest stateful agent just uses `InMemoryAgent`:
+
+```python
+import asyncio
+from ai_query.agents import InMemoryAgent
+
+class CounterAgent(InMemoryAgent):
+    initial_state = {"count": 0}
+    
+    async def increment(self):
+        await self.set_state({
+            "count": self.state["count"] + 1
+        })
+        return self.state["count"]
+    
+    async def decrement(self):
+        await self.set_state({
+            "count": self.state["count"] - 1
+        })
+        return self.state["count"]
+
+async def main():
+    async with CounterAgent("counter-1") as agent:
+        print(f"Initial count: {agent.state['count']}")
+        
+        await agent.increment()
+        print(f"After increment: {agent.state['count']}")
+        
+        await agent.increment()
+        await agent.increment()
+        print(f"After 2 more increments: {agent.state['count']}")
+
+asyncio.run(main())
+```
+
+**Output:**
+```
+Initial count: 0
+After increment: 1
+After 2 more increments: 3
+```
+
+## Step 2: Add Persistence with SQLite
+
+Switch to `SQLiteAgent` for data that survives restarts:
+
+```python
+import asyncio
+from ai_query.agents import SQLiteAgent
+
+class PersistentCounter(SQLiteAgent):
+    db_path = "./counters.db"
+    initial_state = {"count": 0}
+    
+    async def increment(self):
+        await self.set_state({"count": self.state["count"] + 1})
+        return self.state["count"]
+
+async def main():
+    # First run
+    async with PersistentCounter("my-counter") as agent:
+        print(f"Count: {agent.state['count']}")
+        await agent.increment()
+        await agent.increment()
+        print(f"Count: {agent.state['count']}")
+    
+    # Simulate restart - data persists!
+    async with PersistentCounter("my-counter") as agent:
+        print(f"After restart: {agent.state['count']}")
+
+asyncio.run(main())
+```
+
+**Output:**
+```
+Count: 0
+Count: 2
+After restart: 2
+```
+
+## Step 3: Add Lifecycle Hooks
+
+React to agent events:
+
+```python
+import asyncio
+from ai_query.agents import SQLiteAgent
+
+class LoggingCounter(SQLiteAgent):
+    db_path = "./counters.db"
+    initial_state = {"count": 0, "history": []}
+    
+    async def on_start(self):
+        print(f"🚀 Agent started with count: {self.state['count']}")
+    
+    def on_state_update(self, state, source):
+        print(f"📊 State updated by {source}: count = {state['count']}")
+    
+    async def increment(self):
+        new_history = self.state["history"] + [
+            {"action": "increment", "value": self.state["count"] + 1}
+        ]
+        await self.set_state({
+            "count": self.state["count"] + 1,
+            "history": new_history[-10:]  # Keep last 10
+        })
+
+async def main():
+    async with LoggingCounter("logged-counter") as agent:
+        await agent.increment()
+        await agent.increment()
+        print(f"History: {agent.state['history']}")
+
+asyncio.run(main())
+```
+
+**Output:**
+```
+🚀 Agent started with count: 0
+📊 State updated by server: count = 1
+📊 State updated by server: count = 2
+History: [{'action': 'increment', 'value': 1}, {'action': 'increment', 'value': 2}]
+```
+
+## Step 4: Multiple Agent Instances
+
+Each agent ID is independent:
+
+```python
+import asyncio
+from ai_query.agents import SQLiteAgent
+
+class UserStats(SQLiteAgent):
+    db_path = "./users.db"
+    initial_state = {"visits": 0, "name": "Unknown"}
+    
+    async def visit(self, name: str = None):
+        await self.set_state({
+            "visits": self.state["visits"] + 1,
+            "name": name or self.state["name"]
+        })
+
+async def main():
+    # Different users = different states
+    async with UserStats("user-alice") as alice:
+        await alice.visit("Alice")
+        await alice.visit()
+        print(f"Alice: {alice.state}")
+    
+    async with UserStats("user-bob") as bob:
+        await bob.visit("Bob")
+        print(f"Bob: {bob.state}")
+    
+    # Reload Alice - her state is preserved
+    async with UserStats("user-alice") as alice:
+        print(f"Alice again: {alice.state}")
+
+asyncio.run(main())
+```
+
+**Output:**
+```
+Alice: {'visits': 2, 'name': 'Alice'}
+Bob: {'visits': 1, 'name': 'Bob'}
+Alice again: {'visits': 2, 'name': 'Alice'}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Persistent Chatbot" href="/cookbook/persistent-chatbot">
+    Build a chatbot that remembers conversations
+  </Card>
+  <Card title="Real-time Agent" href="/cookbook/realtime-agent">
+    Add WebSocket support for real-time updates
+  </Card>
+</CardGroup>

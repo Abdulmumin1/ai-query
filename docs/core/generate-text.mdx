@@ -27,10 +27,10 @@ asyncio.run(main())
 |-----------|------|-------------|
 | `model` | `LanguageModel` | The AI model to use (from `openai()`, `anthropic()`, or `google()`) |
 | `prompt` | `str` | The user prompt (simple string) |
-| `messages` | `list[dict]` | Full conversation history (alternative to `prompt`) |
+| `messages` | [`list[Message]`](/api-reference/types/message) | Full conversation history (alternative to `prompt`) |
 | `system` | `str` | System prompt to set context |
-| `tools` | `dict[str, Tool]` | Tools the AI can call |
-| `stop_when` | `StopCondition` | Stop condition for tool loops (e.g., `step_count_is(5)` or `has_tool_call("finish")`) |
+| `tools` | [`dict[str, Tool]`](/api-reference/types/tool) | Tools the AI can call |
+| `stop_when` | [`StopCondition`](/api-reference/types/stop-conditions) | Stop condition for tool loops (e.g., `step_count_is(5)` or `has_tool_call("finish")`) |
 | `on_step_start` | `Callable` | Callback when a step starts |
 | `on_step_finish` | `Callable` | Callback when a step finishes |
 | `provider_options` | `dict` | Provider-specific options |
@@ -67,7 +67,7 @@ result = await generate_text(
 
 ## Response Object
 
-The `generate_text` function returns a `GenerateTextResult`:
+The `generate_text` function returns a [`GenerateTextResult`](/api-reference/types/results):
 
 ```python
 result = await generate_text(

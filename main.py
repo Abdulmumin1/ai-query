@@ -1,71 +1,68 @@
-"""Example of MCP (Model Context Protocol) integration with ai-query."""
+"""Example using ChatAgent with MCP server tools."""
 
 import asyncio
-import json
-from ai_query import generate_text, google, openai, step_count_is, StepFinishEvent, mcp
+from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query.providers.openai import openai
+from ai_query import connect_mcp_http, step_count_is
 
 
-def on_step_finish(event: StepFinishEvent):
-    """Log the progress of each step."""
-    print(f"\n--- Step {event.step_number} ---")
-
-    if event.step.text:
-        print(f"Response: {event.step.text.strip()[:300]}")
-
-    if event.step.tool_calls:
-        for tc in event.step.tool_calls:
-            args = json.dumps(tc.arguments)
-            print(f"Tool Call: {tc.name}({args})")
-
-    if event.step.tool_results:
-        for tr in event.step.tool_results:
-            print(f"Result: {tr.result}")
+class MCPBot(ChatAgent, SQLiteAgent):
+    """Chatbot that uses tools from an MCP server."""
+    
+    db_path = "./mcp_bot.db"
+    model = openai("z-ai/glm-4.5-air:free", base_url='https://openrouter.ai/api/v1')
+    system = "You are a helpful assistant. Use tools when needed."
+    initial_state = {"message_count": 0}
+    
+    # Will be set after connecting to MCP
+    _mcp_tools: dict = {}
+    
+    @property
+    def stop_when(self):
+        return step_count_is(10)
+    
+    @property
+    def tools(self):
+        return self._mcp_tools
+    
+    def on_step_finish(self, event):
+        if event.step.tool_calls:
+            for tc in event.step.tool_calls:
+                print(f"  [Tool] {tc.name}")
+    
+    async def on_start(self):
+        print(f"Bot started! Previous messages: {len(self.messages)}")
 
 
 async def main():
-    """
-    Example using a local Python MCP server.
-
-    The test_mcp_server.py provides these tools:
-    - calculator: Perform math calculations
-    - get_weather: Get weather for a city
-    - echo: Echo back a message
-    - random_number: Generate random numbers
-    - lookup_user: Look up user profiles
-    """
-    print("=" * 60)
-    print("MCP Integration Example - Using local test_mcp_server.py")
-    print("=" * 60)
-
-    # Connect to our local Python MCP server
-    async with mcp("python", "test_mcp_server.py") as server:
-
-        # Show discovered tools
-        print(f"\nDiscovered {len(server.tools)} tool(s) from MCP server:")
-        for name, tool in server.tools.items():
-            print(f"  - {name}: {tool.description}")
-
-        print("\n" + "-" * 60)
-        print("Sending prompt to model with MCP tools...")
-        print("-" * 60)
-
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),  # or openai("gpt-4o")
-            system="You are a helpful assistant. Use the available tools to answer questions.",
-            prompt="What's 125 * 8? Also, what's the weather like in Tokyo? And look up user 1.",
-            tools=server.tools,
-            on_step_finish=on_step_finish,
-            stop_when=step_count_is(5),
-        )
-
-        print("\n" + "=" * 60)
-        print("FINAL ANSWER")
-        print("=" * 60)
-        print(result.text)
-        print("=" * 60)
-
-        if result.usage:
-            print(f"\nTotal tokens used: {result.usage.total_tokens}")
+    # Connect to MCP server first
+    print("Connecting to MCP server...")
+    mcp_server = await connect_mcp_http("https://ai-query.dev/mcp")
+    
+    try:
+        print(f"Connected! Available tools: {list(mcp_server.tools.keys())}")
+        
+        async with MCPBot("mcp-bot1") as bot:
+            # Inject MCP tools into the bot
+            bot._mcp_tools = mcp_server.tools
+            
+            while True:
+                print("\n--- Chat ---")
+                question = input("Enter your message (or 'quit'): ")
+                
+                if question.lower() in ('quit', 'exit', 'q'):
+                    break
+                
+                print("\nBot: ", end="", flush=True)
+                async for chunk in bot.stream_chat(question):
+                    print(chunk, end="", flush=True)
+                print()
+                
+                print(f"\nTotal messages: {len(bot.messages)}")
+    finally:
+        # Always close the MCP connection
+        await mcp_server.close()
+        print("MCP server disconnected.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,161 @@
+---
+title: "ChatAgent"
+description: "Mixin class adding AI chat capabilities to agents"
+---
+
+The `ChatAgent` mixin adds AI-powered chat capabilities to any agent. Combine it with a storage backend to create a chatbot.
+
+## Import
+
+```python
+from ai_query.agents import ChatAgent
+```
+
+## Class Definition
+
+```python
+class ChatAgent(Agent[State], Generic[State]):
+    model: LanguageModel = google("gemini-2.0-flash")
+    stop_when: StopCondition | list[StopCondition] | None = None
+    system: str = "You are a helpful assistant."
+    tools: dict[str, Any] = {}
+```
+
+### Class Attributes
+
+<ParamField path="model" type="LanguageModel" default="google('gemini-2.0-flash')">
+  The model to use for chat. Use `google()`, `openai()`, or `anthropic()` to create.
+</ParamField>
+
+<ParamField path="stop_when" type="StopCondition | None" default="None">
+  Stop condition(s) for tool execution loops. See [stop conditions](/api-reference/types/stop-conditions).
+</ParamField>
+
+<ParamField path="system" type="str" default="You are a helpful assistant.">
+  System prompt for the AI.
+</ParamField>
+
+<ParamField path="tools" type="dict[str, Any]" default="{}">
+  Tools available to the AI during chat.
+</ParamField>
+
+## Methods
+
+### chat
+
+```python
+async def chat(self, message: str) -> str
+```
+
+Send a message and get an AI response.
+
+This method:
+1. Adds the user message to history
+2. Calls the AI model with the full conversation
+3. Adds the assistant response to history
+4. Persists the updated history
+
+**Parameters:**
+
+<ParamField path="message" type="str" required>
+  The user's message.
+</ParamField>
+
+**Returns:** The AI's response text.
+
+### stream_chat
+
+```python
+async def stream_chat(self, message: str) -> AsyncIterator[str]
+```
+
+Stream an AI response.
+
+**Parameters:**
+
+<ParamField path="message" type="str" required>
+  The user's message.
+</ParamField>
+
+**Yields:** Response text chunks as they arrive.
+
+## Usage
+
+### Basic Chat
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent
+
+class MyBot(ChatAgent, InMemoryAgent):
+    system = "You are a helpful assistant."
+
+async with MyBot("bot-1") as bot:
+    response = await bot.chat("Hello!")
+    print(response)
+```
+
+### Streaming Chat
+
+```python
+async with MyBot("bot-1") as bot:
+    async for chunk in bot.stream_chat("Tell me a story"):
+        print(chunk, end="", flush=True)
+```
+
+### With Tools
+
+To use tools with ChatAgent, use `generate_text` directly inside your agent methods for full control. See the [Using generate_text Directly](/core/stateful-agents#using-generate_text-directly) section.
+
+### With Persistent Storage
+
+```python
+from ai_query.agents import ChatAgent, SQLiteAgent
+
+class PersistentBot(ChatAgent, SQLiteAgent):
+    db_path = "./chat_history.db"
+    system = "You remember our previous conversations."
+
+# First session
+async with PersistentBot("user-123") as bot:
+    await bot.chat("My name is Alice")
+
+# Later session - history is preserved
+async with PersistentBot("user-123") as bot:
+    response = await bot.chat("What's my name?")
+    # AI remembers: "Your name is Alice"
+```
+
+## WebSocket + SSE Streaming
+
+For real-time apps, use the built-in server with SSE for AI streaming:
+
+```python
+class RealtimeBot(ChatAgent, InMemoryAgent):
+    system = "You are a real-time assistant."
+    
+    async def on_message(self, connection, message):
+        # User messages via WebSocket
+        await self.broadcast(f"User: {message}")
+        
+        # AI responses via SSE (efficient streaming)
+        await self.stream_chat_sse(message)
+
+# Start server with WebSocket + SSE
+RealtimeBot("bot").serve(port=8080)
+# WebSocket: ws://localhost:8080/ws
+# SSE: http://localhost:8080/events
+```
+
+### stream_chat_sse
+
+```python
+async def stream_chat_sse(self, message: str) -> str
+```
+
+Stream an AI response via SSE to connected clients. Sends `ai_start`, `ai_chunk`, and `ai_end` events.
+
+**Parameters:**
+- `message` - The user's message
+
+**Returns:** The complete AI response text.
+

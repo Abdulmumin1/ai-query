@@ -1,0 +1,320 @@
+---
+title: "Agent"
+description: "Abstract base class for stateful AI agents"
+---
+
+The `Agent` class is the foundation for building stateful AI agents with persistent storage, WebSocket support, and lifecycle hooks.
+
+## Import
+
+```python
+from ai_query.agents import Agent
+```
+
+## Class Definition
+
+```python
+class Agent(ABC, Generic[State]):
+    initial_state: State = {}
+    
+    def __init__(self, agent_id: str, *, env: Any = None)
+```
+
+### Parameters
+
+<ParamField path="agent_id" type="str" required>
+  Unique identifier for this agent instance. Used as the key for state persistence.
+</ParamField>
+
+<ParamField path="env" type="Any">
+  Optional environment bindings. Used for Cloudflare Durable Objects integration.
+</ParamField>
+
+## Properties
+
+### state
+
+```python
+@property
+def state(self) -> State
+```
+
+Current agent state. Raises `RuntimeError` if accessed before `start()` is called.
+
+### messages
+
+```python
+@property
+def messages(self) -> list[Message]
+```
+
+Conversation history for this agent.
+
+### id
+
+```python
+@property
+def id(self) -> str
+```
+
+The agent's unique identifier.
+
+## Methods
+
+### set_state
+
+```python
+async def set_state(self, state: State) -> None
+```
+
+Update the agent's state. This will:
+1. Update in-memory state
+2. Persist to storage
+3. Call `on_state_update` hook
+4. Broadcast new state to all WebSocket clients
+
+### save_messages
+
+```python
+async def save_messages(self, messages: list[Message]) -> None
+```
+
+Persist messages to storage.
+
+### clear_messages
+
+```python
+async def clear_messages(self) -> None
+```
+
+Clear the conversation history.
+
+### broadcast
+
+```python
+async def broadcast(self, message: str | bytes) -> None
+```
+
+Send a message to all connected WebSocket clients.
+
+### stream_to_sse
+
+```python
+async def stream_to_sse(self, event: str, data: str) -> None
+```
+
+Send an SSE event to all connected SSE clients.
+
+**Parameters:**
+- `event` - Event type (e.g., `"ai_start"`, `"ai_chunk"`, `"ai_end"`)
+- `data` - Event data to send
+
+### serve
+
+```python
+def serve(
+    self,
+    host: str = "localhost",
+    port: int = 8080,
+    path: str = "/ws",
+) -> None
+```
+
+Start a WebSocket + SSE server for this agent. This is a blocking call.
+
+**Endpoints:**
+- `ws://{host}:{port}{path}` - WebSocket for messages
+- `http://{host}:{port}/events` - SSE for AI streaming
+
+**Example:**
+```python
+MyAgent("agent-1").serve(port=8080)
+```
+
+### serve_async
+
+```python
+async def serve_async(
+    self,
+    host: str = "localhost",
+    port: int = 8080,
+    path: str = "/ws",
+) -> None
+```
+
+Async version of `serve()`.
+
+### start
+
+```python
+async def start(self) -> None
+```
+
+Initialize the agent. Loads state/messages from storage and calls `on_start` hook.
+
+## Lifecycle Hooks
+
+Override these methods in your subclass:
+
+### on_start
+
+```python
+async def on_start(self) -> None
+```
+
+Called when the agent starts (after state is loaded).
+
+### on_state_update
+
+```python
+def on_state_update(self, state: State, source: str | Connection) -> None
+```
+
+Called when state changes. `source` is `"server"` for server-initiated changes.
+
+## WebSocket Hooks
+
+### on_connect
+
+```python
+async def on_connect(self, connection: Connection, ctx: ConnectionContext) -> None
+```
+
+Called when a WebSocket client connects.
+
+### on_message
+
+```python
+async def on_message(self, connection: Connection, message: str | bytes) -> None
+```
+
+Called when a message is received from a client.
+
+### on_close
+
+```python
+async def on_close(self, connection: Connection, code: int, reason: str) -> None
+```
+
+Called when a WebSocket client disconnects.
+
+### on_error
+
+```python
+async def on_error(self, connection: Connection, error: Exception) -> None
+```
+
+Called on WebSocket errors.
+
+## Abstract Methods
+
+These must be implemented by storage backends:
+
+```python
+@abstractmethod
+async def _load_state(self) -> State | None
+
+@abstractmethod
+async def _save_state(self, state: State) -> None
+
+@abstractmethod
+async def _load_messages(self) -> list[Message]
+
+@abstractmethod
+async def _save_messages(self, messages: list[Message]) -> None
+```
+
+## Context Manager
+
+Agents can be used as async context managers:
+
+```python
+async with MyAgent("agent-1") as agent:
+    await agent.set_state({"key": "value"})
+```
+
+---
+
+## Connection Protocol
+
+```python
+from ai_query.agents import Connection
+```
+
+Protocol that any WebSocket must implement to work with agents.
+
+```python
+@runtime_checkable
+class Connection(Protocol):
+    async def send(self, message: str | bytes) -> None:
+        """Send a message to the client."""
+        ...
+    
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        """Close the connection."""
+        ...
+```
+
+**Implement this to use agents with any WebSocket library.**
+
+---
+
+## ConnectionContext
+
+```python
+from ai_query.agents import ConnectionContext
+```
+
+Context passed to `on_connect` with connection metadata.
+
+```python
+@dataclass
+class ConnectionContext:
+    request: Any = None      # Original HTTP request
+    metadata: dict[str, Any] = {}  # Query params, headers, etc.
+```
+
+---
+
+## AioHttpConnection
+
+```python
+from ai_query.agents import AioHttpConnection
+```
+
+Built-in `Connection` implementation for aiohttp WebSockets. Used internally by `serve()`.
+
+```python
+class AioHttpConnection(Connection):
+    def __init__(self, ws: WebSocketResponse, request: Request)
+    
+    async def send(self, message: str | bytes) -> None
+    async def close(self, code: int = 1000, reason: str = "") -> None
+    
+    username: str | None  # Convenience attribute
+```
+
+---
+
+## Example
+
+```python
+from ai_query.agents import InMemoryAgent
+
+class CounterAgent(InMemoryAgent):
+    initial_state = {"count": 0}
+    
+    async def on_start(self):
+        print(f"Started with count: {self.state['count']}")
+    
+    async def increment(self):
+        await self.set_state({"count": self.state["count"] + 1})
+
+# As context manager
+async with CounterAgent("counter-1") as agent:
+    await agent.increment()
+    print(agent.state["count"])  # 1
+
+# Or as server
+CounterAgent("counter-1").serve(port=8080)
+```

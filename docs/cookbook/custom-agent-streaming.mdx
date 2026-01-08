@@ -1,0 +1,138 @@
+---
+title: "Custom Agent with Streaming"
+description: "Build an agent using stream_text directly for full AI control"
+---
+
+Use the base `Agent` class with `stream_text` for complete control over AI interactions while leveraging WebSocket + SSE for real-time communication.
+
+## When to Use This Pattern
+
+- Need fine-grained control over AI calls
+- Want to customize prompts per-request
+- Need to use different models for different scenarios
+- Want to add custom pre/post processing
+
+## The Agent
+
+```python
+from ai_query.agents import InMemoryAgent
+from ai_query import stream_text, google, tool, Field
+
+
+class CustomAIAgent(InMemoryAgent):
+    """Agent using stream_text directly for full control."""
+    
+    initial_state = {"query_count": 0}
+    
+    async def on_message(self, connection, message):
+        username = getattr(connection, "username", "Anonymous")
+        await self.broadcast(f"{username}: {message}")
+        
+        if "@ai" in message.lower():
+            await self._handle_ai_query(username, message)
+    
+    async def _handle_ai_query(self, username: str, message: str):
+        """Use stream_text directly with WebSocket + SSE."""
+        
+        # Update state
+        await self.set_state({
+            **self.state,
+            "query_count": self.state["query_count"] + 1,
+        })
+        
+        # Define tools with closure access to self
+        @tool(description="Get query stats")
+        def get_stats() -> str:
+            return f"Total queries: {self.state['query_count']}"
+        
+        # Signal AI starting via SSE
+        await self.stream_to_sse("ai_start", "")
+        
+        # Full control over the AI call
+        result = stream_text(
+            model=google("gemini-2.0-flash"),
+            system=f"You are helping {username}. Be concise.",
+            prompt=message,
+            tools={"get_stats": get_stats},
+        )
+        
+        # Stream via SSE
+        full_response = ""
+        async for chunk in result.text_stream:
+            full_response += chunk
+            await self.stream_to_sse("ai_chunk", chunk)
+        
+        await self.stream_to_sse("ai_end", full_response)
+        
+        # Also broadcast final response for non-SSE clients
+        await self.broadcast(f"[AI] {full_response}")
+
+# Start server
+CustomAIAgent("agent").serve(port=8080)
+```
+
+## Key Differences from ChatAgent
+
+| Feature | ChatAgent | Agent + stream_text |
+|---------|-----------|---------------------|
+| System prompt | Fixed `system` attribute | Per-request customization |
+| Message history | Automatic | Manual if needed |
+| Model | Fixed `model` attribute | Per-request selection |
+| Tools | `tools` property | Per-request definition |
+| Complexity | Simple | Full control |
+
+## Hybrid Approach
+
+You can also subclass ChatAgent but override specific methods:
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent
+from ai_query import stream_text, google
+
+class HybridAgent(ChatAgent, InMemoryAgent):
+    system = "Default system prompt"
+    
+    async def on_message(self, connection, message):
+        if message.startswith("/custom"):
+            # Use stream_text directly for special commands
+            result = stream_text(
+                model=google("gemini-pro"),  # Different model
+                prompt=message[7:],
+            )
+            async for chunk in result.text_stream:
+                await self.stream_to_sse("ai_chunk", chunk)
+        else:
+            # Use ChatAgent's built-in chat for normal messages
+            await self.stream_chat_sse(message)
+```
+
+## SSE Events Reference
+
+| Event | When | Data |
+|-------|------|------|
+| `ai_start` | AI begins generating | Empty |
+| `ai_chunk` | Each token/chunk | Text chunk |
+| `ai_end` | Generation complete | Full response |
+
+## Client JavaScript
+
+```javascript
+// WebSocket for chat
+const ws = new WebSocket('ws://localhost:8080/ws?username=Alice');
+ws.onmessage = (e) => console.log(e.data);
+
+// SSE for AI streaming  
+const sse = new EventSource('http://localhost:8080/events');
+sse.addEventListener('ai_chunk', (e) => process.stdout.write(e.data));
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stateful Agents" href="/core/stateful-agents">
+    Full guide to agent architecture
+  </Card>
+  <Card title="Real-time Agent" href="/cookbook/realtime-agent">
+    Complete chat room example
+  </Card>
+</CardGroup>

@@ -26,7 +26,7 @@ asyncio.run(main())
 ```
 
 <Note>
-`stream_text` returns immediately with a `TextStreamResult` object. The actual streaming happens when you iterate over `text_stream`.
+`stream_text` returns immediately with a [`TextStreamResult`](/api-reference/types/results) object. The actual streaming happens when you iterate over `text_stream`.
 </Note>
 
 ## Getting Usage Statistics
@@ -84,17 +84,17 @@ When tools are provided, the streaming handles the full execution loop:
 |-----------|------|-------------|
 | `model` | `LanguageModel` | The AI model to use |
 | `prompt` | `str` | The user prompt |
-| `messages` | `list[dict]` | Full conversation history |
+| `messages` | [`list[Message]`](/api-reference/types/message) | Full conversation history |
 | `system` | `str` | System prompt |
-| `tools` | `dict[str, Tool]` | Available tools |
-| `stop_when` | `StopCondition` | Stop condition for tool loops |
+| `tools` | [`dict[str, Tool]`](/api-reference/types/tool) | Available tools |
+| `stop_when` | [`StopCondition`](/api-reference/types/stop-conditions) | Stop condition for tool loops |
 | `on_step_start` | `Callable` | Step start callback |
 | `on_step_finish` | `Callable` | Step finish callback |
 | `provider_options` | `dict` | Provider-specific options |
 
 ## TextStreamResult Object
 
-The `stream_text` function returns a `TextStreamResult`:
+The `stream_text` function returns a [`TextStreamResult`](/api-reference/types/results):
 
 ```python
 result = stream_text(model=google("gemini-2.0-flash"), prompt="Hello")

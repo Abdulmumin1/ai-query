@@ -1,0 +1,131 @@
+---
+title: "MCP Agent"
+description: "Build a chatbot that uses tools from an MCP server"
+---
+
+Combine [`ChatAgent`](/api-reference/chat-agent) with [MCP](/core/mcp) to create intelligent agents that use external tools from MCP servers.
+
+## Overview
+
+This example creates a chat agent that:
+- Connects to a remote MCP server over HTTP
+- Uses the server's tools to answer questions
+- Maintains conversation history
+- Tracks tool usage with step callbacks
+
+## The Code
+
+```python
+import asyncio
+from ai_query.agents import ChatAgent, InMemoryAgent
+from ai_query.providers.openai import openai
+from ai_query import connect_mcp_http, step_count_is
+
+
+class MCPAgent(ChatAgent, InMemoryAgent):
+    """Agent that uses tools from an MCP server."""
+    
+    model = openai("gpt-4o-mini")
+    system = "You are a helpful assistant. Use tools when needed."
+    initial_state = {"queries": 0}
+    
+    # Will be set after connecting to MCP
+    _mcp_tools: dict = {}
+    
+    @property
+    def stop_when(self):
+        return step_count_is(10)
+    
+    @property
+    def tools(self):
+        return self._mcp_tools
+    
+    def on_step_finish(self, event):
+        """Log tool usage."""
+        if event.step.tool_calls:
+            for tc in event.step.tool_calls:
+                print(f"  [Tool] {tc.name}")
+    
+    async def on_start(self):
+        print(f"Agent started with {len(self.messages)} messages")
+
+
+async def main():
+    # Connect to MCP server
+    print("Connecting to MCP server...")
+    mcp_server = await connect_mcp_http("https://your-mcp-server.com/mcp")
+    
+    try:
+        print(f"Tools available: {list(mcp_server.tools.keys())}")
+        
+        async with MCPAgent("mcp-agent") as agent:
+            # Inject MCP tools into the agent
+            agent._mcp_tools = mcp_server.tools
+            
+            while True:
+                question = input("\nYou: ")
+                if question.lower() in ('quit', 'exit'):
+                    break
+                
+                print("\nAgent: ", end="", flush=True)
+                async for chunk in agent.stream_chat(question):
+                    print(chunk, end="", flush=True)
+                print()
+    finally:
+        await mcp_server.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Using Different Models
+
+You can use any provider:
+
+```python
+from ai_query.providers.google import google
+from ai_query.providers.anthropic import anthropic
+
+class GoogleMCPAgent(ChatAgent, InMemoryAgent):
+    model = google("gemini-2.0-flash")
+    ...
+
+class ClaudeMCPAgent(ChatAgent, InMemoryAgent):
+    model = anthropic("claude-sonnet-4-20250514")
+    ...
+```
+
+## Using SSE Transport
+
+For legacy MCP servers using SSE:
+
+```python
+from ai_query import connect_mcp_sse
+
+async with connect_mcp_sse("https://server.com/sse") as mcp_server:
+    # Same usage pattern
+    ...
+```
+
+## Persistent Storage
+
+Use [`SQLiteAgent`](/api-reference/agent-backends#sqliteagent) for persistent conversations:
+
+```python
+class PersistentMCPAgent(ChatAgent, SQLiteAgent):
+    db_path = "./mcp_agent.db"
+    model = openai("gpt-4o")
+    ...
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Integration" icon="plug" href="/core/mcp">
+    Learn more about MCP transports and servers
+  </Card>
+  <Card title="Stateful Agents" icon="robot" href="/core/stateful-agents">
+    Build agents with persistent state
+  </Card>
+</CardGroup>

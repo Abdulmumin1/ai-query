@@ -29,6 +29,7 @@
               "core/streaming",
               "core/tools",
               "core/agents",
+              "core/stateful-agents",
               "core/mcp"
             ]
           },
@@ -51,6 +52,14 @@
               "api-reference/generate-text",
               "api-reference/stream-text",
               "api-reference/mcp"
+            ]
+          },
+          {
+            "group": "Agent Classes",
+            "pages": [
+              "api-reference/agent",
+              "api-reference/chat-agent",
+              "api-reference/agent-backends"
             ]
           },
           {
@@ -90,6 +99,16 @@
               "cookbook/wikipedia-agent",
               "cookbook/task-planner",
               "cookbook/code-executor"
+            ]
+          },
+          {
+            "group": "Stateful Agents",
+            "pages": [
+              "cookbook/simple-stateful-agent",
+              "cookbook/persistent-chatbot",
+              "cookbook/realtime-agent",
+              "cookbook/custom-agent-streaming",
+              "cookbook/mcp-agent"
             ]
           }
         ]
