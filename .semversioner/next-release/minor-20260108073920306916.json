@@ -1,0 +1,4 @@
+{
+  "type": "minor",
+  "description": "Experimental MCP support, with stdio, sse and streamable http transport"
+}

@@ -40,6 +40,17 @@ from ai_query.providers.base import BaseProvider
 from ai_query.providers.openai import OpenAIProvider, openai
 from ai_query.providers.anthropic import AnthropicProvider, anthropic
 from ai_query.providers.google import GoogleProvider, google
+from ai_query.mcp import (
+    mcp,
+    mcp_sse,
+    mcp_http,
+    connect_mcp,
+    connect_mcp_sse,
+    connect_mcp_http,
+    merge_tools,
+    MCPServer,
+    MCPClient,
+)
 
 
 async def generate_text(
@@ -138,14 +149,7 @@ async def generate_text(
     if not final_messages:
         raise ValueError("Either 'prompt' or 'messages' must be provided")
 
-    # If no tools, just do a simple generation (no loop)
-    if tools is None:
-        return await model.provider.generate(
-            model=model.model_id,
-            messages=final_messages,
-            provider_options=provider_options,
-            **kwargs,
-        )
+
 
     # Normalize stop_when to a list
     stop_conditions: list[StopCondition] = []
@@ -155,9 +159,9 @@ async def generate_text(
         else:
             stop_conditions = [stop_when]
 
-    # If no stop condition provided, default to step_count_is(10)
+    # If no stop condition provided, default to step_count_is(1)
     if not stop_conditions:
-        stop_conditions = [step_count_is(10)]
+        stop_conditions = [step_count_is(1)]
 
     # Execution loop
     steps: list[StepResult] = []
@@ -390,15 +394,7 @@ def stream_text(
     if not final_messages:
         raise ValueError("Either 'prompt' or 'messages' must be provided")
 
-    # If no tools, just do a simple stream (no loop)
-    if tools is None:
-        stream = model.provider.stream(
-            model=model.model_id,
-            messages=final_messages,
-            provider_options=provider_options,
-            **kwargs,
-        )
-        return TextStreamResult(stream)
+
 
     # Normalize stop_when to a list
     stop_conditions: list[StopCondition] = []
@@ -408,9 +404,9 @@ def stream_text(
         else:
             stop_conditions = [stop_when]
 
-    # If no stop condition provided, default to step_count_is(10)
+    # If no stop condition provided, default to step_count_is(1)
     if not stop_conditions:
-        stop_conditions = [step_count_is(10)]
+        stop_conditions = [step_count_is(1)]
 
     async def _stream_generator() -> AsyncIterator[StreamChunk]:
         """Generator that handles the tool execution loop."""
@@ -623,4 +619,14 @@ __all__ = [
     "OpenAIProvider",
     "AnthropicProvider",
     "GoogleProvider",
+    # MCP support
+    "mcp",
+    "mcp_sse",
+    "mcp_http",
+    "connect_mcp",
+    "connect_mcp_sse",
+    "connect_mcp_http",
+    "merge_tools",
+    "MCPServer",
+    "MCPClient",
 ]

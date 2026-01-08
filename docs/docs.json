@@ -28,7 +28,8 @@
               "core/conversations",
               "core/streaming",
               "core/tools",
-              "core/agents"
+              "core/agents",
+              "core/mcp"
             ]
           },
           {
@@ -48,7 +49,8 @@
             "group": "Functions",
             "pages": [
               "api-reference/generate-text",
-              "api-reference/stream-text"
+              "api-reference/stream-text",
+              "api-reference/mcp"
             ]
           },
           {

@@ -1,0 +1,294 @@
+---
+title: MCP Integration
+description: Connect to MCP (Model Context Protocol) servers and use their tools seamlessly
+---
+
+# MCP (Model Context Protocol)
+
+ai-query supports [MCP](https://modelcontextprotocol.io/) - a standard protocol for AI tool integration. Connect to any MCP server and use its tools seamlessly with `generate_text` and `stream_text`.
+
+## Installation
+
+MCP support requires the `mcp` package:
+
+```bash
+pip install ai-query[mcp]
+# or
+uv add ai-query[mcp]
+```
+
+## Transports
+
+MCP supports multiple transports for connecting to servers:
+
+| Transport | Function | Use Case |
+|-----------|----------|----------|
+| **stdio** | `mcp()` | Local servers (python, node, npx) |
+| **SSE** | `mcp_sse()` | Remote servers (legacy) |
+| **Streamable HTTP** | `mcp_http()` | Remote servers (recommended) |
+
+## Local MCP Server (stdio)
+
+Use `mcp()` to connect to local MCP servers that communicate over stdio:
+
+```python
+from ai_query import generate_text, google, mcp
+
+async def main():
+    # Connect to a local Python MCP server
+    async with mcp("python", "my_server.py") as server:
+        # See what tools are available
+        print(f"Available tools: {list(server.tools.keys())}")
+
+        # Use the tools with generate_text
+        result = await generate_text(
+            model=google("gemini-2.0-flash"),
+            prompt="Calculate 25 * 4",
+            tools=server.tools,
+        )
+        print(result.text)
+```
+
+### Using Node.js MCP Servers
+
+```python
+# Run a JavaScript MCP server
+async with mcp("node", "my_server.js") as server:
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        prompt="Hello!",
+        tools=server.tools,
+    )
+```
+
+### Using npx for npm Packages
+
+Many MCP servers are published as npm packages. Use `npx` to run them:
+
+```python
+from ai_query import generate_text, openai, mcp
+
+# Use the official MCP fetch server
+async with mcp("npx", "-y", "@modelcontextprotocol/server-fetch") as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Fetch and summarize https://example.com",
+        tools=server.tools,
+    )
+```
+
+### Environment Variables
+
+Pass environment variables to the subprocess:
+
+```python
+async with mcp(
+    "python", "my_server.py",
+    env={"API_KEY": "secret", "DEBUG": "true"}
+) as server:
+    ...
+```
+
+## Remote MCP Server (SSE)
+
+Use `mcp_sse()` for remote servers using the legacy SSE transport:
+
+```python
+from ai_query import generate_text, openai, mcp_sse
+
+async with mcp_sse("http://localhost:8000/sse") as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Hello!",
+        tools=server.tools,
+    )
+```
+
+### With Authentication
+
+```python
+async with mcp_sse(
+    "https://api.example.com/mcp/sse",
+    headers={"Authorization": "Bearer your-token"}
+) as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Hello!",
+        tools=server.tools,
+    )
+```
+
+## Remote MCP Server (Streamable HTTP)
+
+Use `mcp_http()` for remote servers using the recommended Streamable HTTP transport (MCP spec 2025-11-25):
+
+```python
+from ai_query import generate_text, openai, mcp_http
+
+async with mcp_http("http://localhost:8000/mcp") as server:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Hello!",
+        tools=server.tools,
+    )
+```
+
+### With Authentication
+
+```python
+async with mcp_http(
+    "https://api.example.com/mcp",
+    headers={"Authorization": "Bearer your-token"}
+) as server:
+    ...
+```
+
+## Combining Tool Sources
+
+Use `merge_tools()` to combine tools from multiple MCP servers or mix with local tools:
+
+```python
+from ai_query import generate_text, openai, mcp, merge_tools, tool, Field
+
+# Define a local tool
+@tool(description="Calculate math expressions")
+def calculate(expr: str = Field(description="Math expression")) -> str:
+    return str(eval(expr))
+
+async def main():
+    # Connect to multiple MCP servers
+    async with mcp("python", "weather_server.py") as weather:
+        async with mcp("python", "search_server.py") as search:
+            # Merge all tool sources
+            all_tools = merge_tools(
+                {"calculator": calculate},  # Local tool
+                weather,                      # MCP server 1
+                search,                       # MCP server 2
+            )
+
+            result = await generate_text(
+                model=openai("gpt-4o"),
+                prompt="What's the weather in Tokyo, search for news, and calculate 100/4",
+                tools=all_tools,
+            )
+            print(result.text)
+```
+
+## Manual Connection Management
+
+For long-lived connections (e.g., in a web server), use the non-context-manager functions:
+
+```python
+from ai_query import connect_mcp, connect_mcp_sse, connect_mcp_http
+
+# Connect without context manager
+server = await connect_mcp("python", "server.py")
+
+try:
+    # Use server.tools for multiple requests
+    result1 = await generate_text(model=..., tools=server.tools, prompt="Query 1")
+    result2 = await generate_text(model=..., tools=server.tools, prompt="Query 2")
+finally:
+    # Always close when done
+    await server.close()
+```
+
+Available functions:
+- `connect_mcp()` - stdio transport
+- `connect_mcp_sse()` - SSE transport
+- `connect_mcp_http()` - Streamable HTTP transport
+
+## MCPServer Object
+
+When you connect to an MCP server, you get an `MCPServer` object:
+
+```python
+async with mcp("python", "server.py") as server:
+    # Available tools (ToolSet = dict[str, Tool])
+    print(server.tools)
+
+    # Raw tool definitions from the server
+    print(server.raw_tools)
+
+    # Transport type used
+    print(server.transport)  # "stdio", "sse", or "streamable_http"
+```
+
+## Creating an MCP Server
+
+Here's a simple example of creating an MCP server in Python:
+
+```python
+# my_server.py
+import asyncio
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
+
+server = Server("my-server")
+
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name="greet",
+            description="Greet someone by name",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name to greet"}
+                },
+                "required": ["name"]
+            }
+        )
+    ]
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    if name == "greet":
+        return [TextContent(type="text", text=f"Hello, {arguments['name']}!")]
+    return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Then use it with ai-query:
+
+```python
+async with mcp("python", "my_server.py") as server:
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        prompt="Greet Alice",
+        tools=server.tools,
+    )
+    print(result.text)  # "Hello, Alice!"
+```
+
+## Error Handling
+
+```python
+from ai_query import mcp
+
+try:
+    async with mcp("python", "nonexistent.py") as server:
+        ...
+except FileNotFoundError:
+    print("Server script not found")
+except ImportError:
+    print("MCP package not installed. Run: pip install ai-query[mcp]")
+except Exception as e:
+    print(f"Failed to connect: {e}")
+```
+
+## Best Practices
+
+1. **Use context managers** - They ensure proper cleanup of connections
+2. **Reuse connections** - For multiple requests, keep the connection open
+3. **Handle errors** - MCP servers can fail or timeout
+4. **Check available tools** - Print `server.tools.keys()` to see what's available
+5. **Use merge_tools** - Combine multiple sources cleanly
