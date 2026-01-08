@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.2.0
+
+- minor: Experimental MCP support, with stdio, sse and streamable http transport
+
 ## 1.1.0
 
 - minor: Refactor tool definition to use `@tool` decorator and `Field` for parameters, updating examples and adding new tests and agent
