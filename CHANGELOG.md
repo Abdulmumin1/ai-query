@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.3.0
+
+- minor: Added support for Stateful agents. Agent base class support persistence, message history, and lifecycle hooks
+
 ## 1.2.0
 
 - minor: Experimental MCP support, with stdio, sse and streamable http transport

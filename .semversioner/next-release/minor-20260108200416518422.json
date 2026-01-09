@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "Added support for Stateful agents. Agent base class support persistence, message history, and lifecycle hooks"
-}
