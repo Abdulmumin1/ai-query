@@ -138,18 +138,22 @@ Run any agent as a WebSocket server with one line:
 ```python
 from ai_query.agents import ChatAgent, InMemoryAgent
 
-class ChatRoom(ChatAgent, InMemoryAgent):
-    system = "You are helpful."
+class TaskAssistant(ChatAgent, InMemoryAgent):
+    system = "You are a helpful task assistant."
     
     async def on_message(self, connection, message):
         response = await self.chat(message)
         await connection.send(response)
 
 # Start the server!
-ChatRoom("my-room").serve(port=8080)
+TaskAssistant("assistant-1").serve(port=8080)
 ```
 
 Connect at `ws://localhost:8080/ws`.
+
+<Tip>
+**Need multiple independent agents?** Use [`serve_many()`](/core/agent-server) to route clients to different agent instances—perfect for per-user assistants or multi-tenant apps.
+</Tip>
 
 ### Broadcasting
 
@@ -546,6 +550,7 @@ class TaskAgent(SQLiteAgent):
 | `broadcast(message)` | Send to all WebSocket clients |
 | `stream_to_sse(event, data)` | Send SSE event to all SSE clients |
 | `serve(port, path)` | Start built-in WebSocket/SSE server |
+| `serve_many(port, config)` | Start multi-agent server (class method) |
 | `start()` | Initialize the agent |
 
 ### ChatAgent
@@ -562,4 +567,13 @@ class TaskAgent(SQLiteAgent):
 | `on_step_start(event)` | Hook called when AI step starts |
 | `on_step_finish(event)` | Hook called when AI step finishes |
 
+## Next Steps
 
+<CardGroup cols={2}>
+  <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
+    Run multiple independent agents on a single server with routing
+  </Card>
+  <Card title="Agent API Reference" icon="code" href="/api-reference/agent">
+    Full API documentation for the Agent class
+  </Card>
+</CardGroup>

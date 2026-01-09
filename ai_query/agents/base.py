@@ -317,3 +317,35 @@ class Agent(ABC, Generic[State]):
         """
         from ai_query.agents.server import run_agent_server_async
         await run_agent_server_async(self, host=host, port=port, path=path)
+    
+    @classmethod
+    def serve_many(
+        cls,
+        host: str = "localhost",
+        port: int = 8080,
+        config: "AgentServerConfig | None" = None,
+    ) -> None:
+        """Start a multi-agent server for this agent class.
+        
+        Each client connects to a unique agent instance via URL path:
+        - ws://{host}:{port}/agent/{agent_id}/ws (WebSocket)
+        - http://{host}:{port}/agent/{agent_id}/events (SSE)
+        - http://{host}:{port}/agent/{agent_id}/state (REST API)
+        
+        This is a blocking call that runs forever.
+        
+        Args:
+            host: Host to bind to (default: localhost).
+            port: Port to bind to (default: 8080).
+            config: Optional AgentServerConfig for lifecycle and security.
+        
+        Example:
+            class ChatRoom(ChatAgent, InMemoryAgent):
+                system = "You are helpful"
+            
+            # Clients connect to ws://localhost:8080/agent/room-1/ws
+            ChatRoom.serve_many(port=8080)
+        """
+        from ai_query.agents.router import AgentServer, AgentServerConfig
+        AgentServer(cls, config=config).serve(host=host, port=port)
+

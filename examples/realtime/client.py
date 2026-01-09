@@ -1,11 +1,11 @@
-"""WebSocket + SSE client for the real-time chat room.
+"""WebSocket + SSE client for the real-time task assistant.
 
 Usage:
-    uv run examples/realtime/client.py --username Alice
+    uv run examples/realtime/client.py --user alice
 
 Commands:
     - Type a message and press Enter to send
-    - Include @ai to get an AI response (streamed via SSE)
+    - AI responds to all messages (streamed via SSE)
     - Press Ctrl+C to quit
 """
 
@@ -14,8 +14,8 @@ import argparse
 import aiohttp
 
 
-async def main(username: str, host: str = "localhost", port: int = 8080):
-    ws_url = f"ws://{host}:{port}/ws?username={username}"
+async def main(user: str, host: str = "localhost", port: int = 8080):
+    ws_url = f"ws://{host}:{port}/ws?user={user}"
     sse_url = f"http://{host}:{port}/events"
     
     print(f"Connecting to {ws_url}...")
@@ -23,7 +23,7 @@ async def main(username: str, host: str = "localhost", port: int = 8080):
     
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(ws_url) as ws:
-            print("Connected! Type messages and press Enter. Use @ai to talk to the AI.\n")
+            print("Connected! Type messages and press Enter.\n")
             
             # Task to receive WebSocket messages
             async def receive_ws():
@@ -78,13 +78,14 @@ async def main(username: str, host: str = "localhost", port: int = 8080):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Chat room client")
-    parser.add_argument("--username", "-u", default="Anonymous", help="Your username")
+    parser = argparse.ArgumentParser(description="Task assistant client")
+    parser.add_argument("--user", "-u", default="anonymous", help="Your user ID")
     parser.add_argument("--host", default="localhost", help="Server host")
     parser.add_argument("--port", "-p", type=int, default=8080, help="Server port")
     args = parser.parse_args()
     
     try:
-        asyncio.run(main(args.username, args.host, args.port))
+        asyncio.run(main(args.user, args.host, args.port))
     except KeyboardInterrupt:
         print("\nDisconnected.")
+

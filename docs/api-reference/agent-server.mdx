@@ -1,0 +1,247 @@
+---
+title: "AgentServer"
+description: "API reference for multi-agent server with routing"
+---
+
+The `AgentServer` class manages multiple agent instances on a single server, routing clients to the correct agent based on URL path.
+
+## Import
+
+```python
+from ai_query.agents import AgentServer, AgentServerConfig
+```
+
+## AgentServerConfig
+
+Configuration dataclass for `AgentServer` lifecycle and security.
+
+```python
+@dataclass
+class AgentServerConfig:
+    # Lifecycle
+    idle_timeout: float | None = 300.0
+    max_agents: int | None = None
+    
+    # Security
+    auth: Callable[[Request], Awaitable[bool]] | None = None
+    allowed_origins: list[str] | None = None
+    
+    # Routes
+    base_path: str = "/agent"
+    enable_rest_api: bool = True
+    enable_list_agents: bool = False
+```
+
+### Parameters
+
+<ParamField path="idle_timeout" type="float | None" default="300.0">
+  Seconds before evicting idle agents (no connections). Set to `None` to disable auto-eviction.
+</ParamField>
+
+<ParamField path="max_agents" type="int | None" default="None">
+  Maximum concurrent agents. Returns 429 Too Many Requests if limit reached. `None` = unlimited.
+</ParamField>
+
+<ParamField path="auth" type="Callable[[Request], Awaitable[bool]] | None" default="None">
+  Async function to validate requests. Return `True` to allow, `False` to reject (401).
+</ParamField>
+
+<ParamField path="allowed_origins" type="list[str] | None" default="None">
+  CORS allowed origins. `None` = allow all (`*`).
+</ParamField>
+
+<ParamField path="base_path" type="str" default="/agent">
+  Base path for agent routes.
+</ParamField>
+
+<ParamField path="enable_rest_api" type="bool" default="True">
+  Enable REST endpoints (GET/PUT state, DELETE agent).
+</ParamField>
+
+<ParamField path="enable_list_agents" type="bool" default="False">
+  Enable `GET /agents` endpoint. Off by default for security.
+</ParamField>
+
+---
+
+## AgentServer
+
+```python
+class AgentServer(Generic[State]):
+    def __init__(
+        self,
+        agent_cls: type[Agent[State]],
+        config: AgentServerConfig | None = None,
+    )
+```
+
+### Parameters
+
+<ParamField path="agent_cls" type="type[Agent]" required>
+  The Agent class to instantiate for each ID.
+</ParamField>
+
+<ParamField path="config" type="AgentServerConfig | None">
+  Optional configuration. Uses defaults if not provided.
+</ParamField>
+
+---
+
+## Methods
+
+### get_or_create
+
+```python
+def get_or_create(self, agent_id: str) -> Agent[State]
+```
+
+Get or lazily create an agent by ID.
+
+**Raises:** `HTTPTooManyRequests` if `max_agents` limit is reached.
+
+### evict
+
+```python
+async def evict(self, agent_id: str) -> None
+```
+
+Evict an agent, closing all connections and removing it from the registry.
+
+### list_agents
+
+```python
+def list_agents(self) -> list[str]
+```
+
+Return list of active agent IDs.
+
+### serve
+
+```python
+def serve(
+    self,
+    host: str = "localhost",
+    port: int = 8080,
+) -> None
+```
+
+Start the multi-agent server (blocking).
+
+### serve_async
+
+```python
+async def serve_async(
+    self,
+    host: str = "localhost",
+    port: int = 8080,
+) -> None
+```
+
+Start the multi-agent server (async).
+
+---
+
+## Lifecycle Hooks
+
+Override these methods in a subclass for custom behavior:
+
+### on_agent_create
+
+```python
+async def on_agent_create(self, agent: Agent) -> None
+```
+
+Called when a new agent is created (on first connection).
+
+### on_agent_evict
+
+```python
+async def on_agent_evict(self, agent: Agent) -> None
+```
+
+Called when an agent is about to be evicted.
+
+---
+
+## Endpoints
+
+When the server is running:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `{base_path}/{id}/ws` | WebSocket connection |
+| GET | `{base_path}/{id}/events` | SSE stream |
+| GET | `{base_path}/{id}/state` | Get agent state |
+| PUT | `{base_path}/{id}/state` | Update agent state |
+| DELETE | `{base_path}/{id}` | Evict agent |
+| GET | `/agents` | List agents (if enabled) |
+
+---
+
+## Agent.serve_many
+
+Convenience class method on `Agent` to start a multi-agent server:
+
+```python
+@classmethod
+def serve_many(
+    cls,
+    host: str = "localhost",
+    port: int = 8080,
+    config: AgentServerConfig | None = None,
+) -> None
+```
+
+Equivalent to:
+```python
+AgentServer(cls, config=config).serve(host=host, port=port)
+```
+
+---
+
+## Example
+
+### Basic Usage
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent, AgentServer
+
+class MyAgent(ChatAgent, InMemoryAgent):
+    system = "You are helpful."
+
+# These are equivalent:
+MyAgent.serve_many(port=8080)
+# or
+AgentServer(MyAgent).serve(port=8080)
+```
+
+### With Configuration
+
+```python
+from ai_query.agents import AgentServer, AgentServerConfig
+
+async def auth(request):
+    return request.headers.get("X-API-Key") == "secret"
+
+config = AgentServerConfig(
+    idle_timeout=600,
+    max_agents=50,
+    auth=auth,
+    allowed_origins=["https://myapp.com"],
+)
+
+AgentServer(MyAgent, config=config).serve(port=8080)
+```
+
+### Custom Server with Hooks
+
+```python
+class MyServer(AgentServer):
+    async def on_agent_create(self, agent):
+        print(f"Agent {agent.id} created")
+    
+    async def on_agent_evict(self, agent):
+        print(f"Agent {agent.id} evicted")
+
+MyServer(MyAgent, config=config).serve(port=8080)
+```

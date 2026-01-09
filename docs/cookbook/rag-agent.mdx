@@ -1,0 +1,213 @@
+---
+title: "RAG Agent"
+description: "Build a retrieval-augmented generation agent with search tools"
+---
+
+Build an AI agent that retrieves relevant information before answering, reducing hallucinations and providing accurate, sourced responses.
+
+## The Pattern
+
+Give the AI a search tool to retrieve information, then let it synthesize a response from the results.
+
+```python
+from ai_query import generate_text, google, tool, Field
+
+# Your retrieval function (could be vector DB, search API, etc.)
+async def search_documents(query: str) -> list[str]:
+    # Replace with your actual retrieval logic
+    return ["Document 1 content...", "Document 2 content..."]
+
+@tool(description="Search the knowledge base for relevant information")
+async def search(query: str = Field(description="Search query")) -> str:
+    results = await search_documents(query)
+    return "\n\n".join([f"[Result {i+1}]: {r}" for i, r in enumerate(results)])
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="""You are a helpful assistant with access to a knowledge base.
+    Always search for information before answering questions.
+    Cite your sources in your response.""",
+    prompt="What is our company's refund policy?",
+    tools={"search": search},
+)
+print(result.text)
+```
+
+## Complete Example: Documentation Assistant
+
+A full RAG agent that answers questions about your documentation:
+
+```python
+import asyncio
+from ai_query import generate_text, google, tool, Field, step_count_is
+
+# Simulated document store (replace with your vector DB)
+DOCS = {
+    "installation": "To install ai-query, run: pip install ai-query",
+    "quickstart": "Import with: from ai_query import generate_text",
+    "streaming": "Use stream_text() for streaming responses",
+    "tools": "Define tools with @tool decorator and Field() for parameters",
+    "agents": "Use Agent class for stateful, persistent AI agents",
+}
+
+def simple_search(query: str, top_k: int = 3) -> list[tuple[str, str]]:
+    """Simple keyword search (replace with vector similarity)."""
+    query_words = set(query.lower().split())
+    scores = []
+    for title, content in DOCS.items():
+        doc_words = set((title + " " + content).lower().split())
+        score = len(query_words & doc_words)
+        scores.append((score, title, content))
+    scores.sort(reverse=True)
+    return [(title, content) for _, title, content in scores[:top_k]]
+
+
+class DocsAssistant:
+    def __init__(self):
+        self.context = []
+    
+    async def answer(self, question: str) -> str:
+        @tool(description="Search the documentation for relevant information")
+        async def search_docs(
+            query: str = Field(description="Search query for documentation"),
+        ) -> str:
+            results = simple_search(query)
+            self.context = results
+            if not results:
+                return "No relevant documentation found."
+            return "\n\n".join([
+                f"**{title}**: {content}" 
+                for title, content in results
+            ])
+        
+        result = await generate_text(
+            model=google("gemini-2.0-flash"),
+            system="""You are a documentation assistant for ai-query.
+            
+            Instructions:
+            1. Search the docs to find relevant information
+            2. Answer the user's question based on the search results
+            3. If you can't find the answer, say so
+            4. Cite which docs you used""",
+            prompt=question,
+            tools={"search_docs": search_docs},
+            stop_when=step_count_is(3),
+        )
+        
+        return result.text
+
+
+async def main():
+    assistant = DocsAssistant()
+    
+    # Ask questions
+    questions = [
+        "How do I install this library?",
+        "How do I create streaming responses?",
+        "What are agents used for?",
+    ]
+    
+    for q in questions:
+        print(f"\n**Q: {q}**")
+        answer = await assistant.answer(q)
+        print(f"A: {answer}\n")
+        print("-" * 50)
+
+asyncio.run(main())
+```
+
+## Multi-Source RAG
+
+Search multiple sources and combine results:
+
+```python
+from ai_query import generate_text, google, tool, Field, step_count_is
+
+@tool(description="Search internal documentation")
+async def search_docs(query: str = Field(description="Search query")) -> str:
+    # Your docs search
+    return "Documentation results..."
+
+@tool(description="Search support tickets and past issues")
+async def search_tickets(query: str = Field(description="Search query")) -> str:
+    # Your ticket search
+    return "Ticket search results..."
+
+@tool(description="Search the FAQ database")
+async def search_faq(query: str = Field(description="Search query")) -> str:
+    # Your FAQ search
+    return "FAQ results..."
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="""You are a support agent. Use the available search tools to find 
+    relevant information before answering. You can search multiple sources.""",
+    prompt="How do I reset my password?",
+    tools={
+        "search_docs": search_docs,
+        "search_tickets": search_tickets,
+        "search_faq": search_faq,
+    },
+    stop_when=step_count_is(5),
+)
+```
+
+## With Citations
+
+Track which documents were used:
+
+```python
+from ai_query import generate_text, google, tool, Field, has_tool_call
+
+citations = []
+
+@tool(description="Search and retrieve relevant documents")
+async def retrieve(query: str = Field(description="Search query")) -> str:
+    results = await vector_search(query)
+    for doc in results:
+        citations.append({"id": doc.id, "title": doc.title, "url": doc.url})
+    return "\n".join([f"[{doc.id}] {doc.content}" for doc in results])
+
+@tool(description="Submit the final answer with citations")
+def answer(
+    response: str = Field(description="The answer text"),
+    sources: list[str] = Field(description="List of document IDs used"),
+) -> str:
+    return response
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="Search for information, then submit your answer with source citations.",
+    prompt=question,
+    tools={"retrieve": retrieve, "answer": answer},
+    stop_when=has_tool_call("answer"),
+)
+
+# Access final answer and citations
+final_answer = result.steps[-1].tool_calls[0].args
+print(f"Answer: {final_answer['response']}")
+print(f"Sources: {final_answer['sources']}")
+```
+
+## Tips
+
+<AccordionGroup>
+  <Accordion title="Use vector search for better retrieval">
+    Simple keyword matching works for demos, but use embeddings and vector 
+    similarity for production RAG systems.
+  </Accordion>
+  
+  <Accordion title="Limit context size">
+    Only include the most relevant chunks to avoid hitting context limits
+    and to keep responses focused.
+  </Accordion>
+  
+  <Accordion title="Let the AI decide what to search">
+    Don't pre-search—let the AI formulate its own queries based on the 
+    user's question for better results.
+  </Accordion>
+  
+  <Accordion title="Add source metadata">
+    Include document titles, URLs, and IDs so the AI can cite sources.
+  </Accordion>
+</AccordionGroup>

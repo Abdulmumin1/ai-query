@@ -1,0 +1,279 @@
+---
+title: "Multi-Agent Server"
+description: "Run multiple independent agent instances on a single server with routing"
+---
+
+Run multiple independent agent instances on a single server. Each client connects to their own isolated agent via URL path—perfect for per-user assistants, task workers, or multi-tenant AI services.
+
+## Quick Start
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent
+
+class TaskAgent(ChatAgent, InMemoryAgent):
+    system = "You are a task execution assistant."
+    initial_state = {"tasks_completed": 0}
+
+# Start multi-agent server
+TaskAgent.serve_many(port=8080)
+
+# Clients connect to independent agents:
+# ws://localhost:8080/agent/user-alice/ws
+# ws://localhost:8080/agent/worker-1/ws
+# Each agent is completely isolated
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Per-User Assistants" icon="user">
+    Each user gets their own AI with isolated state and history
+  </Card>
+  <Card title="Task Workers" icon="robot">
+    Spawn independent agents for parallel task execution
+  </Card>
+  <Card title="Multi-Tenant APIs" icon="building">
+    Isolate AI state per customer or organization
+  </Card>
+  <Card title="Session Agents" icon="clock">
+    Create agents for specific workflows or sessions
+  </Card>
+</CardGroup>
+
+## Architecture
+
+```
+Single Server ──► Agent Router ──┬──► Agent "user-alice" (state, tools, history)
+                                 ├──► Agent "user-bob" (state, tools, history)
+                                 └──► Agent "worker-1" (state, tools, history)
+```
+
+## Two Ways to Start
+
+### Option 1: `serve_many()` Class Method
+
+The simplest way—call directly on your agent class:
+
+```python
+TaskAgent.serve_many(port=8080)
+```
+
+### Option 2: `AgentServer` Class
+
+For more control over configuration:
+
+```python
+from ai_query.agents import AgentServer, AgentServerConfig
+
+config = AgentServerConfig(
+    idle_timeout=300,     # Evict after 5 min idle
+    max_agents=100,       # Max 100 concurrent agents
+    enable_rest_api=True, # Enable state REST endpoints
+)
+
+AgentServer(TaskAgent, config=config).serve(port=8080)
+```
+
+## Endpoints
+
+| Endpoint | Type | Description |
+|----------|------|-------------|
+| `/agent/{id}/ws` | WebSocket | Bidirectional communication |
+| `/agent/{id}/events` | SSE | AI streaming (server-sent events) |
+| `/agent/{id}/state` | REST | Get/PUT agent state |
+| `/agent/{id}` | REST | DELETE to evict agent |
+| `/agents` | REST | List active agents (if enabled) |
+
+## Configuration Options
+
+```python
+from ai_query.agents import AgentServerConfig
+
+config = AgentServerConfig(
+    # Lifecycle
+    idle_timeout=300.0,       # Seconds before evicting idle agents (None = never)
+    max_agents=None,          # Max concurrent agents (None = unlimited)
+    
+    # Security
+    auth=my_auth_function,    # Async auth middleware (see below)
+    allowed_origins=["https://myapp.com"],  # CORS origins
+    
+    # Routes
+    base_path="/agent",       # Base path for routes
+    enable_rest_api=True,     # Enable state REST endpoints
+    enable_list_agents=False, # Enable /agents (off by default - security)
+)
+```
+
+## Authentication
+
+Add authentication by providing an async function that returns `True` (allow) or `False` (reject):
+
+```python
+async def api_key_auth(request):
+    """Simple API key authentication."""
+    key = request.headers.get("X-API-Key")
+    return key == "your-secret-key"
+
+config = AgentServerConfig(auth=api_key_auth)
+```
+
+### Per-Agent Authorization
+
+```python
+async def per_agent_auth(request):
+    """Check if user can access this specific agent."""
+    agent_id = request.match_info["agent_id"]
+    user = await get_user_from_token(request)
+    
+    # Only allow access to user's own agents
+    return agent_id.startswith(f"user-{user.id}-")
+
+config = AgentServerConfig(auth=per_agent_auth)
+```
+
+## Lifecycle Management
+
+### Idle Timeout
+
+Agents with no connections are automatically evicted after `idle_timeout` seconds:
+
+```python
+config = AgentServerConfig(idle_timeout=600)  # 10 minutes
+```
+
+### Max Agents Limit
+
+Reject new agents when limit is reached (returns 429 Too Many Requests):
+
+```python
+config = AgentServerConfig(max_agents=100)
+```
+
+### Lifecycle Hooks
+
+Override hooks on `AgentServer` for custom logic:
+
+```python
+class MyServer(AgentServer):
+    async def on_agent_create(self, agent):
+        print(f"Created agent: {agent.id}")
+    
+    async def on_agent_evict(self, agent):
+        print(f"Evicting agent: {agent.id}")
+        # Save important data before eviction
+
+MyServer(TaskAgent, config=config).serve(port=8080)
+```
+
+## Complete Example: Per-User Research Assistant
+
+Each user gets their own AI research assistant with persistent findings:
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent, AgentServer, AgentServerConfig
+from ai_query import tool, Field
+from ai_query.providers.google import google
+
+class ResearchAssistant(ChatAgent, InMemoryAgent):
+    model = google("gemini-2.0-flash")
+    system = "You are a research assistant. Help users research topics and save findings."
+    
+    initial_state = {
+        "findings": [],
+        "total_queries": 0,
+    }
+    
+    @property
+    def tools(self):
+        @tool(description="Save an important research finding")
+        async def save_finding(
+            topic: str = Field(description="Topic of the finding"),
+            finding: str = Field(description="The finding to save"),
+        ) -> str:
+            findings = self.state["findings"] + [{"topic": topic, "finding": finding}]
+            await self.set_state({**self.state, "findings": findings})
+            return f"Saved finding #{len(findings)}"
+        
+        @tool(description="List all saved findings")
+        async def list_findings() -> str:
+            if not self.state["findings"]:
+                return "No findings saved yet."
+            return "\n".join([f"- [{f['topic']}] {f['finding']}" for f in self.state["findings"]])
+        
+        return {"save_finding": save_finding, "list_findings": list_findings}
+    
+    async def on_connect(self, connection, ctx):
+        await super().on_connect(connection, ctx)
+        findings_count = len(self.state["findings"])
+        if findings_count > 0:
+            await connection.send(f"Welcome back! You have {findings_count} saved findings.")
+        else:
+            await connection.send("Hello! I can help you research topics.")
+    
+    async def on_message(self, connection, message):
+        await self.set_state({**self.state, "total_queries": self.state["total_queries"] + 1})
+        response = await self.stream_chat_sse(message)
+        await connection.send(response)
+
+
+if __name__ == "__main__":
+    config = AgentServerConfig(idle_timeout=600, max_agents=50)
+    AgentServer(ResearchAssistant, config=config).serve(port=8080)
+```
+
+## Example: Parallel Task Workers
+
+Spawn independent agents to execute tasks in parallel:
+
+```python
+from ai_query.agents import ChatAgent, SQLiteAgent, AgentServer, AgentServerConfig
+from ai_query import tool, Field
+
+class TaskWorker(ChatAgent, SQLiteAgent):
+    db_path = "./workers.db"
+    system = "You execute tasks step by step. Report progress and mark complete when done."
+    initial_state = {"status": "idle", "steps_completed": []}
+    
+    @property
+    def tools(self):
+        @tool(description="Execute a step of the task")
+        async def execute_step(step: str = Field(description="Step to execute")) -> str:
+            steps = self.state["steps_completed"] + [step]
+            await self.set_state({**self.state, "steps_completed": steps, "status": "working"})
+            return f"Completed step {len(steps)}: {step}"
+        
+        @tool(description="Mark the task as complete")
+        async def complete_task(summary: str = Field(description="Task summary")) -> str:
+            await self.set_state({**self.state, "status": "complete"})
+            return f"Task complete: {summary}"
+        
+        return {"execute_step": execute_step, "complete_task": complete_task}
+
+# Start worker pool
+AgentServer(TaskWorker).serve(port=8080)
+
+# Create workers programmatically:
+# POST to ws://localhost:8080/agent/task-001/ws with task instructions
+# Each task-XXX gets its own isolated worker
+```
+
+## Comparison
+
+| Feature | `agent.serve()` | `serve_many()` / `AgentServer` |
+|---------|-----------------|--------------------------------|
+| Agent instances | Single | Multiple (routed by ID) |
+| Endpoint | `/ws` | `/agent/{id}/ws` |
+| State isolation | One shared state | Each agent has own state |
+| Use case | Single assistant | Multi-user, multi-tenant, task workers |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/api-reference/agent-server">
+    Full AgentServer and AgentServerConfig API
+  </Card>
+  <Card title="Stateful Agents" icon="database" href="/core/stateful-agents">
+    Learn about agent state and storage backends
+  </Card>
+</CardGroup>
