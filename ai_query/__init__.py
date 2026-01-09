@@ -317,9 +317,9 @@ async def generate_text(
             content=tool_result_parts,
         ))
 
-    # Store steps in the response for access
+    # Store steps in the result for access
     if final_result:
-        final_result.response["steps"] = steps
+        final_result.steps = steps
         return final_result
 
     # Fallback (shouldn't reach here)
@@ -407,10 +407,13 @@ def stream_text(
     # If no stop condition provided, default to step_count_is(1)
     if not stop_conditions:
         stop_conditions = [step_count_is(1)]
+    # Shared steps list - populated by generator, accessible from result
+    shared_steps: list[StepResult] = []
 
     async def _stream_generator() -> AsyncIterator[StreamChunk]:
         """Generator that handles the tool execution loop."""
-        steps: list[StepResult] = []
+        nonlocal shared_steps
+        steps: list[StepResult] = shared_steps  # Use the shared list
         current_messages = list(final_messages)
         total_usage = Usage()
         accumulated_text = ""
@@ -452,17 +455,17 @@ def stream_text(
                         total_usage.output_tokens += chunk.usage.output_tokens
                         total_usage.cached_tokens += chunk.usage.cached_tokens
                         total_usage.total_tokens += chunk.usage.total_tokens
-
                     step_finish_reason = chunk.finish_reason
-                    step_tool_calls = chunk.tool_calls or []
+                    if chunk.tool_calls:
+                        step_tool_calls = chunk.tool_calls
                 else:
-                    # Yield text chunks immediately
+                    # Yield text chunk
                     if chunk.text:
                         step_text += chunk.text
                         accumulated_text += chunk.text
-                        yield chunk
+                        yield StreamChunk(text=chunk.text)
 
-            # Create step result for stop conditions
+            # Create step result
             step = StepResult(
                 text=step_text,
                 tool_calls=step_tool_calls,
@@ -487,6 +490,7 @@ def stream_text(
                     if inspect.isawaitable(callback_result):
                         await callback_result
 
+                # Yield final chunk with usage
                 yield StreamChunk(
                     is_final=True,
                     usage=total_usage,
@@ -497,7 +501,7 @@ def stream_text(
             # Execute tools
             tool_results: list[ToolResult] = []
             for tc in step_tool_calls:
-                tool_def = tools.get(tc.name)
+                tool_def = tools.get(tc.name) if tools else None
                 if tool_def is None:
                     tool_results.append(ToolResult(
                         tool_call_id=tc.id,
@@ -518,10 +522,11 @@ def stream_text(
                     tool_results.append(ToolResult(
                         tool_call_id=tc.id,
                         tool_name=tc.name,
-                        result=f"Error: {e}",
+                        result=f"Error: {str(e)}",
                         is_error=True,
                     ))
 
+            # Update step with tool results
             step.tool_results = tool_results
             steps.append(step)
 
@@ -574,8 +579,8 @@ def stream_text(
                 content=tool_result_parts,
             ))
 
-    # Return TextStreamResult wrapping the generator
-    return TextStreamResult(_stream_generator())
+    # Return TextStreamResult wrapping the generator with shared steps
+    return TextStreamResult(_stream_generator(), steps=shared_steps)
 
 
 __all__ = [

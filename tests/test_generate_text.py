@@ -168,8 +168,8 @@ class TestGenerateTextWithTools:
 
         assert "5" in result.text
         assert provider.call_count == 2
-        assert "steps" in result.response
-        assert len(result.response["steps"]) == 2
+        assert len(result.steps) > 0
+        assert len(result.steps) == 2
 
     @pytest.mark.asyncio
     async def test_multiple_tool_calls(self):
@@ -230,7 +230,7 @@ class TestGenerateTextWithTools:
         )
 
         # Should not crash, should report error
-        steps = result.response["steps"]
+        steps = result.steps
         assert any(
             any(tr.is_error for tr in step.tool_results)
             for step in steps
@@ -265,7 +265,7 @@ class TestGenerateTextWithTools:
 
         # Should not crash
         assert result.text is not None
-        steps = result.response["steps"]
+        steps = result.steps
         assert any(
             any(tr.is_error for tr in step.tool_results)
             for step in steps
@@ -338,7 +338,7 @@ class TestGenerateTextStopConditions:
         )
 
         # Should stop after 3 steps
-        assert len(result.response["steps"]) == 3
+        assert len(result.steps) == 3
 
     @pytest.mark.asyncio
     async def test_stop_when_has_tool_call(self):
@@ -375,7 +375,7 @@ class TestGenerateTextStopConditions:
         )
 
         # Should stop when "done" is called
-        assert len(result.response["steps"]) == 2
+        assert len(result.steps) == 2
 
     @pytest.mark.asyncio
     async def test_multiple_stop_conditions(self):
@@ -404,7 +404,7 @@ class TestGenerateTextStopConditions:
         )
 
         # Should stop at 5 (step_count condition met first)
-        assert len(result.response["steps"]) == 5
+        assert len(result.steps) == 5
 
     @pytest.mark.asyncio
     async def test_default_stop_condition(self):
@@ -430,7 +430,7 @@ class TestGenerateTextStopConditions:
         )
 
         # Should stop at default 1
-        assert len(result.response["steps"]) == 1
+        assert len(result.steps) == 1
 
 
 # =============================================================================
