@@ -1,0 +1,203 @@
+---
+title: "Structured Output"
+description: "Get typed, structured JSON responses from AI models"
+---
+
+Use tools to get structured, typed responses that you can parse reliably.
+
+## The Pattern
+
+Instead of parsing free-form text, define a tool that captures the exact structure you need. The AI will call it with structured data.
+
+```python
+from ai_query import generate_text, google, tool, Field, has_tool_call
+
+@tool(description="Submit the extracted data")
+def submit_result(
+    name: str = Field(description="Person's full name"),
+    email: str = Field(description="Email address"),
+    company: str = Field(description="Company name"),
+    role: str = Field(description="Job title/role"),
+) -> str:
+    return "Received"
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="""Extract contact info from this text:
+    
+    Hi, I'm Sarah Chen from Acme Corp. I'm the VP of Engineering.
+    Reach me at sarah.chen@acme.com for any questions.""",
+    tools={"submit_result": submit_result},
+    stop_when=has_tool_call("submit_result"),
+)
+
+# Access the structured data
+tool_call = result.steps[-1].tool_calls[0]
+print(tool_call.args)
+# {'name': 'Sarah Chen', 'email': 'sarah.chen@acme.com', 
+#  'company': 'Acme Corp', 'role': 'VP of Engineering'}
+```
+
+## Complete Example: Data Extraction Pipeline
+
+Extract structured data from unstructured text:
+
+```python
+import asyncio
+from dataclasses import dataclass
+from ai_query import generate_text, google, tool, Field, has_tool_call
+
+@dataclass
+class Product:
+    name: str
+    price: float
+    category: str
+    features: list[str]
+
+async def extract_product(text: str) -> Product:
+    """Extract product info from description text."""
+    
+    result_data = {}
+    
+    @tool(description="Submit the extracted product information")
+    def submit_product(
+        name: str = Field(description="Product name"),
+        price: float = Field(description="Price in USD"),
+        category: str = Field(description="Product category"),
+        features: list[str] = Field(description="Key features"),
+    ) -> str:
+        result_data.update({
+            "name": name,
+            "price": price,
+            "category": category,
+            "features": features,
+        })
+        return "Received"
+    
+    await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="Extract product information. Call submit_product with the data.",
+        prompt=text,
+        tools={"submit_product": submit_product},
+        stop_when=has_tool_call("submit_product"),
+    )
+    
+    return Product(**result_data)
+
+
+async def main():
+    text = """
+    Introducing the UltraBook Pro 15!
+    
+    This premium laptop features a stunning 15.6" 4K display,
+    Intel i9 processor, 32GB RAM, and 1TB SSD storage.
+    Perfect for creative professionals and developers.
+    
+    Price: $1,899.99
+    """
+    
+    product = await extract_product(text)
+    print(f"Name: {product.name}")
+    print(f"Price: ${product.price}")
+    print(f"Category: {product.category}")
+    print(f"Features: {product.features}")
+
+asyncio.run(main())
+```
+
+## Classification
+
+Use structured output for classification tasks:
+
+```python
+from ai_query import generate_text, google, tool, Field, has_tool_call
+from enum import Enum
+
+class Sentiment(Enum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    NEUTRAL = "neutral"
+
+async def classify_sentiment(text: str) -> tuple[Sentiment, float]:
+    """Classify sentiment with confidence score."""
+    
+    result = {}
+    
+    @tool(description="Submit the sentiment classification")
+    def classify(
+        sentiment: str = Field(description="One of: positive, negative, neutral"),
+        confidence: float = Field(description="Confidence score 0-1"),
+        reasoning: str = Field(description="Brief explanation"),
+    ) -> str:
+        result["sentiment"] = sentiment
+        result["confidence"] = confidence
+        result["reasoning"] = reasoning
+        return "Classified"
+    
+    await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="Classify the sentiment of the text. Be precise.",
+        prompt=text,
+        tools={"classify": classify},
+        stop_when=has_tool_call("classify"),
+    )
+    
+    return Sentiment(result["sentiment"]), result["confidence"]
+
+
+# Usage
+sentiment, confidence = await classify_sentiment(
+    "This product exceeded my expectations! Amazing quality."
+)
+print(f"{sentiment.value} ({confidence:.0%} confident)")
+# positive (95% confident)
+```
+
+## Multiple Extractions
+
+Extract multiple items from a document:
+
+```python
+@tool(description="Add an extracted item to the list")
+def add_item(
+    item_name: str = Field(description="Name of the item"),
+    quantity: int = Field(description="Quantity"),
+    unit_price: float = Field(description="Price per unit"),
+) -> str:
+    items.append({"name": item_name, "qty": quantity, "price": unit_price})
+    return f"Added {item_name}"
+
+@tool(description="Finish extraction when all items are added")
+def finish() -> str:
+    return "Done"
+
+items = []
+await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="Extract all items from the invoice. Add each with add_item, then call finish.",
+    prompt=invoice_text,
+    tools={"add_item": add_item, "finish": finish},
+    stop_when=has_tool_call("finish"),
+)
+print(items)
+```
+
+## Tips
+
+<AccordionGroup>
+  <Accordion title="Use clear field descriptions">
+    The AI uses field descriptions to understand what to extract. Be specific.
+  </Accordion>
+  
+  <Accordion title="Use has_tool_call to stop">
+    Stop the loop when your extraction tool is called to avoid extra processing.
+  </Accordion>
+  
+  <Accordion title="Capture data via closure">
+    Use a mutable dict or list in the outer scope to capture the tool's arguments.
+  </Accordion>
+  
+  <Accordion title="Validate the output">
+    Always validate extracted data before using it in production.
+  </Accordion>
+</AccordionGroup>

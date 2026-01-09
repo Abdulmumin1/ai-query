@@ -22,15 +22,21 @@
             ]
           },
           {
-            "group": "Core",
+            "group": "Core Concepts",
             "pages": [
               "core/generate-text",
-              "core/conversations",
               "core/streaming",
+              "core/conversations",
               "core/tools",
               "core/agents",
-              "core/stateful-agents",
               "core/mcp"
+            ]
+          },
+          {
+            "group": "Stateful Agents",
+            "pages": [
+              "core/stateful-agents",
+              "core/agent-server"
             ]
           },
           {
@@ -59,7 +65,8 @@
             "pages": [
               "api-reference/agent",
               "api-reference/chat-agent",
-              "api-reference/agent-backends"
+              "api-reference/agent-backends",
+              "api-reference/agent-server"
             ]
           },
           {
@@ -90,7 +97,8 @@
             "pages": [
               "cookbook/index",
               "cookbook/chatbot",
-              "cookbook/multimodal-chatbot"
+              "cookbook/multimodal-chatbot",
+              "cookbook/structured-output"
             ]
           },
           {
@@ -98,7 +106,9 @@
             "pages": [
               "cookbook/wikipedia-agent",
               "cookbook/task-planner",
-              "cookbook/code-executor"
+              "cookbook/code-executor",
+              "cookbook/rag-agent",
+              "cookbook/multi-agent-workflow"
             ]
           },
           {
@@ -107,6 +117,7 @@
               "cookbook/simple-stateful-agent",
               "cookbook/persistent-chatbot",
               "cookbook/realtime-agent",
+              "cookbook/per-user-assistant",
               "cookbook/custom-agent-streaming",
               "cookbook/mcp-agent"
             ]

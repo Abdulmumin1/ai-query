@@ -1,0 +1,270 @@
+---
+title: "Multi-Agent Workflow"
+description: "Coordinate multiple specialized agents to complete complex tasks"
+---
+
+Build workflows where multiple specialized agents collaborate to complete complex tasks.
+
+## The Pattern
+
+Create specialized agents for different tasks, then orchestrate them with a coordinator:
+
+```python
+from ai_query import generate_text, google, tool, Field
+
+# Specialized "agents" as tools
+@tool(description="Research agent: searches and gathers information")
+async def researcher(topic: str = Field(description="Topic to research")) -> str:
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="You are a research specialist. Provide detailed findings.",
+        prompt=f"Research: {topic}",
+    )
+    return result.text
+
+@tool(description="Writer agent: creates content from research")
+async def writer(
+    topic: str = Field(description="Topic"),
+    research: str = Field(description="Research findings to use"),
+) -> str:
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="You are a content writer. Create engaging content.",
+        prompt=f"Write about {topic} using this research:\n{research}",
+    )
+    return result.text
+
+# Coordinator orchestrates the workflow
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="""You are a project coordinator. To complete tasks:
+    1. Use the researcher to gather information
+    2. Use the writer to create the final content
+    3. Return the final result""",
+    prompt="Create a blog post about renewable energy trends in 2024",
+    tools={"researcher": researcher, "writer": writer},
+)
+```
+
+## Complete Example: Content Pipeline
+
+A full content creation pipeline with research, writing, and editing:
+
+```python
+import asyncio
+from ai_query import generate_text, google, tool, Field, step_count_is
+
+class ContentPipeline:
+    """Multi-agent content creation pipeline."""
+    
+    def __init__(self):
+        self.research_data = None
+        self.draft = None
+        self.final = None
+    
+    async def create_content(self, topic: str) -> str:
+        @tool(description="Research agent: gathers comprehensive information on a topic")
+        async def research(
+            query: str = Field(description="What to research"),
+        ) -> str:
+            result = await generate_text(
+                model=google("gemini-2.0-flash"),
+                system="""You are a thorough researcher. Provide:
+                - Key facts and statistics
+                - Recent developments
+                - Expert opinions
+                - Relevant examples""",
+                prompt=query,
+            )
+            self.research_data = result.text
+            return f"Research complete. Key findings:\n{result.text}"
+        
+        @tool(description="Writer agent: creates a well-structured draft")
+        async def write_draft(
+            topic: str = Field(description="Topic to write about"),
+            research: str = Field(description="Research to incorporate"),
+        ) -> str:
+            result = await generate_text(
+                model=google("gemini-2.0-flash"),
+                system="""You are a skilled writer. Create engaging, 
+                well-structured content with clear sections.""",
+                prompt=f"Write about: {topic}\n\nUsing research:\n{research}",
+            )
+            self.draft = result.text
+            return f"Draft created:\n{result.text}"
+        
+        @tool(description="Editor agent: refines and polishes the draft")
+        async def edit(
+            draft: str = Field(description="Draft to edit"),
+        ) -> str:
+            result = await generate_text(
+                model=google("gemini-2.0-flash"),
+                system="""You are an editor. Improve the text by:
+                - Fixing any errors
+                - Improving clarity and flow
+                - Strengthening the opening and closing
+                - Adding transitions between sections""",
+                prompt=f"Edit this draft:\n{draft}",
+            )
+            self.final = result.text
+            return f"Editing complete:\n{result.text}"
+        
+        @tool(description="Mark the content as complete and ready for publication")
+        def complete(final_content: str = Field(description="Final content")) -> str:
+            self.final = final_content
+            return "Content pipeline complete!"
+        
+        await generate_text(
+            model=google("gemini-2.0-flash"),
+            system="""You are a content pipeline coordinator.
+            
+            Follow this workflow:
+            1. Research the topic thoroughly
+            2. Write a draft using the research
+            3. Edit and polish the draft
+            4. Call complete with the final content
+            
+            Each agent specializes in their task. Use them in order.""",
+            prompt=f"Create high-quality content about: {topic}",
+            tools={
+                "research": research,
+                "write_draft": write_draft,
+                "edit": edit,
+                "complete": complete,
+            },
+            stop_when=step_count_is(6),
+        )
+        
+        return self.final
+
+
+async def main():
+    pipeline = ContentPipeline()
+    content = await pipeline.create_content(
+        "The impact of AI on software development in 2024"
+    )
+    print(content)
+
+asyncio.run(main())
+```
+
+## Parallel Agent Execution
+
+Run multiple agents in parallel for faster results:
+
+```python
+import asyncio
+from ai_query import generate_text, google, tool, Field
+
+async def analyze_with_specialists(data: str) -> dict:
+    """Run multiple specialist analyses in parallel."""
+    
+    async def technical_analysis(data: str) -> str:
+        result = await generate_text(
+            model=google("gemini-2.0-flash"),
+            system="You are a technical analyst. Focus on technical details.",
+            prompt=data,
+        )
+        return result.text
+    
+    async def market_analysis(data: str) -> str:
+        result = await generate_text(
+            model=google("gemini-2.0-flash"),
+            system="You are a market analyst. Focus on market implications.",
+            prompt=data,
+        )
+        return result.text
+    
+    async def risk_analysis(data: str) -> str:
+        result = await generate_text(
+            model=google("gemini-2.0-flash"),
+            system="You are a risk analyst. Identify potential risks.",
+            prompt=data,
+        )
+        return result.text
+    
+    # Run all analyses in parallel
+    technical, market, risk = await asyncio.gather(
+        technical_analysis(data),
+        market_analysis(data),
+        risk_analysis(data),
+    )
+    
+    return {
+        "technical": technical,
+        "market": market,
+        "risk": risk,
+    }
+
+# Use results in a synthesizer
+@tool(description="Get specialist analyses on a topic")
+async def get_analyses(topic: str = Field(description="Topic")) -> str:
+    analyses = await analyze_with_specialists(topic)
+    return f"""
+    Technical Analysis: {analyses['technical']}
+    
+    Market Analysis: {analyses['market']}
+    
+    Risk Analysis: {analyses['risk']}
+    """
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="Synthesize the specialist analyses into a comprehensive report.",
+    prompt="Analyze: Cloud computing migration strategy",
+    tools={"get_analyses": get_analyses},
+)
+```
+
+## Debate Pattern
+
+Have agents argue different perspectives:
+
+```python
+@tool(description="Get the argument FOR the proposition")
+async def argue_for(proposition: str = Field(description="The proposition")) -> str:
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="You strongly support this position. Give compelling arguments FOR it.",
+        prompt=proposition,
+    )
+    return result.text
+
+@tool(description="Get the argument AGAINST the proposition")  
+async def argue_against(proposition: str = Field(description="The proposition")) -> str:
+    result = await generate_text(
+        model=google("gemini-2.0-flash"),
+        system="You strongly oppose this position. Give compelling arguments AGAINST it.",
+        prompt=proposition,
+    )
+    return result.text
+
+# Moderator synthesizes both sides
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    system="""You are an impartial moderator. 
+    Get arguments from both sides, then provide a balanced summary.""",
+    prompt="Should companies adopt a 4-day work week?",
+    tools={"argue_for": argue_for, "argue_against": argue_against},
+)
+```
+
+## Tips
+
+<AccordionGroup>
+  <Accordion title="Keep agents focused">
+    Each agent should have a clear, specific role. Don't overload them.
+  </Accordion>
+  
+  <Accordion title="Use different prompting styles">
+    Customize system prompts for each agent's specialty and personality.
+  </Accordion>
+  
+  <Accordion title="Consider using different models">
+    Use faster/cheaper models for simple tasks, more capable ones for complex reasoning.
+  </Accordion>
+  
+  <Accordion title="Add error handling">
+    Wrap agent calls in try/catch and have fallback strategies.
+  </Accordion>
+</AccordionGroup>

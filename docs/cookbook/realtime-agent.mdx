@@ -12,93 +12,90 @@ With the built-in `serve()` method, you can run a WebSocket server in one line:
 ```python
 from ai_query.agents import ChatAgent, InMemoryAgent
 
-class ChatRoom(ChatAgent, InMemoryAgent):
-    system = "You are a helpful AI in a group chat."
+class TaskAssistant(ChatAgent, InMemoryAgent):
+    system = "You are a helpful task assistant. Help users complete their work."
     
     async def on_connect(self, connection, ctx):
         await super().on_connect(connection, ctx)
-        connection.username = ctx.metadata.get("username", "Anonymous")
-        await self.broadcast(f"[System] {connection.username} joined!")
+        connection.user_id = ctx.metadata.get("user_id", "anonymous")
+        await connection.send("Connected! How can I help you today?")
     
     async def on_message(self, connection, message):
-        await self.broadcast(f"{connection.username}: {message}")
-        if "@ai" in message.lower():
-            response = await self.chat(message)
-            await self.broadcast(f"AI: {response}")
+        # Respond to all messages with AI assistance
+        response = await self.chat(message)
+        await connection.send(response)
     
     async def on_close(self, connection, code, reason):
         await super().on_close(connection, code, reason)
-        await self.broadcast(f"[System] {connection.username} left")
+        print(f"User {connection.user_id} disconnected")
 
 # One line to start the server!
-ChatRoom("main-room").serve(port=8080)
+TaskAssistant("assistant-1").serve(port=8080)
 ```
 
-Connect with: `wscat -c 'ws://localhost:8080/ws?username=Alice'`
+Connect with: `wscat -c 'ws://localhost:8080/ws?user_id=alice'`
 
-## Full Example with State
+## Full Example with State and Tools
 
-For a more complete example with participant tracking and streaming AI:
+A research assistant that tracks findings and provides streaming responses:
 
 ```python
 import json
 from ai_query.agents import ChatAgent, InMemoryAgent
+from ai_query import tool, Field
 
-class ChatRoom(ChatAgent, InMemoryAgent):
-    initial_state = {"participants": [], "message_count": 0}
-    system = """You are an AI assistant in a group chat.
-    Be helpful and acknowledge users by name."""
+class ResearchAssistant(ChatAgent, InMemoryAgent):
+    initial_state = {"findings": [], "queries": 0}
+    system = """You are a research assistant. Help users research topics 
+    and save important findings for later reference."""
+    
+    @property
+    def tools(self):
+        @tool(description="Save an important finding for later")
+        async def save_finding(finding: str = Field(description="Finding to save")) -> str:
+            findings = self.state["findings"] + [finding]
+            await self.set_state({**self.state, "findings": findings})
+            return f"Saved finding #{len(findings)}"
+        
+        @tool(description="List all saved findings")
+        async def list_findings() -> str:
+            if not self.state["findings"]:
+                return "No findings saved yet."
+            return "\n".join([f"{i+1}. {f}" for i, f in enumerate(self.state["findings"])])
+        
+        return {"save_finding": save_finding, "list_findings": list_findings}
     
     async def on_connect(self, connection, ctx):
         await super().on_connect(connection, ctx)
-        connection.username = ctx.metadata.get("username", "Anonymous")
+        connection.user_id = ctx.metadata.get("user_id", "anonymous")
         
-        # Update participants
-        await self.set_state({
-            **self.state,
-            "participants": self.state["participants"] + [connection.username]
-        })
-        
-        await connection.send(json.dumps({
-            "type": "system",
-            "message": f"Welcome! {len(self.state['participants'])} online."
-        }))
-        await self.broadcast(json.dumps({
-            "type": "join",
-            "username": connection.username
-        }))
+        findings_count = len(self.state["findings"])
+        if findings_count > 0:
+            await connection.send(json.dumps({
+                "type": "system",
+                "message": f"Welcome back! You have {findings_count} saved findings."
+            }))
+        else:
+            await connection.send(json.dumps({
+                "type": "system",
+                "message": "Hello! I can help you research topics."
+            }))
     
     async def on_message(self, connection, message):
-        data = json.loads(message) if message.startswith("{") else {"text": message}
-        text = data.get("text", "")
+        await self.set_state({**self.state, "queries": self.state["queries"] + 1})
         
-        await self.broadcast(json.dumps({
-            "type": "user",
-            "username": connection.username,
-            "message": text
-        }))
-        
-        if "@ai" in text.lower():
-            await self._stream_ai_response(text)
+        # Stream AI response
+        await self._stream_response(message)
     
-    async def _stream_ai_response(self, text):
+    async def _stream_response(self, message):
         await self.broadcast(json.dumps({"type": "ai_start"}))
         full_response = ""
-        async for chunk in self.stream_chat(text):
+        async for chunk in self.stream_chat(message):
             full_response += chunk
             await self.broadcast(json.dumps({"type": "ai_chunk", "chunk": chunk}))
         await self.broadcast(json.dumps({"type": "ai_end", "message": full_response}))
-    
-    async def on_close(self, connection, code, reason):
-        username = connection.username
-        await super().on_close(connection, code, reason)
-        await self.set_state({
-            **self.state,
-            "participants": [p for p in self.state["participants"] if p != username]
-        })
-        await self.broadcast(json.dumps({"type": "leave", "username": username}))
 
-ChatRoom("main-room").serve(port=8080)
+ResearchAssistant("research-1").serve(port=8080)
 ```
 
 ## Custom WebSocket Integration
@@ -121,7 +118,7 @@ class FastAPIConnection(Connection):
 
 
 class MyAgent(ChatAgent, InMemoryAgent):
-    system = "Hello!"
+    system = "You are a helpful assistant."
 
 
 app = FastAPI()
@@ -151,19 +148,19 @@ async def websocket_endpoint(websocket: WebSocket):
 ## Client Example (JavaScript)
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws?username=Alice');
+const ws = new WebSocket('ws://localhost:8080/ws?user_id=alice');
 
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
     switch(data.type) {
-        case 'user': console.log(`${data.username}: ${data.message}`); break;
+        case 'system': console.log(`System: ${data.message}`); break;
         case 'ai_chunk': process.stdout.write(data.chunk); break;
-        case 'join': console.log(`${data.username} joined`); break;
-        case 'leave': console.log(`${data.username} left`); break;
+        case 'ai_end': console.log(); break;
     }
 };
 
-ws.send(JSON.stringify({text: "Hello @ai!"}));
+// Ask the assistant to research something
+ws.send("Research the latest developments in quantum computing");
 ```
 
 ## Cloudflare Durable Objects
@@ -173,10 +170,11 @@ For production, use [`DurableObjectAgent`](/api-reference/agent-backends#durable
 ```python
 from ai_query.agents import ChatAgent, DurableObjectAgent
 
-class CloudflareChatRoom(ChatAgent, DurableObjectAgent):
-    initial_state = {"participants": []}
+class CloudflareAssistant(ChatAgent, DurableObjectAgent):
+    initial_state = {"queries": 0}
     
     async def on_message(self, conn, message):
+        await self.set_state({**self.state, "queries": self.state["queries"] + 1})
         response = await self.chat(message)
         await conn.send(response)
 ```
@@ -184,10 +182,10 @@ class CloudflareChatRoom(ChatAgent, DurableObjectAgent):
 ## Next Steps
 
 <CardGroup cols={2}>
+  <Card title="Multi-Agent Server" href="/core/agent-server">
+    Route multiple users to independent agents
+  </Card>
   <Card title="Agent API" href="/api-reference/agent">
     Complete Agent API reference
-  </Card>
-  <Card title="Durable Objects" href="/api-reference/agent-backends#durableobjectagent">
-    Deploy to Cloudflare Workers
   </Card>
 </CardGroup>

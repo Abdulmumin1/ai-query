@@ -1,5 +1,36 @@
+---
+title: "Per-User Assistant"
+description: "Create isolated AI assistants for each user with persistent state"
+---
+
+Build a system where each user gets their own AI assistant with isolated state, conversation history, and tools.
+
+## Quick Start
+
+Use `serve_many()` to create per-user agents:
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent
+
+class UserAssistant(ChatAgent, InMemoryAgent):
+    system = "You are a personal assistant. Remember user preferences."
+    initial_state = {"preferences": {}, "tasks": []}
+
+# Each user gets their own assistant
+UserAssistant.serve_many(port=8080)
+
+# Connect:
+# ws://localhost:8080/agent/user-alice/ws
+# ws://localhost:8080/agent/user-bob/ws
+```
+
+## Complete Example: Personal Task Manager
+
+A full per-user task management assistant:
+
+```python
 from ai_query.agents import ChatAgent, SQLiteAgent, AgentServer, AgentServerConfig
-from ai_query import tool, Field, step_count_is
+from ai_query import tool, Field
 from ai_query.providers.google import google
 from datetime import datetime
 
@@ -11,10 +42,6 @@ class PersonalAssistant(ChatAgent, SQLiteAgent):
     system = """You are a personal productivity assistant.
     Help users manage tasks, take notes, and stay organized.
     Use tools to store and retrieve information."""
-
-    @property
-    def stop_when(self):
-        return step_count_is(10)
     
     initial_state = {
         "name": None,
@@ -131,6 +158,84 @@ if __name__ == "__main__":
         idle_timeout=1800,  # 30 min idle timeout
         max_agents=100,
         enable_rest_api=True,
-        allowed_origins=["http://127.0.0.1:5500"],
     )
     AgentServer(PersonalAssistant, config=config).serve(port=8080)
+```
+
+## With Authentication
+
+Secure per-user access:
+
+```python
+from ai_query.agents import AgentServer, AgentServerConfig
+
+async def auth_middleware(request):
+    """Verify user owns this agent."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = await verify_jwt(token)
+    
+    if not user:
+        return False
+    
+    # Ensure user can only access their own agent
+    agent_id = request.match_info["agent_id"]
+    return agent_id == f"user-{user.id}"
+
+config = AgentServerConfig(
+    auth=auth_middleware,
+    idle_timeout=3600,
+)
+
+AgentServer(PersonalAssistant, config=config).serve(port=8080)
+```
+
+## Client Example
+
+```javascript
+// JavaScript client for per-user assistant
+const userId = 'alice';
+const ws = new WebSocket(`ws://localhost:8080/agent/user-${userId}/ws`);
+const sse = new EventSource(`http://localhost:8080/agent/user-${userId}/events`);
+
+ws.onmessage = (e) => console.log('Assistant:', e.data);
+
+// AI streaming via SSE
+sse.addEventListener('ai_chunk', (e) => process.stdout.write(e.data));
+sse.addEventListener('ai_end', () => console.log());
+
+// Send messages
+ws.send("Add a task: Review quarterly report");
+ws.send("What tasks do I have?");
+ws.send("Set my preference for theme to dark");
+```
+
+## Persistence Options
+
+Choose the right storage backend:
+
+| Backend | Use Case |
+|---------|----------|
+| `InMemoryAgent` | Development, testing |
+| `SQLiteAgent` | Single-server, local persistence |
+| `DurableObjectAgent` | Cloudflare Workers, global edge |
+| Custom Redis/Postgres | Shared state, horizontal scaling |
+
+## Tips
+
+<AccordionGroup>
+  <Accordion title="Use meaningful agent IDs">
+    Use `user-{user_id}` or `session-{session_id}` patterns for clear identification.
+  </Accordion>
+  
+  <Accordion title="Set appropriate idle timeouts">
+    Balance memory usage vs user experience. Longer for active users.
+  </Accordion>
+  
+  <Accordion title="Personalize the experience">
+    Use stored preferences and history to make each assistant feel personal.
+  </Accordion>
+  
+  <Accordion title="Implement proper auth">
+    Always verify users can only access their own agents in production.
+  </Accordion>
+</AccordionGroup>

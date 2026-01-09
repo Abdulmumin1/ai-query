@@ -4,6 +4,7 @@ from ai_query.agents.base import Agent
 from ai_query.agents.chat import ChatAgent
 from ai_query.agents.websocket import Connection, ConnectionContext
 from ai_query.agents.server import AioHttpConnection
+from ai_query.agents.router import AgentServer, AgentServerConfig
 from ai_query.agents.builtin import (
     InMemoryAgent,
     SQLiteAgent,
@@ -18,6 +19,9 @@ __all__ = [
     "Connection",
     "ConnectionContext",
     "AioHttpConnection",
+    # Multi-agent server
+    "AgentServer",
+    "AgentServerConfig",
     # Built-in agents
     "InMemoryAgent",
     "SQLiteAgent",
