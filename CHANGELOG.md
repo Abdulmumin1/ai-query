@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.4.0
+
+- minor: feat: added multi-tenacy kinda logic for websocket and sse
+
 ## 1.3.0
 
 - minor: Added support for Stateful agents. Agent base class support persistence, message history, and lifecycle hooks
