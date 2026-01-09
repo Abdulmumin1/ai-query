@@ -1,0 +1,201 @@
+---
+title: "Persistent Chatbot"
+description: "Build an AI chatbot that remembers conversations across sessions"
+---
+
+Create a chatbot that persists conversation history, so users can continue where they left off.
+
+## What You'll Build
+
+A support chatbot that:
+- Remembers previous conversations
+- Uses tools to look up information
+- Persists state between restarts
+
+## Full Example
+
+```python
+import asyncio
+from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query import tool, Field
+
+class SupportBot(ChatAgent, SQLiteAgent):
+    """AI support bot with persistent memory."""
+    
+    db_path = "./support_bot.db"
+    initial_state = {
+        "ticket_count": 0,
+        "user_name": None,
+    }
+    
+    system = """You are a helpful customer support agent.
+    
+    Remember:
+    - Be friendly and professional
+    - Use tools to look up orders and create tickets
+    - If the user has told you their name, use it
+    - Reference previous conversations when relevant
+    """
+    
+    @property
+    def tools(self):
+        return {
+            "lookup_order": self.lookup_order,
+            "create_ticket": self.create_ticket,
+            "remember_name": self.remember_name,
+        }
+    
+    @staticmethod
+    @tool(description="Look up order details by order ID")
+    async def lookup_order(
+        order_id: str = Field(description="The order ID to look up")
+    ) -> str:
+        # Simulated order lookup
+        orders = {
+            "ORD-123": "MacBook Pro - Shipped Jan 5, Arrives Jan 8",
+            "ORD-456": "AirPods Pro - Processing, Ships tomorrow",
+            "ORD-789": "iPhone Case - Delivered Jan 3",
+        }
+        return orders.get(order_id, f"Order {order_id} not found")
+    
+    async def create_ticket(
+        self,
+        subject: str = Field(description="Ticket subject"),
+        priority: str = Field(description="low, medium, or high")
+    ) -> str:
+        """Create a support ticket (instance method to access state)."""
+        ticket_num = self.state["ticket_count"] + 1
+        await self.set_state({
+            **self.state,
+            "ticket_count": ticket_num
+        })
+        return f"Created ticket #{ticket_num}: {subject} (Priority: {priority})"
+    
+    async def remember_name(
+        self,
+        name: str = Field(description="The user's name")
+    ) -> str:
+        """Remember the user's name for future interactions."""
+        await self.set_state({
+            **self.state,
+            "user_name": name
+        })
+        return f"I'll remember your name is {name}"
+
+
+async def main():
+    user_id = "user-12345"
+    
+    print("=" * 50)
+    print("Support Bot - Session 1")
+    print("=" * 50)
+    
+    async with SupportBot(user_id) as bot:
+        # First interaction
+        response = await bot.chat(
+            "Hi! My name is Sarah. Can you check on order ORD-123?"
+        )
+        print(f"Bot: {response}\n")
+        
+        # Follow up
+        response = await bot.chat(
+            "Great! Can you also create a ticket about late delivery?"
+        )
+        print(f"Bot: {response}\n")
+    
+    print("\n" + "=" * 50)
+    print("Support Bot - Session 2 (After Restart)")
+    print("=" * 50)
+    
+    # Simulate restart - conversation history is preserved!
+    async with SupportBot(user_id) as bot:
+        print(f"Loaded {len(bot.messages)} previous messages\n")
+        
+        # Bot should remember the context
+        response = await bot.chat(
+            "What was the status of my order again?"
+        )
+        print(f"Bot: {response}\n")
+        
+        # Check if name was remembered
+        response = await bot.chat("Do you remember my name?")
+        print(f"Bot: {response}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## How It Works
+
+### 1. Mixing ChatAgent with SQLiteAgent
+
+```python
+class SupportBot(ChatAgent, SQLiteAgent):
+```
+
+This combines:
+- **ChatAgent**: Provides `chat()` and `stream_chat()` methods
+- **SQLiteAgent**: Persists state and messages to SQLite
+
+### 2. Dynamic System Prompt
+
+You can customize the system prompt based on state:
+
+```python
+@property
+def system(self):
+    base = "You are a helpful support agent."
+    if self.state.get("user_name"):
+        base += f" The user's name is {self.state['user_name']}."
+    return base
+```
+
+### 3. Instance Methods as Tools
+
+Tools can access agent state by being instance methods:
+
+```python
+async def create_ticket(self, subject: str, priority: str) -> str:
+    # Access self.state here
+    ticket_num = self.state["ticket_count"] + 1
+    await self.set_state({...})
+    return f"Created ticket #{ticket_num}"
+```
+
+## Streaming Responses
+
+For real-time UX, stream the responses:
+
+```python
+async with SupportBot(user_id) as bot:
+    print("Bot: ", end="")
+    async for chunk in bot.stream_chat("Tell me about your services"):
+        print(chunk, end="", flush=True)
+    print()
+```
+
+## Running with Different Users
+
+Each user gets their own conversation history:
+
+```python
+# Alice's conversation
+async with SupportBot("alice-id") as bot:
+    await bot.chat("I'm Alice, I need help with ORD-123")
+
+# Bob's conversation (completely separate)
+async with SupportBot("bob-id") as bot:
+    await bot.chat("I'm Bob, check ORD-456 please")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Real-time Agent" href="/cookbook/realtime-agent">
+    Add WebSocket support for live updates
+  </Card>
+  <Card title="Agent API Reference" href="/api-reference/agent">
+    Full API documentation
+  </Card>
+</CardGroup>

@@ -542,10 +542,27 @@ class GenerateTextResult:
     """Result from generate_text call."""
 
     text: str
+    steps: list[StepResult] = field(default_factory=list)
     finish_reason: str | None = None
     usage: Usage | None = None
     response: dict[str, Any] = field(default_factory=dict)
     provider_metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def tool_calls(self) -> list[ToolCall]:
+        """All tool calls made across all steps."""
+        calls = []
+        for step in self.steps:
+            calls.extend(step.tool_calls)
+        return calls
+
+    @property
+    def tool_results(self) -> list[ToolResult]:
+        """All tool results from all steps."""
+        results = []
+        for step in self.steps:
+            results.extend(step.tool_results)
+        return results
 
 
 @dataclass
@@ -576,6 +593,7 @@ class TextStreamResult:
     - text: Awaitable that resolves to full text after streaming
     - usage: Awaitable that resolves to Usage after streaming
     - finish_reason: Awaitable that resolves to finish reason after streaming
+    - steps: Awaitable that resolves to list of StepResult after streaming
 
     Example:
         >>> result = stream_text(model=google("gemini-2.0-flash"), prompt="Hi")
@@ -583,17 +601,19 @@ class TextStreamResult:
         ...     print(chunk, end="")
         >>> print(await result.usage)  # Usage after stream completes
         >>> print(await result.text)   # Full accumulated text
+        >>> print(await result.steps)  # All steps with tool calls
 
     Or iterate directly:
         >>> async for chunk in stream_text(model=google("gemini-2.0-flash"), prompt="Hi"):
         ...     print(chunk, end="")
     """
 
-    def __init__(self, stream: AsyncIterator[StreamChunk]) -> None:
+    def __init__(self, stream: AsyncIterator[StreamChunk], steps: list[StepResult] | None = None) -> None:
         self._stream = stream
         self._chunks: list[str] = []
         self._usage: Usage | None = None
         self._finish_reason: str | None = None
+        self._steps: list[StepResult] = steps or []
         self._done = False
         self._done_event = asyncio.Event()
         self._consumed = False
@@ -651,6 +671,12 @@ class TextStreamResult:
         """Get the finish reason after streaming completes."""
         await self._wait_for_completion()
         return self._finish_reason
+
+    @property
+    async def steps(self) -> list[StepResult]:
+        """Get all steps including tool calls after streaming completes."""
+        await self._wait_for_completion()
+        return self._steps
 
     def __aiter__(self) -> AsyncIterator[str]:
         """Allow direct iteration: async for chunk in stream_text(...)"""

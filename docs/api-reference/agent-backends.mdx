@@ -1,0 +1,229 @@
+---
+title: "Agent Backends"
+description: "Built-in storage backends for agents"
+---
+
+ai-query provides three built-in agent backends for different use cases.
+
+## InMemoryAgent
+
+In-memory storage for development and testing. Data is lost when the process exits.
+
+```python
+from ai_query.agents import InMemoryAgent
+```
+
+### Usage
+
+```python
+class MyAgent(InMemoryAgent):
+    initial_state = {"count": 0}
+
+async with MyAgent("agent-1") as agent:
+    await agent.set_state({"count": 1})
+```
+
+### Class Methods
+
+#### clear_all
+
+```python
+@classmethod
+def clear_all(cls) -> None
+```
+
+Clear all stored data. Useful for testing.
+
+#### clear
+
+```python
+def clear(self) -> None
+```
+
+Clear this agent's stored data.
+
+---
+
+## SQLiteAgent
+
+SQLite-based persistent storage with SQL query support.
+
+```python
+from ai_query.agents import SQLiteAgent
+```
+
+### Class Attributes
+
+<ParamField path="db_path" type="str" default="agents.db">
+  Path to the SQLite database file. Use `:memory:` for in-memory database.
+</ParamField>
+
+### Constructor
+
+```python
+def __init__(
+    self,
+    agent_id: str,
+    *,
+    env: Any = None,
+    db_path: str | None = None  # Override class db_path
+)
+```
+
+### Methods
+
+#### sql
+
+```python
+def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
+```
+
+Execute a SQL query against the agent's database.
+
+**Parameters:**
+- `query`: SQL query string with `?` placeholders
+- `*params`: Query parameters
+
+**Returns:** List of rows as dictionaries.
+
+### Usage
+
+```python
+class DataAgent(SQLiteAgent):
+    db_path = "./data/agents.db"
+    initial_state = {}
+    
+    async def setup(self):
+        self.sql("CREATE TABLE IF NOT EXISTS logs (id INTEGER, msg TEXT)")
+    
+    def log(self, message: str):
+        self.sql("INSERT INTO logs (msg) VALUES (?)", message)
+    
+    def get_logs(self) -> list[dict]:
+        return self.sql("SELECT * FROM logs ORDER BY id DESC LIMIT 10")
+
+async with DataAgent("data-1") as agent:
+    await agent.setup()
+    agent.log("Hello world")
+    print(agent.get_logs())
+```
+
+---
+
+## DurableObjectAgent
+
+Agent for Cloudflare Durable Objects. Uses DO's built-in storage and WebSocket APIs.
+
+```python
+from ai_query.agents import DurableObjectAgent
+```
+
+### Constructor
+
+```python
+def __init__(self, ctx: Any, env: Any)
+```
+
+**Parameters:**
+- `ctx`: Durable Object context from Cloudflare
+- `env`: Environment bindings
+
+### Methods
+
+#### sql
+
+```python
+def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
+```
+
+Execute SQL against the DO's embedded SQLite.
+
+#### fetch
+
+```python
+async def fetch(self, request: Any) -> Any
+```
+
+Handle HTTP/WebSocket requests. Automatically handles WebSocket upgrades.
+
+#### on_request
+
+```python
+async def on_request(self, request: Any) -> Any
+```
+
+Handle regular HTTP requests. Override for custom endpoints.
+
+### Usage
+
+```python
+from ai_query.agents import ChatAgent, DurableObjectAgent
+
+class MyDurableBot(ChatAgent, DurableObjectAgent):
+    initial_state = {"sessions": 0}
+    
+    async def on_connect(self, conn, ctx):
+        await super().on_connect(conn, ctx)
+        await self.set_state({
+            "sessions": self.state["sessions"] + 1
+        })
+        await conn.send("Welcome!")
+    
+    async def on_message(self, conn, message):
+        response = await self.chat(message)
+        await conn.send(response)
+
+# Export in wrangler.toml:
+# [[durable_objects.bindings]]
+# name = "MY_BOT"
+# class_name = "MyDurableBot"
+```
+
+---
+
+## Creating Custom Backends
+
+Extend `Agent` and implement the abstract methods:
+
+```python
+from ai_query.agents import Agent
+import redis.asyncio as redis
+
+class RedisAgent(Agent):
+    redis_url: str = "redis://localhost:6379"
+    
+    def __init__(self, agent_id: str, **kwargs):
+        super().__init__(agent_id, **kwargs)
+        self._redis = redis.from_url(self.redis_url)
+    
+    async def _load_state(self):
+        data = await self._redis.get(f"agent:{self._id}:state")
+        return json.loads(data) if data else None
+    
+    async def _save_state(self, state):
+        await self._redis.set(
+            f"agent:{self._id}:state",
+            json.dumps(state)
+        )
+    
+    async def _load_messages(self):
+        data = await self._redis.get(f"agent:{self._id}:messages")
+        if data:
+            return [Message(**m) for m in json.loads(data)]
+        return []
+    
+    async def _save_messages(self, messages):
+        data = [{"role": m.role, "content": m.content} for m in messages]
+        await self._redis.set(
+            f"agent:{self._id}:messages",
+            json.dumps(data)
+        )
+```
+
+## Comparison
+
+| Backend | Persistence | SQL | Best For |
+|---------|-------------|-----|----------|
+| `InMemoryAgent` | ❌ | ❌ | Development, testing |
+| `SQLiteAgent` | ✅ | ✅ | Local apps, prototypes |
+| `DurableObjectAgent` | ✅ | ✅ | Cloudflare Workers |
