@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, TYPE_CHECKING
 
 from ai_query.types import Message
 from ai_query.agents.websocket import Connection, ConnectionContext
+
+if TYPE_CHECKING:
+    from ai_query.agents.transport import AgentTransport
+    from ai_query.agents.events import EventBus
+    from ai_query.agents.message import IncomingMessage
 
 State = TypeVar("State")
 
@@ -50,6 +55,10 @@ class Agent(ABC, Generic[State]):
         self._connections: set[Connection] = set()
         self._sse_connections: set[Any] = set()  # SSE stream responses
         self.env = env
+        
+        # Actor primitives (injected by AgentServer or manually)
+        self._transport: "AgentTransport | None" = None
+        self._event_bus: "EventBus | None" = None
     
     @property
     def id(self) -> str:
@@ -201,6 +210,161 @@ class Agent(ABC, Generic[State]):
                    updated by a client.
         """
         pass
+    
+    # ─── Actor Communication ─────────────────────────────────────────────
+    
+    async def invoke(
+        self, 
+        agent_id: str, 
+        payload: dict[str, Any],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """Call another agent and wait for response.
+        
+        Sends a request to another agent via the configured transport and
+        waits for the response.
+        
+        Args:
+            agent_id: The target agent's identifier.
+            payload: The request payload to send.
+            timeout: Maximum time to wait for response in seconds.
+        
+        Returns:
+            The response from the target agent.
+        
+        Raises:
+            RuntimeError: If no transport is configured.
+        
+        Example:
+            result = await self.invoke("agent:researcher", {
+                "task": "search",
+                "query": "AI news"
+            })
+        """
+        if self._transport is None:
+            raise RuntimeError(
+                "No transport configured. Use AgentServer or set _transport manually."
+            )
+        return await self._transport.invoke(agent_id, payload, timeout)
+    
+    async def emit(self, event: str, data: dict[str, Any]) -> None:
+        """Emit an event to subscribers.
+        
+        Events are namespaced with the agent ID: "agent-id:event-name".
+        If no event bus is configured, this is a no-op.
+        
+        Args:
+            event: The event name (e.g., "task.complete").
+            data: The event payload.
+        
+        Example:
+            await self.emit("analysis.complete", {
+                "result": analysis_result
+            })
+        """
+        if self._event_bus is not None:
+            await self._event_bus.emit(f"{self.id}:{event}", data)
+    
+    async def on_receive(self, message: "IncomingMessage") -> Any:
+        """Unified handler for all incoming messages.
+        
+        Override this for a single handler that processes messages from
+        any source (WebSocket clients, other agents, HTTP requests).
+        
+        The default implementation routes to legacy handlers for backward
+        compatibility.
+        
+        Args:
+            message: The incoming message with source metadata.
+        
+        Returns:
+            Response for agent invokes, None for client messages.
+        
+        Example:
+            async def on_receive(self, message: IncomingMessage) -> Any:
+                if message.source == "client":
+                    response = await self.chat(message.content)
+                    await message.reply(response)
+                elif message.source == "agent":
+                    return await self.process_task(message.content)
+        """
+        if message.source == "client" and message._connection is not None:
+            await self.on_message(message._connection, message.content)
+        elif message.source == "agent":
+            return await self.handle_invoke(
+                message.content if isinstance(message.content, dict) else {}
+            )
+    
+    async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle an invoke() call from another agent.
+        
+        Override this to process requests from other agents.
+        
+        Args:
+            payload: The request payload from the calling agent.
+        
+        Returns:
+            Response to send back to the calling agent.
+        
+        Raises:
+            NotImplementedError: If not overridden.
+        
+        Example:
+            async def handle_invoke(self, payload: dict) -> dict:
+                task = payload.get("task")
+                if task == "summarize":
+                    result = await self.summarize(payload["text"])
+                    return {"summary": result}
+                return {"error": "Unknown task"}
+        """
+        raise NotImplementedError(
+            f"Agent {self.id} does not implement handle_invoke(). "
+            "Override this method to handle invoke() calls from other agents."
+        )
+    
+    async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Serverless request lifecycle handler.
+        
+        Use this for stateless serverless environments (Lambda, Cloud Run).
+        Handles the full lifecycle: load state → process → save state → respond.
+        
+        Args:
+            request: The request with 'action' and action-specific fields.
+                - action='chat': requires 'message'
+                - action='invoke': requires 'payload'
+                - action='state': returns current state
+        
+        Returns:
+            Response dict with action-specific results.
+        
+        Example (AWS Lambda):
+            def handler(event, context):
+                agent = MyAgent(event["agent_id"])
+                return asyncio.run(agent.handle_request(event))
+        """
+        # Ensure agent is started
+        if self._state is None:
+            await self.start()
+        
+        action = request.get("action", "chat")
+        
+        if action == "chat":
+            # Import here to avoid circular import
+            if hasattr(self, "chat"):
+                message = request.get("message", "")
+                response = await self.chat(message)  # type: ignore
+                return {"agent_id": self.id, "response": response}
+            return {"error": "Agent does not support chat"}
+        
+        elif action == "invoke":
+            payload = request.get("payload", {})
+            result = await self.handle_invoke(payload)
+            return {"agent_id": self.id, "result": result}
+        
+        elif action == "state":
+            return {"agent_id": self.id, "state": self.state}
+        
+        return {"error": f"Unknown action: {action}"}
     
     # ─── Broadcast to Connections ───────────────────────────────────────
     

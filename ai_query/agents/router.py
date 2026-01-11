@@ -14,6 +14,8 @@ from ai_query.agents.websocket import Connection, ConnectionContext
 
 if TYPE_CHECKING:
     from ai_query.agents.base import Agent
+    from ai_query.agents.transport import AgentTransport
+    from ai_query.agents.events import EventBus
 
 State = TypeVar("State")
 
@@ -111,17 +113,27 @@ class AgentServer(Generic[State]):
         self,
         agent_cls: type["Agent[State]"],
         config: AgentServerConfig | None = None,
+        transport: "AgentTransport | None" = None,
+        event_bus: "EventBus | None" = None,
     ):
         """Initialize the agent server.
         
         Args:
             agent_cls: The Agent class to instantiate for each ID.
             config: Optional configuration for lifecycle and security.
+            transport: Optional custom transport for agent-to-agent communication.
+                If not provided, LocalTransport is used.
+            event_bus: Optional custom event bus for pub/sub.
+                If not provided, LocalEventBus is used.
         """
         self._agent_cls = agent_cls
         self._config = config or AgentServerConfig()
         self._agents: dict[str, _AgentMeta] = {}
         self._eviction_task: asyncio.Task | None = None
+        self._transport = transport
+        self._event_bus = event_bus
+        self._transport_initialized = False
+        self._event_bus_initialized = False
     
     # ─── Core API ────────────────────────────────────────────────────────
     
@@ -153,6 +165,20 @@ class AgentServer(Generic[State]):
         
         # Create new agent
         agent = self._agent_cls(agent_id)
+        
+        # Inject transport and event bus
+        if self._transport is None and not self._transport_initialized:
+            from ai_query.agents.transport import LocalTransport
+            self._transport = LocalTransport(self)
+            self._transport_initialized = True
+        if self._event_bus is None and not self._event_bus_initialized:
+            from ai_query.agents.events import LocalEventBus
+            self._event_bus = LocalEventBus()
+            self._event_bus_initialized = True
+        
+        agent._transport = self._transport
+        agent._event_bus = self._event_bus
+        
         self._agents[agent_id] = _AgentMeta(agent=agent)
         return agent
     

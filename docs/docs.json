@@ -119,7 +119,9 @@
               "cookbook/realtime-agent",
               "cookbook/per-user-assistant",
               "cookbook/custom-agent-streaming",
-              "cookbook/mcp-agent"
+              "cookbook/mcp-agent",
+              "cookbook/agent-communication",
+              "cookbook/serverless-agents"
             ]
           }
         ]

@@ -535,6 +535,70 @@ class TaskAgent(SQLiteAgent):
         return "Task marked complete"
 ```
 
+## Agent-to-Agent Communication
+
+Agents can call other agents using `invoke()`. This is useful for splitting work across specialized agents.
+
+### How It Works
+
+1. **Agent A** calls `await self.invoke("agent-b", payload)`
+2. **Agent B** receives the call in its `handle_invoke(payload)` method
+3. **Agent B** returns a response dict
+4. **Agent A** gets the response
+
+### Example: Coordinator + Researcher
+
+```python
+# Agent 1: Receives user messages, delegates research
+class CoordinatorAgent(ChatAgent, InMemoryAgent):
+    async def on_message(self, conn, msg):
+        # Call the researcher agent
+        result = await self.invoke("researcher", {
+            "task": "search",
+            "query": msg
+        })
+        await conn.send(f"Found: {result['answer']}")
+
+# Agent 2: Handles research requests from other agents
+class ResearcherAgent(ChatAgent, InMemoryAgent):
+    async def handle_invoke(self, payload: dict) -> dict:
+        """
+        Receives: {"task": "search", "query": "..."}
+        Returns:  {"answer": "..."}
+        """
+        if payload.get("task") == "search":
+            answer = await self.chat(f"Research: {payload['query']}")
+            return {"answer": answer}
+        return {"error": "Unknown task"}
+```
+
+### Serverless with handle_request()
+
+For AWS Lambda, Vercel, etc. (stateless environments):
+
+```python
+# Your agent
+class MyAgent(ChatAgent, SQLiteAgent):
+    system = "You are helpful"
+
+# Lambda handler
+def handler(event, context):
+    agent = MyAgent(event["pathParameters"]["agent_id"])
+    return asyncio.run(agent.handle_request({
+        "action": "chat",           # or "invoke" or "state"
+        "message": event["body"]    # for chat action
+    }))
+```
+
+<CardGroup cols={2}>
+  <Card title="Agent Communication" icon="messages" href="/cookbook/agent-communication">
+    Complete patterns: pipelines, fan-out, events
+  </Card>
+  <Card title="Serverless Agents" icon="cloud" href="/cookbook/serverless-agents">
+    Deploy to Lambda, Vercel, Cloud Run
+  </Card>
+</CardGroup>
+
 
 ## API Reference
 
@@ -549,6 +613,11 @@ class TaskAgent(SQLiteAgent):
 | `clear_messages()` | Clear conversation history |
 | `broadcast(message)` | Send to all WebSocket clients |
 | `stream_to_sse(event, data)` | Send SSE event to all SSE clients |
+| `invoke(agent_id, payload)` | Call another agent, wait for response |
+| `emit(event, data)` | Fire event to subscribers |
+| `handle_invoke(payload)` | Handle incoming invoke calls |
+| `handle_request(request)` | Serverless lifecycle handler |
+| `on_receive(message)` | Unified message handler |
 | `serve(port, path)` | Start built-in WebSocket/SSE server |
 | `serve_many(port, config)` | Start multi-agent server (class method) |
 | `start()` | Initialize the agent |
@@ -572,6 +641,12 @@ class TaskAgent(SQLiteAgent):
 <CardGroup cols={2}>
   <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
     Run multiple independent agents on a single server with routing
+  </Card>
+  <Card title="Agent Communication" icon="messages" href="/cookbook/agent-communication">
+    Build multi-agent systems with invoke, emit, and event patterns
+  </Card>
+  <Card title="Serverless Agents" icon="cloud" href="/cookbook/serverless-agents">
+    Deploy to AWS Lambda, Vercel, and other serverless platforms
   </Card>
   <Card title="Agent API Reference" icon="code" href="/api-reference/agent">
     Full API documentation for the Agent class

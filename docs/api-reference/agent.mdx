@@ -109,6 +109,147 @@ Send an SSE event to all connected SSE clients.
 - `event` - Event type (e.g., `"ai_start"`, `"ai_chunk"`, `"ai_end"`)
 - `data` - Event data to send
 
+## Actor Communication
+
+Methods for agent-to-agent communication and event-driven architecture.
+
+### invoke
+
+```python
+async def invoke(
+    self, 
+    agent_id: str, 
+    payload: dict[str, Any],
+    timeout: float = 30.0
+) -> dict[str, Any]
+```
+
+Call another agent and wait for response. Requires a transport to be configured (automatic when using `AgentServer`).
+
+**Parameters:**
+- `agent_id` - Target agent's identifier
+- `payload` - Request data to send
+- `timeout` - Max wait time in seconds (default: 30)
+
+**Returns:** Response dict from the target agent.
+
+**Example:**
+```python
+result = await self.invoke("summarizer", {
+    "task": "summarize",
+    "text": long_document
+})
+print(result["summary"])
+```
+
+### emit
+
+```python
+async def emit(self, event: str, data: dict[str, Any]) -> None
+```
+
+Fire an event to all subscribers. Events are namespaced: `"{agent_id}:{event}"`.
+
+**Example:**
+```python
+await self.emit("task.complete", {"result": analysis_result})
+```
+
+### handle_invoke
+
+```python
+async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]
+```
+
+Override to handle incoming `invoke()` calls from other agents.
+
+**Parameters:**
+
+<ParamField path="payload" type="dict" required>
+  The data sent by the calling agent. **You define the structure.** A common pattern is to use a `task` field to route to different handlers.
+</ParamField>
+
+**Returns:** A dict that gets sent back to the calling agent.
+
+**Example:**
+```python
+async def handle_invoke(self, payload: dict) -> dict:
+    # payload structure is whatever the caller sends
+    # Common pattern: use "task" to route
+    task = payload.get("task")
+    
+    if task == "summarize":
+        text = payload.get("text", "")
+        summary = await self.chat(f"Summarize: {text}")
+        return {"status": "ok", "summary": summary}
+    
+    if task == "translate":
+        text = payload.get("text", "")
+        lang = payload.get("language", "Spanish")
+        result = await self.chat(f"Translate to {lang}: {text}")
+        return {"status": "ok", "translation": result}
+    
+    return {"status": "error", "message": f"Unknown task: {task}"}
+```
+
+### handle_request
+
+```python
+async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]
+```
+
+Serverless lifecycle handler. Use for stateless environments (Lambda, Cloud Run).
+
+**Request Format:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action` | `str` | What to do: `"chat"`, `"invoke"`, or `"state"` |
+| `message` | `str` | Required for `action="chat"` |
+| `payload` | `dict` | Required for `action="invoke"` (passed to `handle_invoke`) |
+
+**Response Format:**
+
+| Action | Response |
+|--------|----------|
+| `chat` | `{"agent_id": "...", "response": "AI response..."}` |
+| `invoke` | `{"agent_id": "...", "result": {...}}` |
+| `state` | `{"agent_id": "...", "state": {...}}` |
+
+**Example (AWS Lambda):**
+```python
+def handler(event, context):
+    agent_id = event["pathParameters"]["agent_id"]
+    body = json.loads(event.get("body", "{}"))
+    
+    agent = MyAgent(agent_id)
+    result = asyncio.run(agent.handle_request({
+        "action": body.get("action", "chat"),
+        "message": body.get("message", ""),
+        "payload": body.get("payload", {}),
+    }))
+    
+    return {"statusCode": 200, "body": json.dumps(result)}
+```
+
+### on_receive
+
+```python
+async def on_receive(self, message: IncomingMessage) -> Any
+```
+
+Unified handler for all incoming messages (WebSocket, HTTP, or agent invoke). Override for a single entry point.
+
+**Example:**
+```python
+async def on_receive(self, message: IncomingMessage) -> Any:
+    if message.source == "client":
+        response = await self.chat(message.content)
+        await message.reply(response)
+    elif message.source == "agent":
+        return await self.process_request(message.content)
+```
+
 ### serve
 
 ```python
