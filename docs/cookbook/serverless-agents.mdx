@@ -1,0 +1,253 @@
+---
+title: "Serverless Agents"
+description: "Deploy agents to AWS Lambda, Vercel, and other serverless platforms"
+---
+
+Use `handle_request()` to run agents in serverless environments where each request is independent.
+
+## Why handle_request()?
+
+Serverless platforms like AWS Lambda don't keep your code running between requests. Each request starts fresh with no memory of previous requests.
+
+`handle_request()` solves this by:
+1. Loading the agent's state from storage
+2. Processing your request
+3. Saving state back to storage
+4. Returning the response
+
+## Quick Start
+
+```python
+from ai_query.agents import ChatAgent, SQLiteAgent
+import asyncio
+
+class MyAgent(ChatAgent, SQLiteAgent):
+    system = "You are a helpful assistant"
+
+# AWS Lambda handler
+def handler(event, context):
+    # Get agent ID from the URL path
+    agent_id = event["pathParameters"]["agent_id"]
+    
+    # Create agent instance
+    agent = MyAgent(agent_id)
+    
+    # Process request and return response
+    return asyncio.run(agent.handle_request({
+        "action": "chat",
+        "message": event.get("body", "")
+    }))
+```
+
+## Request Format
+
+The `handle_request()` method expects a dict with an `action` field:
+
+### Action: chat
+
+Send a message and get a response.
+
+```python
+# Request
+{
+    "action": "chat",
+    "message": "Hello, how are you?"
+}
+
+# Response
+{
+    "agent_id": "agent-123",
+    "response": "I'm doing well, thanks for asking!"
+}
+```
+
+### Action: invoke
+
+Trigger the agent's `handle_invoke()` method (for agent-to-agent calls).
+
+```python
+# Request
+{
+    "action": "invoke",
+    "payload": {"task": "summarize", "text": "Long document..."}
+}
+
+# Response
+{
+    "agent_id": "agent-123",
+    "result": {"summary": "Short summary..."}
+}
+```
+
+### Action: state
+
+Get the agent's current state.
+
+```python
+# Request
+{"action": "state"}
+
+# Response
+{
+    "agent_id": "agent-123",
+    "state": {"message_count": 42, "user_name": "Alice"}
+}
+```
+
+## AWS Lambda Example
+
+Complete example with proper request/response handling:
+
+```python
+# handler.py
+import asyncio
+import json
+from ai_query.agents import ChatAgent, SQLiteAgent
+
+class AssistantAgent(ChatAgent, SQLiteAgent):
+    system = "You are a helpful assistant"
+    initial_state = {"message_count": 0}
+
+
+def handler(event, context):
+    """AWS Lambda entry point."""
+    
+    # Get agent ID from URL path: /agent/{agent_id}
+    agent_id = event["pathParameters"]["agent_id"]
+    
+    # Parse the request body
+    body = json.loads(event.get("body", "{}"))
+    
+    # Create agent and process request
+    agent = AssistantAgent(agent_id)
+    result = asyncio.run(agent.handle_request({
+        "action": body.get("action", "chat"),
+        "message": body.get("message", ""),
+        "payload": body.get("payload", {}),
+    }))
+    
+    # Return Lambda response format
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(result)
+    }
+```
+
+## Handling invoke() Calls
+
+If other agents need to call your serverless agent, implement `handle_invoke()`:
+
+```python
+class MyAgent(ChatAgent, SQLiteAgent):
+    system = "You are a helpful assistant"
+    
+    async def handle_invoke(self, payload: dict) -> dict:
+        """
+        Handle requests from other agents.
+        
+        payload: Whatever the calling agent sent
+        Returns: Dict that gets sent back to the caller
+        """
+        task = payload.get("task")
+        
+        if task == "summarize":
+            text = payload.get("text", "")
+            summary = await self.chat(f"Summarize this: {text}")
+            return {"summary": summary}
+        
+        if task == "answer":
+            question = payload.get("question", "")
+            answer = await self.chat(question)
+            return {"answer": answer}
+        
+        return {"error": f"Unknown task: {task}"}
+```
+
+Then other agents can call it via HTTP:
+
+```python
+# POST /agent/my-agent
+{
+    "action": "invoke",
+    "payload": {"task": "summarize", "text": "Long document..."}
+}
+```
+
+## Storage Options
+
+Serverless agents need persistent storage. Here are your options:
+
+| Platform | Storage Option |
+|----------|---------------|
+| AWS Lambda | `SQLiteAgent` with EFS mount |
+| AWS Lambda | Custom DynamoDB adapter |
+| Vercel | Custom Redis/Postgres adapter |
+| Cloudflare | Use `DurableObjectAgent` instead |
+
+### Custom Storage Example (DynamoDB)
+
+```python
+from ai_query.agents import Agent
+from ai_query.types import Message
+import boto3
+
+class DynamoDBAgent(Agent):
+    """Agent that stores state in DynamoDB."""
+    
+    def __init__(self, agent_id: str):
+        super().__init__(agent_id)
+        self.table = boto3.resource("dynamodb").Table("agents")
+    
+    async def _load_state(self):
+        response = self.table.get_item(Key={"agent_id": self.id})
+        item = response.get("Item", {})
+        return item.get("state")
+    
+    async def _save_state(self, state):
+        self.table.update_item(
+            Key={"agent_id": self.id},
+            UpdateExpression="SET #s = :state",
+            ExpressionAttributeNames={"#s": "state"},
+            ExpressionAttributeValues={":state": state}
+        )
+    
+    async def _load_messages(self) -> list[Message]:
+        response = self.table.get_item(Key={"agent_id": self.id})
+        item = response.get("Item", {})
+        return [Message(**m) for m in item.get("messages", [])]
+    
+    async def _save_messages(self, messages: list[Message]):
+        self.table.update_item(
+            Key={"agent_id": self.id},
+            UpdateExpression="SET messages = :m",
+            ExpressionAttributeValues={
+                ":m": [{"role": m.role, "content": m.content} for m in messages]
+            }
+        )
+```
+
+## Cloudflare Workers
+
+For Cloudflare, use `DurableObjectAgent` instead of `handle_request()`. Durable Objects have built-in state persistence:
+
+```python
+from ai_query.agents import ChatAgent, DurableObjectAgent
+
+class MyAgent(ChatAgent, DurableObjectAgent):
+    system = "You are helpful"
+    
+    # The fetch() method is the entry point (handled automatically)
+    # State is automatically persisted in the Durable Object
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent Communication" icon="messages" href="/cookbook/agent-communication">
+    Make agents call each other
+  </Card>
+  <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
+    Run multiple agents on one server
+  </Card>
+</CardGroup>
