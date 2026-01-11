@@ -1,0 +1,98 @@
+---
+title: "OpenRouter"
+description: "Use any AI model through OpenRouter's unified API"
+---
+
+OpenRouter provides access to many AI models from different providers through a single, unified API. This makes it easy to switch between models without changing your code.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+```
+
+Get your API key from [OpenRouter](https://openrouter.ai/keys).
+
+## Usage
+
+```python
+from ai_query import generate_text, openrouter
+
+result = await generate_text(
+    model=openrouter("openai/gpt-4o"),
+    prompt="Explain machine learning in simple terms."
+)
+```
+
+## Available Models
+
+OpenRouter provides access to models from many providers. Model IDs follow the pattern `provider/model-name`:
+
+| Model ID | Description |
+|----------|-------------|
+| `openai/gpt-4o` | OpenAI GPT-4o |
+| `openai/gpt-4o-mini` | OpenAI GPT-4o mini |
+| `anthropic/claude-3.5-sonnet` | Anthropic Claude 3.5 Sonnet |
+| `anthropic/claude-3-opus` | Anthropic Claude 3 Opus |
+| `google/gemini-pro-1.5` | Google Gemini Pro 1.5 |
+| `meta-llama/llama-3.1-405b-instruct` | Meta Llama 3.1 405B |
+| `mistralai/mistral-large` | Mistral Large |
+
+See the [OpenRouter models page](https://openrouter.ai/models) for a full list.
+
+## Provider Options
+
+Customize parameters:
+
+```python
+result = await generate_text(
+    model=openrouter("anthropic/claude-3.5-sonnet"),
+    prompt="Write a creative story.",
+    provider_options={
+        "openrouter": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+
+## Tool Calling
+
+Tool calling works the same as with other providers:
+
+```python
+from ai_query import generate_text, openrouter, tool, Field
+
+@tool(description="Search the web")
+async def search(query: str = Field(description="Search query")) -> str:
+    return f"Results for: {query}"
+
+result = await generate_text(
+    model=openrouter("openai/gpt-4o"),
+    prompt="Search for the latest Python news",
+    tools={"search": search}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, openrouter
+
+result = stream_text(
+    model=openrouter("openai/gpt-4o"),
+    prompt="Write a poem about coding."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## Why OpenRouter?
+
+- **Single API**: Access models from OpenAI, Anthropic, Google, Meta, and more through one API
+- **Fallback routing**: Automatically fall back to alternative models if one is unavailable
+- **Cost optimization**: Compare prices across providers
+- **No vendor lock-in**: Easily switch between models without code changes

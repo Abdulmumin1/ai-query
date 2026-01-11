@@ -12,6 +12,7 @@ license = { file = "LICENSE" }
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0.0"]
+bedrock = ["boto3>=1.34.0"]
 
 [project.urls]
 Homepage = "https://github.com/Abdulmumin1/ai-query"

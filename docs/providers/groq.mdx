@@ -1,0 +1,95 @@
+---
+title: "Groq"
+description: "Use Groq's ultra-fast inference for open models"
+---
+
+Groq provides ultra-fast inference for open-source models using their custom LPU (Language Processing Unit) hardware. Their API is OpenAI-compatible for seamless integration.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export GROQ_API_KEY="gsk_..."
+```
+
+Get your API key from [Groq Console](https://console.groq.com/keys).
+
+## Usage
+
+```python
+from ai_query import generate_text, groq
+
+result = await generate_text(
+    model=groq("llama-3.3-70b-versatile"),
+    prompt="Explain machine learning in simple terms."
+)
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `llama-3.3-70b-versatile` | Llama 3.3 70B - best quality |
+| `llama-3.1-8b-instant` | Llama 3.1 8B - ultra fast |
+| `llama-guard-3-8b` | Llama Guard 3 - content moderation |
+| `mixtral-8x7b-32768` | Mixtral 8x7B - 32k context |
+| `gemma2-9b-it` | Gemma 2 9B - Google's open model |
+
+See the [Groq models page](https://console.groq.com/docs/models) for a full list.
+
+## Provider Options
+
+Customize parameters:
+
+```python
+result = await generate_text(
+    model=groq("llama-3.3-70b-versatile"),
+    prompt="Write a creative story.",
+    provider_options={
+        "groq": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+
+## Tool Calling
+
+Tool calling works the same as with other providers:
+
+```python
+from ai_query import generate_text, groq, tool, Field
+
+@tool(description="Search the web")
+async def search(query: str = Field(description="Search query")) -> str:
+    return f"Results for: {query}"
+
+result = await generate_text(
+    model=groq("llama-3.3-70b-versatile"),
+    prompt="Search for the latest AI news",
+    tools={"search": search}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, groq
+
+result = stream_text(
+    model=groq("llama-3.3-70b-versatile"),
+    prompt="Write a poem about coding."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## Why Groq?
+
+- **Ultra-fast inference**: LPU hardware delivers industry-leading speed
+- **Open models**: Access to Llama, Mixtral, Gemma and more
+- **Free tier**: Generous free usage for experimentation
+- **Low latency**: Great for real-time applications
+- **OpenAI compatible**: Easy migration from OpenAI

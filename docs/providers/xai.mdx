@@ -1,0 +1,87 @@
+---
+title: "xAI"
+description: "Use xAI models (Grok) via the official API"
+---
+
+xAI provides access to Grok logic and vision models through an OpenAI-compatible API.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export XAI_API_KEY="xai-..."
+```
+
+Get your API key from [xAI Console](https://console.x.ai/).
+
+## Usage
+
+```python
+from ai_query import generate_text, xai
+
+result = await generate_text(
+    model=xai("grok-2-1212"),
+    prompt="Tell me a joke."
+)
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `grok-2-1212` | Grok 2 - Latest flagship model |
+| `grok-2-vision-1212` | Grok 2 Vision - Multimodal capabilities |
+| `grok-beta` | Grok Beta |
+| `grok-vision-beta` | Grok Vision Beta |
+
+See the [xAI models documentation](https://docs.x.ai/docs/models) for a full list.
+
+## Provider Options
+
+Customize parameters:
+
+```python
+result = await generate_text(
+    model=xai("grok-2-1212"),
+    prompt="Write a story.",
+    provider_options={
+        "xai": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+```
+
+## Tool Calling
+
+Tool calling is fully supported:
+
+```python
+from ai_query import generate_text, xai, tool, Field
+
+@tool(description="Get weather")
+async def get_weather(location: str = Field(description="City")) -> str:
+    return f"Weather in {location}: 72°F, sunny"
+
+result = await generate_text(
+    model=xai("grok-2-1212"),
+    prompt="What is the weather in SF?",
+    tools={"get_weather": get_weather}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, xai
+
+result = stream_text(
+    model=xai("grok-2-1212"),
+    prompt="Write a poem."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
