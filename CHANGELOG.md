@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.5.0
+
+- minor: Added xai, groq, deepseek and openrouter as openai compat endpoints
+
 ## 1.4.0
 
 - minor: feat: added multi-tenacy kinda logic for websocket and sse
