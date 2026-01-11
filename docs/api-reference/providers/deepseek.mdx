@@ -1,0 +1,67 @@
+---
+title: "deepseek()"
+description: "Create a DeepSeek language model"
+---
+
+Factory function to create a DeepSeek model instance. DeepSeek provides powerful AI models through an OpenAI-compatible API.
+
+## Signature
+
+```python
+def deepseek(model_id: str, *, api_key: str | None = None) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The DeepSeek model identifier (e.g., "deepseek-chat", "deepseek-reasoner").
+</ParamField>
+
+<ParamField path="api_key" type="str" optional>
+  DeepSeek API key. Falls back to `DEEPSEEK_API_KEY` environment variable.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for DeepSeek.
+
+## Environment
+
+Requires `DEEPSEEK_API_KEY` environment variable.
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `deepseek-chat` | DeepSeek-V3 - general purpose chat model |
+| `deepseek-reasoner` | DeepSeek-R1 - advanced reasoning model |
+
+## Example
+
+```python
+from ai_query import generate_text, deepseek
+
+result = await generate_text(
+    model=deepseek("deepseek-chat"),
+    prompt="Hello, world!"
+)
+```
+
+## Provider Options
+
+```python
+result = await generate_text(
+    model=deepseek("deepseek-reasoner"),
+    prompt="Solve this problem step by step.",
+    provider_options={
+        "openai": {
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+    }
+)
+```

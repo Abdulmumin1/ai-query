@@ -1,0 +1,69 @@
+---
+title: "openrouter()"
+description: "Create an OpenRouter language model"
+---
+
+Factory function to create an OpenRouter model instance. OpenRouter provides access to many AI models through a unified OpenAI-compatible API.
+
+## Signature
+
+```python
+def openrouter(model_id: str, *, api_key: str | None = None) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The model identifier in `provider/model-name` format (e.g., "openai/gpt-4o").
+</ParamField>
+
+<ParamField path="api_key" type="str" optional>
+  OpenRouter API key. Falls back to `OPENROUTER_API_KEY` environment variable.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for OpenRouter.
+
+## Environment
+
+Requires `OPENROUTER_API_KEY` environment variable.
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+```
+
+## Popular Models
+
+| Model ID | Description |
+|----------|-------------|
+| `openai/gpt-4o` | OpenAI GPT-4o |
+| `anthropic/claude-3.5-sonnet` | Anthropic Claude 3.5 Sonnet |
+| `google/gemini-pro-1.5` | Google Gemini Pro 1.5 |
+| `meta-llama/llama-3.1-405b-instruct` | Meta Llama 3.1 405B |
+
+## Example
+
+```python
+from ai_query import generate_text, openrouter
+
+result = await generate_text(
+    model=openrouter("openai/gpt-4o"),
+    prompt="Hello, world!"
+)
+```
+
+## Provider Options
+
+```python
+result = await generate_text(
+    model=openrouter("anthropic/claude-3.5-sonnet"),
+    prompt="Be creative.",
+    provider_options={
+        "openai": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+```

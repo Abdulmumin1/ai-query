@@ -1,0 +1,154 @@
+---
+title: "Providers Overview"
+description: "Connect to AI models from any provider"
+---
+
+ai-query supports multiple AI providers through a unified interface. Each provider has its own factory function that creates a `LanguageModel` instance.
+
+## Supported Providers
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="brain" href="/providers/openai">
+    GPT-5, GPT-4o, and o-series reasoning models
+  </Card>
+  <Card title="Anthropic" icon="message" href="/providers/anthropic">
+    Claude 3.5 Sonnet, Claude 3 Opus, and more
+  </Card>
+  <Card title="Google" icon="google" href="/providers/google">
+    Gemini 2.0, Gemini 1.5 Pro and Flash
+  </Card>
+  <Card title="OpenRouter" icon="shuffle" href="/providers/openrouter">
+    Access any model through one API
+  </Card>
+  <Card title="DeepSeek" icon="lightbulb" href="/providers/deepseek">
+    DeepSeek Chat and Reasoner models
+  </Card>
+  <Card title="Groq" icon="bolt" href="/providers/groq">
+    Groq LPU Inference
+  </Card>
+  <Card title="Meta Llama" icon="meta" href="/providers/llama">
+    Official Meta Llama API
+  </Card>
+  <Card title="xAI" icon="x" href="/providers/xai">
+    Grok Models via xAI API
+  </Card>
+</CardGroup>
+
+## Cloud Providers
+
+<CardGroup cols={2}>
+  <Card title="Bedrock" icon="aws" href="/providers/bedrock">
+    AWS Bedrock - managed foundation models
+  </Card>
+</CardGroup>
+
+<Tip>
+Bedrock requires an extra dependency: `pip install ai-query[bedrock]` or `uv add ai-query[bedrock]`
+</Tip>
+
+## Quick Start
+
+Each provider requires an API key set as an environment variable:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Google
+export GOOGLE_API_KEY="..."
+
+# OpenRouter
+export OPENROUTER_API_KEY="sk-or-v1-..."
+
+# DeepSeek
+export DEEPSEEK_API_KEY="sk-..."
+
+# Groq
+export GROQ_API_KEY="gsk-..."
+```
+
+## Usage
+
+All providers follow the same pattern - import the factory function and use it with `generate_text()` or `stream_text()`:
+
+```python
+from ai_query import generate_text, openai, anthropic, google, openrouter, deepseek, groq
+
+# OpenAI
+result = await generate_text(model=openai("gpt-4o"), prompt="Hello!")
+
+# Anthropic  
+result = await generate_text(model=anthropic("claude-sonnet-4-20250514"), prompt="Hello!")
+
+# Google
+result = await generate_text(model=google("gemini-2.0-flash"), prompt="Hello!")
+
+# OpenRouter (access any model)
+result = await generate_text(model=openrouter("openai/gpt-4o"), prompt="Hello!")
+
+# DeepSeek
+result = await generate_text(model=deepseek("deepseek-chat"), prompt="Hello!")
+
+# Groq (ultra-fast inference)
+result = await generate_text(model=groq("llama-3.3-70b-versatile"), prompt="Hello!")
+```
+
+## Switching Providers
+
+One of the key benefits of ai-query is how easy it is to switch between providers:
+
+```python
+from ai_query import generate_text, openai, anthropic
+
+# Just change the model - everything else stays the same!
+async def generate_response(prompt: str, use_openai: bool = True):
+    model = openai("gpt-4o") if use_openai else anthropic("claude-sonnet-4-20250514")
+    
+    result = await generate_text(
+        model=model,
+        prompt=prompt,
+        tools=my_tools  # Same tools work with any provider
+    )
+    return result.text
+```
+
+## Provider Options
+
+Each provider supports specific options through the `provider_options` parameter:
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Be creative!",
+    provider_options={
+        "openai": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+```
+
+See individual provider pages for available options.
+
+## OpenAI-Compatible Providers
+
+OpenRouter, DeepSeek, and Groq use OpenAI-compatible APIs internally. This means:
+
+- They share the same request/response format
+- Provider options use the `"openai"` key
+- Tool calling works identically
+
+```python
+# All three use the same underlying format
+result = await generate_text(
+    model=openrouter("openai/gpt-4o"),  # or deepseek("deepseek-chat") or groq("llama-3.3-70b-versatile")
+    prompt="Hello!",
+    provider_options={
+        "openai": {"temperature": 0.7}  # Same options key
+    }
+)
+```

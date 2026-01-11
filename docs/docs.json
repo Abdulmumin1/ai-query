@@ -17,8 +17,7 @@
             "group": "Getting Started",
             "pages": [
               "index",
-              "quickstart",
-              "providers"
+              "quickstart"
             ]
           },
           {
@@ -38,13 +37,40 @@
               "core/stateful-agents",
               "core/agent-server"
             ]
+          }
+        ]
+      },
+      {
+        "tab": "Providers",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "providers/index"
+            ]
           },
           {
-            "group": "Providers",
+            "group": "Native Providers",
             "pages": [
               "providers/openai",
               "providers/anthropic",
               "providers/google"
+            ]
+          },
+          {
+            "group": "OpenAI-Compatible",
+            "pages": [
+              "providers/openrouter",
+              "providers/deepseek",
+              "providers/groq",
+              "providers/llama",
+              "providers/xai"
+            ]
+          },
+          {
+            "group": "Cloud Providers",
+            "pages": [
+              "providers/bedrock"
             ]
           }
         ]
@@ -84,7 +110,11 @@
             "pages": [
               "api-reference/providers/openai",
               "api-reference/providers/anthropic",
-              "api-reference/providers/google"
+              "api-reference/providers/google",
+              "api-reference/providers/openrouter",
+              "api-reference/providers/deepseek",
+              "api-reference/providers/groq",
+              "api-reference/providers/bedrock"
             ]
           }
         ]

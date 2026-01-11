@@ -245,7 +245,7 @@ class GoogleProvider(BaseProvider):
             # Convert messages
             system_instruction, contents = await self._convert_messages(messages, session)
 
-            # Build generation config from kwargs
+            # Build generation config from kwargs (common params)
             generation_config: dict[str, Any] = {}
             if "max_tokens" in kwargs:
                 generation_config["maxOutputTokens"] = kwargs.pop("max_tokens")
@@ -257,10 +257,50 @@ class GoogleProvider(BaseProvider):
                 generation_config["topK"] = kwargs.pop("top_k")
             if "stop_sequences" in kwargs:
                 generation_config["stopSequences"] = kwargs.pop("stop_sequences")
+            if "presence_penalty" in kwargs:
+                generation_config["presencePenalty"] = kwargs.pop("presence_penalty")
+            if "frequency_penalty" in kwargs:
+                generation_config["frequencyPenalty"] = kwargs.pop("frequency_penalty")
+            if "seed" in kwargs:
+                generation_config["seed"] = kwargs.pop("seed")
 
-            # Merge with any generation_config from provider options
-            if "generation_config" in google_options:
-                generation_config.update(google_options.pop("generation_config"))
+            # Key mapping for snake_case to camelCase conversion
+            key_mapping = {
+                "max_output_tokens": "maxOutputTokens",
+                "top_p": "topP",
+                "top_k": "topK",
+                "stop_sequences": "stopSequences",
+                "candidate_count": "candidateCount",
+                "presence_penalty": "presencePenalty",
+                "frequency_penalty": "frequencyPenalty",
+                "response_mime_type": "responseMimeType",
+                "response_schema": "responseSchema",
+                "thinking_config": "thinkingConfig",
+                "speech_config": "speechConfig",
+            }
+
+            # Extract generation config options directly from google_options
+            # (users can pass them flat, without nesting in "generation_config")
+            for snake_key, camel_key in key_mapping.items():
+                if snake_key in google_options:
+                    generation_config[camel_key] = google_options.pop(snake_key)
+                elif camel_key in google_options:
+                    generation_config[camel_key] = google_options.pop(camel_key)
+            
+            # Also check for direct camelCase keys that aren't in the mapping
+            direct_keys = ["temperature", "seed"]
+            for key in direct_keys:
+                if key in google_options:
+                    generation_config[key] = google_options.pop(key)
+
+            # Handle nested thinking_config conversion
+            if "thinkingConfig" in generation_config:
+                tc = generation_config["thinkingConfig"]
+                if isinstance(tc, dict):
+                    if "include_thoughts" in tc:
+                        tc["includeThoughts"] = tc.pop("include_thoughts")
+                    if "thinking_budget" in tc:
+                        tc["thinkingBudget"] = tc.pop("thinking_budget")
 
             # Build request body
             request_body: dict[str, Any] = {
@@ -273,25 +313,22 @@ class GoogleProvider(BaseProvider):
             if generation_config:
                 request_body["generationConfig"] = generation_config
 
-            # Add remaining google options (safety_settings, etc.)
+            # Add safety_settings if provided
             if "safety_settings" in google_options:
-                # Convert safety settings to proper format
                 safety_settings = google_options.pop("safety_settings")
                 if isinstance(safety_settings, dict):
-                    # Convert dict format to list format expected by API
+                    # Convert dict format {category: threshold} to list format
                     request_body["safetySettings"] = [
                         {"category": k, "threshold": v}
                         for k, v in safety_settings.items()
                     ]
-                else:
+                elif isinstance(safety_settings, list):
+                    # Already in list format, use as-is
                     request_body["safetySettings"] = safety_settings
 
             # Add tools if provided
             if tools:
                 request_body["tools"] = self._convert_tools(tools)
-
-            # Only pass through known Google API fields, ignore others
-            # (prevents errors from unknown fields like "thinkingConfig")
 
             url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
 
@@ -360,7 +397,7 @@ class GoogleProvider(BaseProvider):
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Build request body for Google API."""
-        # Build generation config from kwargs
+        # Build generation config from kwargs (common params)
         generation_config: dict[str, Any] = {}
         if "max_tokens" in kwargs:
             generation_config["maxOutputTokens"] = kwargs.pop("max_tokens")
@@ -372,10 +409,50 @@ class GoogleProvider(BaseProvider):
             generation_config["topK"] = kwargs.pop("top_k")
         if "stop_sequences" in kwargs:
             generation_config["stopSequences"] = kwargs.pop("stop_sequences")
+        if "presence_penalty" in kwargs:
+            generation_config["presencePenalty"] = kwargs.pop("presence_penalty")
+        if "frequency_penalty" in kwargs:
+            generation_config["frequencyPenalty"] = kwargs.pop("frequency_penalty")
+        if "seed" in kwargs:
+            generation_config["seed"] = kwargs.pop("seed")
 
-        # Merge with any generation_config from provider options
-        if "generation_config" in google_options:
-            generation_config.update(google_options.pop("generation_config"))
+        # Key mapping for snake_case to camelCase conversion
+        key_mapping = {
+            "max_output_tokens": "maxOutputTokens",
+            "top_p": "topP",
+            "top_k": "topK",
+            "stop_sequences": "stopSequences",
+            "candidate_count": "candidateCount",
+            "presence_penalty": "presencePenalty",
+            "frequency_penalty": "frequencyPenalty",
+            "response_mime_type": "responseMimeType",
+            "response_schema": "responseSchema",
+            "thinking_config": "thinkingConfig",
+            "speech_config": "speechConfig",
+        }
+
+        # Extract generation config options directly from google_options
+        # (users can pass them flat, without nesting in "generation_config")
+        for snake_key, camel_key in key_mapping.items():
+            if snake_key in google_options:
+                generation_config[camel_key] = google_options.pop(snake_key)
+            elif camel_key in google_options:
+                generation_config[camel_key] = google_options.pop(camel_key)
+        
+        # Also check for direct camelCase keys that aren't in the mapping
+        direct_keys = ["temperature", "seed"]
+        for key in direct_keys:
+            if key in google_options:
+                generation_config[key] = google_options.pop(key)
+
+        # Handle nested thinking_config conversion
+        if "thinkingConfig" in generation_config:
+            tc = generation_config["thinkingConfig"]
+            if isinstance(tc, dict):
+                if "include_thoughts" in tc:
+                    tc["includeThoughts"] = tc.pop("include_thoughts")
+                if "thinking_budget" in tc:
+                    tc["thinkingBudget"] = tc.pop("thinking_budget")
 
         # Build request body
         request_body: dict[str, Any] = {
@@ -392,11 +469,13 @@ class GoogleProvider(BaseProvider):
         if "safety_settings" in google_options:
             safety_settings = google_options.pop("safety_settings")
             if isinstance(safety_settings, dict):
+                # Convert dict format {category: threshold} to list format
                 request_body["safetySettings"] = [
                     {"category": k, "threshold": v}
                     for k, v in safety_settings.items()
                 ]
-            else:
+            elif isinstance(safety_settings, list):
+                # Already in list format, use as-is
                 request_body["safetySettings"] = safety_settings
 
         # Add tools if provided
