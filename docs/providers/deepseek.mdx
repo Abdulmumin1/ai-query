@@ -1,0 +1,102 @@
+---
+title: "DeepSeek"
+description: "Use DeepSeek's advanced AI models"
+---
+
+DeepSeek provides powerful AI models including their flagship chat model and the DeepSeek Reasoner for complex reasoning tasks. Their API is OpenAI-compatible, making integration seamless.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+```
+
+Get your API key from [DeepSeek Platform](https://platform.deepseek.com/).
+
+## Usage
+
+```python
+from ai_query import generate_text, deepseek
+
+result = await generate_text(
+    model=deepseek("deepseek-chat"),
+    prompt="Explain machine learning in simple terms."
+)
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `deepseek-chat` | DeepSeek-V3 - general purpose chat model |
+| `deepseek-reasoner` | DeepSeek-R1 - advanced reasoning model |
+
+## Provider Options
+
+Customize parameters:
+
+```python
+result = await generate_text(
+    model=deepseek("deepseek-chat"),
+    prompt="Write a creative story.",
+    provider_options={
+        "deepseek": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+
+## Using DeepSeek Reasoner
+
+DeepSeek Reasoner (R1) excels at complex reasoning tasks:
+
+```python
+from ai_query import generate_text, deepseek
+
+result = await generate_text(
+    model=deepseek("deepseek-reasoner"),
+    prompt="Solve this step by step: If a train travels 120 km in 2 hours, then stops for 30 minutes, then travels another 90 km in 1.5 hours, what is its average speed for the entire journey?"
+)
+```
+
+## Tool Calling
+
+Tool calling works the same as with other providers:
+
+```python
+from ai_query import generate_text, deepseek, tool, Field
+
+@tool(description="Calculate a math expression")
+async def calculate(expression: str = Field(description="Math expression")) -> str:
+    return str(eval(expression))
+
+result = await generate_text(
+    model=deepseek("deepseek-chat"),
+    prompt="What is 25 * 17 + 89?",
+    tools={"calculate": calculate}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, deepseek
+
+result = stream_text(
+    model=deepseek("deepseek-chat"),
+    prompt="Write a poem about coding."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## Why DeepSeek?
+
+- **Cost effective**: Highly competitive pricing
+- **Strong performance**: Excellent benchmark results
+- **Reasoning capabilities**: DeepSeek-R1 excels at complex reasoning
+- **OpenAI compatible**: Easy migration from OpenAI

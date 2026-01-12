@@ -1,0 +1,69 @@
+---
+title: "groq()"
+description: "Create a Groq language model"
+---
+
+Factory function to create a Groq model instance. Groq provides ultra-fast inference for open-source models through an OpenAI-compatible API.
+
+## Signature
+
+```python
+def groq(model_id: str, *, api_key: str | None = None) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The Groq model identifier (e.g., "llama-3.3-70b-versatile", "mixtral-8x7b-32768").
+</ParamField>
+
+<ParamField path="api_key" type="str" optional>
+  Groq API key. Falls back to `GROQ_API_KEY` environment variable.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for Groq.
+
+## Environment
+
+Requires `GROQ_API_KEY` environment variable.
+
+```bash
+export GROQ_API_KEY="gsk_..."
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `llama-3.3-70b-versatile` | Llama 3.3 70B - best quality |
+| `llama-3.1-8b-instant` | Llama 3.1 8B - ultra fast |
+| `mixtral-8x7b-32768` | Mixtral 8x7B - 32k context |
+| `gemma2-9b-it` | Gemma 2 9B - Google's open model |
+
+## Example
+
+```python
+from ai_query import generate_text, groq
+
+result = await generate_text(
+    model=groq("llama-3.3-70b-versatile"),
+    prompt="Hello, world!"
+)
+```
+
+## Provider Options
+
+```python
+result = await generate_text(
+    model=groq("llama-3.3-70b-versatile"),
+    prompt="Be creative.",
+    provider_options={
+        "openai": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+```

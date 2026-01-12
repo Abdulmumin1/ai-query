@@ -1,0 +1,89 @@
+---
+title: "bedrock()"
+description: "Create an AWS Bedrock language model"
+---
+
+Factory function to create an AWS Bedrock model instance using the Converse API.
+
+<Note>
+Requires optional dependency: `pip install ai-query[bedrock]`
+</Note>
+
+## Signature
+
+```python
+def bedrock(
+    model_id: str,
+    *,
+    region: str | None = None,
+    credentials: dict | Callable | None = None,
+) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The Bedrock model ID (e.g., "anthropic.claude-3-5-sonnet-20241022-v2:0").
+</ParamField>
+
+<ParamField path="region" type="str" optional>
+  AWS region. Falls back to `AWS_REGION` or `AWS_DEFAULT_REGION` environment variable.
+</ParamField>
+
+<ParamField path="credentials" type="dict | Callable" optional>
+  AWS credentials. Can be:
+  - `None`: Use default AWS credential chain
+  - `dict`: `{"access_key": "...", "secret_key": "...", "session_token": "..."}`
+  - `Callable`: A credentials provider function
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for AWS Bedrock.
+
+## Environment
+
+Uses the standard AWS credential chain. Optionally set:
+
+```bash
+export AWS_REGION="us-east-1"
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `anthropic.claude-3-5-sonnet-20241022-v2:0` | Claude 3.5 Sonnet v2 |
+| `anthropic.claude-3-haiku-20240307-v1:0` | Claude 3 Haiku |
+| `meta.llama3-1-70b-instruct-v1:0` | Llama 3.1 70B |
+| `amazon.nova-pro-v1:0` | Amazon Nova Pro |
+
+## Example
+
+```python
+from ai_query import generate_text
+from ai_query.providers.bedrock import bedrock
+
+result = await generate_text(
+    model=bedrock("anthropic.claude-3-5-sonnet-20241022-v2:0"),
+    prompt="Hello, world!"
+)
+```
+
+## With Credentials
+
+```python
+result = await generate_text(
+    model=bedrock(
+        "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        region="us-west-2",
+        credentials={
+            "access_key": "AKIA...",
+            "secret_key": "..."
+        }
+    ),
+    prompt="Hello!"
+)
+```

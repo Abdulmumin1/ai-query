@@ -1,0 +1,88 @@
+---
+title: "Meta Llama"
+description: "Use Meta Llama models via the official API"
+---
+
+Meta Llama provides access to the official Llama models through an OpenAI-compatible API.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export LLAMA_API_KEY="la-..."
+```
+
+Get your API key from [Meta Llama](https://www.llama.com/).
+
+## Usage
+
+```python
+from ai_query import generate_text, llama
+
+result = await generate_text(
+    model=llama("llama-3.1-70b-instruct"),
+    prompt="Explain quantum computing."
+)
+```
+
+## Available Models
+
+| Model ID | Description |
+|----------|-------------|
+| `llama-3.1-405b-instruct` | Llama 3.1 405B - Frontier intelligence |
+| `llama-3.1-70b-instruct` | Llama 3.1 70B - High performance |
+| `llama-3.1-8b-instruct` | Llama 3.1 8B - Fast and lightweight |
+| `llama-3.2-90b-vision-instruct` | Llama 3.2 90B - Vision capable |
+| `llama-3.2-11b-vision-instruct` | Llama 3.2 11B - Vision capable |
+
+See the [Llama API docs](https://llama.developer.meta.com/docs/models) for model details.
+
+## Provider Options
+
+Customize parameters:
+
+```python
+result = await generate_text(
+    model=llama("llama-3.1-70b-instruct"),
+    prompt="Write a story.",
+    provider_options={
+        "llama": {
+            "temperature": 0.9,
+            "max_tokens": 1000
+        }
+    }
+)
+```
+
+## Tool Calling
+
+Tool calling works standardly:
+
+```python
+from ai_query import generate_text, llama, tool, Field
+
+@tool(description="Get stock price")
+async def get_stock(symbol: str = Field(description="Stock symbol")) -> str:
+    return f"{symbol}: $150.00"
+
+result = await generate_text(
+    model=llama("llama-3.1-70b-instruct"),
+    prompt="What is the price of AAPL?",
+    tools={"get_stock": get_stock}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text, llama
+
+result = stream_text(
+    model=llama("llama-3.1-70b-instruct"),
+    prompt="Write a song."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```

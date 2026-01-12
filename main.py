@@ -1,136 +1,69 @@
-from ai_query.agents import ChatAgent, SQLiteAgent, AgentServer, AgentServerConfig
-from ai_query import tool, Field, step_count_is
-from ai_query.providers.google import google
-from datetime import datetime
+"""Example using ChatAgent with MCP server tools."""
 
-class PersonalAssistant(ChatAgent, SQLiteAgent):
-    """Per-user AI assistant with persistent tasks and notes."""
+import asyncio
+from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query.providers.openrouter import openrouter
+from ai_query import connect_mcp_http, step_count_is
+
+
+class MCPBot(ChatAgent, SQLiteAgent):
+    """Chatbot that uses tools from an MCP server."""
     
-    db_path = "./user_data.db"
-    model = google("gemini-2.0-flash")
-    system = """You are a personal productivity assistant.
-    Help users manage tasks, take notes, and stay organized.
-    Use tools to store and retrieve information."""
-
+    db_path = "./mcp_bot.db"
+    model = openrouter("z-ai/glm-4.5-air:free")
+    system = "You are a helpful assistant. Use tools when needed."
+    initial_state = {"message_count": 0}
+    
+    # Will be set after connecting to MCP
+    _mcp_tools: dict = {}
+    
     @property
     def stop_when(self):
         return step_count_is(10)
     
-    initial_state = {
-        "name": None,
-        "preferences": {},
-        "last_active": None,
-    }
-    
-    async def on_start(self):
-        # Create tables for this user
-        self.sql("""
-            CREATE TABLE IF NOT EXISTS tasks (
-                id INTEGER PRIMARY KEY,
-                title TEXT,
-                done BOOLEAN DEFAULT 0,
-                created_at TEXT
-            )
-        """)
-        self.sql("""
-            CREATE TABLE IF NOT EXISTS notes (
-                id INTEGER PRIMARY KEY,
-                content TEXT,
-                created_at TEXT
-            )
-        """)
-    
     @property
     def tools(self):
-        @tool(description="Add a new task to the user's list")
-        def add_task(title: str = Field(description="Task title")) -> str:
-            self.sql(
-                "INSERT INTO tasks (title, created_at) VALUES (?, ?)",
-                title, datetime.now().isoformat()
-            )
-            return f"Added task: {title}"
-        
-        @tool(description="List all pending tasks")
-        def list_tasks() -> str:
-            rows = self.sql("SELECT id, title FROM tasks WHERE done = 0")
-            if not rows:
-                return "No pending tasks!"
-            return "\n".join([f"{r['id']}. {r['title']}" for r in rows])
-        
-        @tool(description="Mark a task as complete")
-        def complete_task(task_id: int = Field(description="Task ID")) -> str:
-            self.sql("UPDATE tasks SET done = 1 WHERE id = ?", task_id)
-            return f"Completed task #{task_id}"
-        
-        @tool(description="Save a note")
-        def save_note(content: str = Field(description="Note content")) -> str:
-            self.sql(
-                "INSERT INTO notes (content, created_at) VALUES (?, ?)",
-                content, datetime.now().isoformat()
-            )
-            return "Note saved!"
-        
-        @tool(description="Search notes")
-        def search_notes(
-            query: str = Field(description="Search query"),
-        ) -> str:
-            rows = self.sql(
-                "SELECT content FROM notes WHERE content LIKE ?",
-                f"%{query}%"
-            )
-            if not rows:
-                return "No matching notes found."
-            return "\n---\n".join([r['content'] for r in rows])
-        
-        @tool(description="Set a user preference")
-        async def set_preference(
-            key: str = Field(description="Preference name"),
-            value: str = Field(description="Preference value"),
-        ) -> str:
-            prefs = {**self.state["preferences"], key: value}
-            await self.set_state({**self.state, "preferences": prefs})
-            return f"Set {key} = {value}"
-        
-        return {
-            "add_task": add_task,
-            "list_tasks": list_tasks,
-            "complete_task": complete_task,
-            "save_note": save_note,
-            "search_notes": search_notes,
-            "set_preference": set_preference,
-        }
+        return self._mcp_tools
     
-    async def on_connect(self, connection, ctx):
-        await super().on_connect(connection, ctx)
-        user_id = self.id.replace("user-", "")
-        
-        # Personalized greeting
-        name = self.state.get("name") or user_id
-        pending = self.sql("SELECT COUNT(*) as c FROM tasks WHERE done = 0")[0]['c']
-        
-        greeting = f"Welcome back, {name}!"
-        if pending > 0:
-            greeting += f" You have {pending} pending tasks."
-        
-        await connection.send(greeting)
+    def on_step_finish(self, event):
+        if event.step.tool_calls:
+            for tc in event.step.tool_calls:
+                print(f"  [Tool] {tc.name}")
     
-    async def on_message(self, connection, message):
-        # Update last active time
-        await self.set_state({
-            **self.state,
-            "last_active": datetime.now().isoformat(),
-        })
+    async def on_start(self):
+        print(f"Bot started! Previous messages: {len(self.messages)}")
+
+
+async def main():
+    # Connect to MCP server first
+    print("Connecting to MCP server...")
+    mcp_server = await connect_mcp_http("https://ai-query.dev/mcp")
+    
+    try:
+        print(f"Connected! Available tools: {list(mcp_server.tools.keys())}")
         
-        # Stream AI response
-        response = await self.stream_chat_sse(message)
-        await connection.send(response)
+        async with MCPBot("mcp-bot2") as bot:
+            # Inject MCP tools into the bot
+            bot._mcp_tools = mcp_server.tools
+            
+            while True:
+                print("\n--- Chat ---")
+                question = input("Enter your message (or 'quit'): ")
+                
+                if question.lower() in ('quit', 'exit', 'q'):
+                    break
+                
+                print("\nBot: ", end="", flush=True)
+                async for chunk in bot.stream_chat(question):
+                    print(chunk, end="", flush=True)
+                print()
+                
+                print(f"\nTotal messages: {len(bot.messages)}")
+    finally:
+        # Always close the MCP connection
+        await mcp_server.close()
+        print("MCP server disconnected.")
 
 
 if __name__ == "__main__":
-    config = AgentServerConfig(
-        idle_timeout=1800,  # 30 min idle timeout
-        max_agents=100,
-        enable_rest_api=True,
-        allowed_origins=["http://127.0.0.1:5500"],
-    )
-    AgentServer(PersonalAssistant, config=config).serve(port=8080)
+    asyncio.run(main())
