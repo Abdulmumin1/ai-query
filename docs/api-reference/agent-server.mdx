@@ -165,16 +165,97 @@ Called when an agent is about to be evicted.
 
 ## Endpoints
 
-When the server is running:
+When the server is running, these endpoints are available:
+
+### Real-time Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `{base_path}/{id}/ws` | WebSocket connection |
-| GET | `{base_path}/{id}/events` | SSE stream |
+| GET | `{base_path}/{id}/events` | SSE stream for AI streaming |
+
+### REST API Endpoints
+
+These are enabled when `enable_rest_api=True` (the default):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `{base_path}/{id}` | Generic request handler (like `handle_request()`) |
+| POST | `{base_path}/{id}/chat` | Chat with the agent (supports `?stream=true`) |
+| POST | `{base_path}/{id}/invoke` | Invoke agent task |
 | GET | `{base_path}/{id}/state` | Get agent state |
 | PUT | `{base_path}/{id}/state` | Update agent state |
 | DELETE | `{base_path}/{id}` | Evict agent |
-| GET | `/agents` | List agents (if enabled) |
+| GET | `/agents` | List agents (if `enable_list_agents=True`) |
+
+### Request Formats
+
+**POST `{base_path}/{id}` (Generic)**
+
+Accepts the same format as `agent.handle_request()`:
+
+```json
+// Chat
+{"action": "chat", "message": "Hello!"}
+
+// Invoke
+{"action": "invoke", "payload": {"task": "summarize", "text": "..."}}
+
+// Get state
+{"action": "state"}
+```
+
+**POST `{base_path}/{id}/chat`**
+
+Standard chat request:
+
+```json
+{"message": "Hello, how can you help me?"}
+```
+
+Response:
+```json
+{"agent_id": "agent-123", "response": "I can help with..."}
+```
+
+**Streaming Chat (`?stream=true`)**
+
+Send a request to `{base_path}/{id}/chat?stream=true` to get a Server-Sent Events (SSE) stream.
+
+Request:
+```bash
+curl -X POST "http://localhost:8080/agent/user-1/chat?stream=true" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Tell me a story"}'
+```
+
+Response (Content-Type: text/event-stream):
+```
+event: start
+data:
+
+event: chunk
+data: Once upon a time
+
+event: chunk
+data: , in a land far away...
+
+event: end
+data: "Once upon a time, in a land far away..."
+```
+
+**POST `{base_path}/{id}/invoke`**
+
+```json
+{"task": "summarize", "text": "Long document..."}
+// or
+{"payload": {"task": "summarize", "text": "..."}}
+```
+
+Response:
+```json
+{"agent_id": "agent-123", "result": {"summary": "..."}}
+```
 
 ---
 

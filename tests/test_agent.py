@@ -150,14 +150,14 @@ class TestSQLiteAgent:
         
         async with MyAgent("agent-1", db_path=db_path) as agent:
             # Create table
-            agent.sql("CREATE TABLE users (id TEXT, name TEXT)")
-            
+            await agent.sql("CREATE TABLE users (id TEXT, name TEXT)")
+
             # Insert
-            agent.sql("INSERT INTO users VALUES (?, ?)", "1", "Alice")
-            
+            await agent.sql("INSERT INTO users VALUES (?, ?)", "1", "Alice")
+
             # Query
-            users = agent.sql("SELECT * FROM users")
-            
+            users = await agent.sql("SELECT * FROM users")
+
             assert len(users) == 1
             assert users[0]["id"] == "1"
             assert users[0]["name"] == "Alice"

@@ -14,6 +14,8 @@ from ai_query.agents.websocket import Connection, ConnectionContext
 
 if TYPE_CHECKING:
     from ai_query.agents.base import Agent
+    from ai_query.agents.transport import AgentTransport
+    from ai_query.agents.events import EventBus
 
 State = TypeVar("State")
 
@@ -111,17 +113,27 @@ class AgentServer(Generic[State]):
         self,
         agent_cls: type["Agent[State]"],
         config: AgentServerConfig | None = None,
+        transport: "AgentTransport | None" = None,
+        event_bus: "EventBus | None" = None,
     ):
         """Initialize the agent server.
         
         Args:
             agent_cls: The Agent class to instantiate for each ID.
             config: Optional configuration for lifecycle and security.
+            transport: Optional custom transport for agent-to-agent communication.
+                If not provided, LocalTransport is used.
+            event_bus: Optional custom event bus for pub/sub.
+                If not provided, LocalEventBus is used.
         """
         self._agent_cls = agent_cls
         self._config = config or AgentServerConfig()
         self._agents: dict[str, _AgentMeta] = {}
         self._eviction_task: asyncio.Task | None = None
+        self._transport = transport
+        self._event_bus = event_bus
+        self._transport_initialized = False
+        self._event_bus_initialized = False
     
     # ─── Core API ────────────────────────────────────────────────────────
     
@@ -153,24 +165,41 @@ class AgentServer(Generic[State]):
         
         # Create new agent
         agent = self._agent_cls(agent_id)
+        
+        # Inject transport and event bus
+        if self._transport is None and not self._transport_initialized:
+            from ai_query.agents.transport import LocalTransport
+            self._transport = LocalTransport(self)
+            self._transport_initialized = True
+        if self._event_bus is None and not self._event_bus_initialized:
+            from ai_query.agents.events import LocalEventBus
+            self._event_bus = LocalEventBus()
+            self._event_bus_initialized = True
+        
+        agent._transport = self._transport
+        agent._event_bus = self._event_bus
+        
         self._agents[agent_id] = _AgentMeta(agent=agent)
         return agent
     
     async def evict(self, agent_id: str) -> None:
         """Evict an agent, closing all connections and removing it.
-        
+
         Args:
             agent_id: The agent ID to evict.
         """
         if agent_id not in self._agents:
             return
-        
+
         meta = self._agents[agent_id]
         agent = meta.agent
-        
+
         # Call lifecycle hook
         await self.on_agent_evict(agent)
-        
+
+        # Stop the agent's message processor
+        await agent.stop()
+
         # Close all connections
         for conn in list(agent._connections):
             try:
@@ -178,7 +207,7 @@ class AgentServer(Generic[State]):
             except Exception:
                 pass
         agent._connections.clear()
-        
+
         # Close SSE connections
         for sse in list(agent._sse_connections):
             try:
@@ -186,7 +215,7 @@ class AgentServer(Generic[State]):
             except Exception:
                 pass
         agent._sse_connections.clear()
-        
+
         # Remove from registry
         del self._agents[agent_id]
     
@@ -274,21 +303,21 @@ class AgentServer(Generic[State]):
         meta.last_activity = time.time()
         
         # Connect
-        await agent.on_connect(connection, ctx)
-        
+        agent.enqueue("connect", None, connection=connection, ctx=ctx)
+
         try:
             async for msg in ws:
                 meta.last_activity = time.time()
                 if msg.type == WSMsgType.TEXT:
-                    await agent.on_message(connection, msg.data)
+                    agent.enqueue("message", msg.data, connection=connection)
                 elif msg.type == WSMsgType.BINARY:
-                    await agent.on_message(connection, msg.data)
+                    agent.enqueue("message", msg.data, connection=connection)
                 elif msg.type == WSMsgType.ERROR:
-                    await agent.on_error(connection, ws.exception())
+                    agent.enqueue("error", ws.exception(), connection=connection)
         except Exception as e:
-            await agent.on_error(connection, e)
+            agent.enqueue("error", e, connection=connection)
         finally:
-            await agent.on_close(connection, 1000, "Client disconnected")
+            agent.enqueue("close", (1000, "Client disconnected"), connection=connection)
             meta.connection_count -= 1
             meta.last_activity = time.time()
         
@@ -402,7 +431,7 @@ class AgentServer(Generic[State]):
     async def _handle_list_agents(self, request: web.Request) -> web.Response:
         """Handle GET /agents."""
         await self._check_auth(request)
-        
+
         agents_data = []
         for agent_id, meta in self._agents.items():
             agents_data.append({
@@ -410,9 +439,146 @@ class AgentServer(Generic[State]):
                 "connections": meta.connection_count,
                 "last_activity": meta.last_activity,
             })
-        
+
         response = web.Response(
             text=json.dumps({"agents": agents_data}),
+            content_type="application/json",
+        )
+        return self._add_cors_headers(response)
+
+    async def _handle_chat(self, request: web.Request) -> web.Response | web.StreamResponse:
+        """Handle POST /agent/{id}/chat - serverless-style chat endpoint."""
+        await self._check_auth(request)
+
+        agent_id = request.match_info["agent_id"]
+        agent = self.get_or_create(agent_id)
+
+        # Start agent if needed
+        if agent._state is None:
+            await agent.start()
+            await self.on_agent_create(agent)
+
+        # Update activity
+        if agent_id in self._agents:
+            self._agents[agent_id].last_activity = time.time()
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise web.HTTPBadRequest(text="Invalid JSON in request body")
+
+        message = body.get("message", "")
+        if not message:
+            raise web.HTTPBadRequest(text="Missing 'message' field")
+
+        # Check for streaming request
+        is_streaming = request.query.get("stream", "").lower() == "true"
+
+        if is_streaming:
+            response = web.StreamResponse(
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
+            self._add_cors_headers(response)
+            await response.prepare(request)
+
+            stream_request = {
+                "action": "chat",
+                "message": message,
+                "payload": body.get("payload", {})
+            }
+
+            try:
+                async for chunk in agent.handle_request_stream(stream_request):
+                    await response.write(chunk.encode())
+            except Exception as e:
+                # If stream already started, we can't change status code
+                # Send error event
+                await response.write(f"event: error\ndata: {str(e)}\n\n".encode())
+
+            return response
+
+        # Use handle_request for consistent behavior
+        result = await agent.handle_request({
+            "action": "chat",
+            "message": message
+        })
+
+        response = web.Response(
+            text=json.dumps(result),
+            content_type="application/json",
+        )
+        return self._add_cors_headers(response)
+
+    async def _handle_invoke(self, request: web.Request) -> web.Response:
+        """Handle POST /agent/{id}/invoke - serverless-style invoke endpoint."""
+        await self._check_auth(request)
+
+        agent_id = request.match_info["agent_id"]
+        agent = self.get_or_create(agent_id)
+
+        # Start agent if needed
+        if agent._state is None:
+            await agent.start()
+            await self.on_agent_create(agent)
+
+        # Update activity
+        if agent_id in self._agents:
+            self._agents[agent_id].last_activity = time.time()
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise web.HTTPBadRequest(text="Invalid JSON in request body")
+
+        payload = body.get("payload", body)
+
+        # Use handle_request for consistent behavior
+        result = await agent.handle_request({
+            "action": "invoke",
+            "payload": payload
+        })
+
+        response = web.Response(
+            text=json.dumps(result),
+            content_type="application/json",
+        )
+        return self._add_cors_headers(response)
+
+    async def _handle_request(self, request: web.Request) -> web.Response:
+        """Handle POST /agent/{id} - generic request handler.
+
+        Accepts the same format as agent.handle_request():
+        - {"action": "chat", "message": "..."}
+        - {"action": "invoke", "payload": {...}}
+        - {"action": "state"}
+        """
+        await self._check_auth(request)
+
+        agent_id = request.match_info["agent_id"]
+        agent = self.get_or_create(agent_id)
+
+        # Start agent if needed
+        if agent._state is None:
+            await agent.start()
+            await self.on_agent_create(agent)
+
+        # Update activity
+        if agent_id in self._agents:
+            self._agents[agent_id].last_activity = time.time()
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            raise web.HTTPBadRequest(text="Invalid JSON in request body")
+
+        result = await agent.handle_request(body)
+
+        response = web.Response(
+            text=json.dumps(result),
             content_type="application/json",
         )
         return self._add_cors_headers(response)
@@ -482,8 +648,13 @@ class AgentServer(Generic[State]):
         if self._config.enable_rest_api:
             app.router.add_get(f"{base}/{{agent_id}}/state", self._handle_get_state)
             app.router.add_put(f"{base}/{{agent_id}}/state", self._handle_put_state)
+            app.router.add_post(f"{base}/{{agent_id}}/chat", self._handle_chat)
+            app.router.add_post(f"{base}/{{agent_id}}/invoke", self._handle_invoke)
+            app.router.add_post(f"{base}/{{agent_id}}", self._handle_request)
             app.router.add_delete(f"{base}/{{agent_id}}", self._handle_delete_agent)
             app.router.add_options(f"{base}/{{agent_id}}/state", self._handle_options)
+            app.router.add_options(f"{base}/{{agent_id}}/chat", self._handle_options)
+            app.router.add_options(f"{base}/{{agent_id}}/invoke", self._handle_options)
             app.router.add_options(f"{base}/{{agent_id}}", self._handle_options)
         
         # List agents endpoint
@@ -503,7 +674,13 @@ class AgentServer(Generic[State]):
         print(f"  WebSocket: ws://{host}:{port}{base}/{{agent_id}}/ws")
         print(f"  SSE:       http://{host}:{port}{base}/{{agent_id}}/events")
         if self._config.enable_rest_api:
-            print(f"  REST API:  http://{host}:{port}{base}/{{agent_id}}/state")
+            print(f"  REST API:")
+            print(f"    POST   {base}/{{agent_id}}        - Generic request handler")
+            print(f"    POST   {base}/{{agent_id}}/chat   - Chat endpoint")
+            print(f"    POST   {base}/{{agent_id}}/invoke - Invoke endpoint")
+            print(f"    GET    {base}/{{agent_id}}/state  - Get state")
+            print(f"    PUT    {base}/{{agent_id}}/state  - Update state")
+            print(f"    DELETE {base}/{{agent_id}}        - Evict agent")
         if self._config.enable_list_agents:
             print(f"  List:      http://{host}:{port}/agents")
         if self._config.idle_timeout:

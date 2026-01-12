@@ -1,0 +1,209 @@
+---
+title: "Agent-to-Agent Communication"
+description: "Make agents work together by calling each other"
+---
+
+Agents can call other agents using `invoke()`. This is useful when you want to split work across specialized agents.
+
+## How It Works
+
+![Invoke-Mechanism](https://rawcontent.dearfutureself.me/inoke-handle_request-mechanism.png)
+
+1. **Agent A** calls `self.invoke("agent-b", payload)`
+2. **Agent B** receives the call in `handle_invoke(payload)`
+3. **Agent B** returns a response dict
+4. **Agent A** gets the response
+
+## Complete Example
+
+Here's a working example with two agents - a coordinator that delegates to a researcher:
+
+```python
+from ai_query.agents import ChatAgent, InMemoryAgent, AgentServer
+
+# ─── AGENT 1: Coordinator ────────────────────────────────────
+class Coordinator(ChatAgent, InMemoryAgent):
+    system = "You help users find information"
+    
+    async def on_message(self, conn, msg):
+        # Call the researcher agent and wait for response
+        result = await self.invoke("researcher", {
+            "task": "search",
+            "query": msg
+        })
+        
+        # Send result back to the user
+        await conn.send(f"Found: {result['answer']}")
+
+
+# ─── AGENT 2: Researcher ─────────────────────────────────────
+class Researcher(ChatAgent, InMemoryAgent):
+    system = "You research topics thoroughly"
+    
+    async def handle_invoke(self, payload: dict) -> dict:
+        """
+        Called when another agent calls invoke() on this agent.
+        
+        Args:
+            payload: Whatever dict the caller sent. Structure is up to you.
+        
+        Returns:
+            A dict that gets returned to the caller.
+        """
+        task = payload.get("task")
+        query = payload.get("query", "")
+        
+        if task == "search":
+            # Use AI to research the topic
+            answer = await self.chat(f"Research this topic: {query}")
+            return {"status": "ok", "answer": answer}
+        
+        return {"status": "error", "message": f"Unknown task: {task}"}
+
+
+# ─── RUN BOTH AGENTS ─────────────────────────────────────────
+def create_agent(agent_id: str):
+    """Factory that creates the right agent type based on ID."""
+    if agent_id == "researcher":
+        return Researcher(agent_id)
+    return Coordinator(agent_id)
+
+# Start server - both agents available at different IDs
+AgentServer(create_agent).serve(port=8080)
+
+# Connect to ws://localhost:8080/agent/coordinator/ws to chat
+# The coordinator will call the researcher automatically
+```
+
+## The invoke() Method
+
+```python
+result = await self.invoke(agent_id, payload, timeout=30.0)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent_id` | `str` | ID of the agent to call |
+| `payload` | `dict` | Data to send (you define the structure) |
+| `timeout` | `float` | Max seconds to wait (default: 30) |
+
+**Returns:** Whatever dict the target agent returns from `handle_invoke()`.
+
+## The handle_invoke() Method
+
+Override this to receive calls from other agents:
+
+```python
+async def handle_invoke(self, payload: dict) -> dict:
+    """
+    Handle incoming calls from other agents.
+    
+    The payload structure is whatever you define. A common pattern
+    is to use a "task" field to route to different handlers.
+    """
+    task = payload.get("task")
+    
+    if task == "summarize":
+        text = payload.get("text", "")
+        summary = await self.chat(f"Summarize: {text}")
+        return {"summary": summary}
+    
+    if task == "translate":
+        text = payload.get("text", "")
+        lang = payload.get("language", "Spanish")
+        translation = await self.chat(f"Translate to {lang}: {text}")
+        return {"translation": translation}
+    
+    # Return error for unknown tasks
+    return {"error": f"Unknown task: {task}"}
+```
+
+## Common Patterns
+
+### Pattern 1: Pipeline (Sequential)
+
+Pass data through a chain of agents:
+
+```python
+class OrchestratorAgent(ChatAgent, InMemoryAgent):
+    async def process(self, document: str):
+        # Step 1: Extract key points
+        step1 = await self.invoke("extractor", {"doc": document})
+        
+        # Step 2: Analyze the extracted data
+        step2 = await self.invoke("analyzer", {"data": step1["points"]})
+        
+        # Step 3: Create final summary
+        step3 = await self.invoke("writer", {"analysis": step2["analysis"]})
+        
+        return step3["summary"]
+```
+
+### Pattern 2: Fan-Out (Parallel)
+
+Call multiple agents at once and combine results:
+
+```python
+import asyncio
+
+class CoordinatorAgent(ChatAgent, InMemoryAgent):
+    async def research(self, topic: str):
+        # Call 3 agents in parallel
+        results = await asyncio.gather(
+            self.invoke("web-researcher", {"query": topic}),
+            self.invoke("academic-researcher", {"query": topic}),
+            self.invoke("news-researcher", {"query": topic}),
+        )
+        
+        # results is a list of 3 response dicts
+        return {
+            "web": results[0]["findings"],
+            "academic": results[1]["findings"],
+            "news": results[2]["findings"],
+        }
+```
+
+## Events with emit()
+
+For fire-and-forget notifications (no response needed):
+
+```python
+class AnalysisAgent(ChatAgent, InMemoryAgent):
+    async def analyze(self, data: str):
+        result = await self.run_analysis(data)
+        
+        # Notify any listeners - doesn't wait for response
+        await self.emit("analysis.complete", {
+            "agent_id": self.id,
+            "result": result
+        })
+        
+        return result
+```
+
+## Cloudflare Durable Objects
+
+If you're using `DurableObjectAgent`, agent-to-agent calls work automatically across Durable Objects:
+
+```python
+from ai_query.agents import ChatAgent, DurableObjectAgent
+
+class MyAgent(ChatAgent, DurableObjectAgent):
+    async def on_message(self, conn, msg):
+        # This works even if "other-agent" is in a different DO!
+        result = await self.invoke("other-agent", {"query": msg})
+        await conn.send(result["answer"])
+```
+
+No extra configuration needed - Cloudflare handles the routing.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Serverless Agents" icon="cloud" href="/cookbook/serverless-agents">
+    Deploy agents to Lambda, Vercel, and other platforms
+  </Card>
+  <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
+    Run multiple agents on a single server
+  </Card>
+</CardGroup>

@@ -7,6 +7,8 @@ Build a chatbot that can analyze images, PDFs, and other files alongside text.
 
 ## Basic Multimodal Chatbot
 
+Messages can contain multiple parts (text, images, files).
+
 ```python
 import asyncio
 import base64
@@ -24,21 +26,22 @@ class MultimodalChatbot:
         image_path: str | None = None,
         image_url: str | None = None
     ) -> str:
-        # Build content
+        # Build content list
+        content = [{"type": "text", "text": text}]
+
         if image_path:
             with open(image_path, "rb") as f:
                 image_data = base64.b64encode(f.read()).decode()
-            content = [
-                {"type": "text", "text": text},
-                {"type": "image", "image": image_data, "media_type": "image/png"}
-            ]
+            content.append({
+                "type": "image",
+                "image": image_data,
+                "media_type": "image/png"
+            })
         elif image_url:
-            content = [
-                {"type": "text", "text": text},
-                {"type": "image", "image": image_url}
-            ]
-        else:
-            content = text
+            content.append({
+                "type": "image",
+                "image": image_url
+            })
 
         self.messages.append({"role": "user", "content": content})
 
@@ -53,7 +56,7 @@ class MultimodalChatbot:
 
 async def main():
     bot = MultimodalChatbot(
-        model=google("gemini-2.5-flash"),
+        model=google("gemini-2.0-flash"),
         system_prompt="You are a helpful assistant that can analyze images."
     )
 
@@ -73,6 +76,27 @@ async def main():
     print(response)
 
 asyncio.run(main())
+```
+
+## Using Message Objects
+
+You can also use `Message` and content part objects for type safety:
+
+```python
+from ai_query import generate_text, google
+from ai_query.types import Message, TextPart, ImagePart
+
+messages = [
+    Message(
+        role="user",
+        content=[
+            TextPart(text="What is this?"),
+            ImagePart(image="https://example.com/image.jpg")
+        ]
+    )
+]
+
+result = await generate_text(model=google("gemini-2.0-flash"), messages=messages)
 ```
 
 ## PDF Analysis Chatbot
@@ -120,7 +144,7 @@ class PDFChatbot:
         return result.text
 
 async def main():
-    bot = PDFChatbot(google("gemini-2.5-pro"))
+    bot = PDFChatbot(google("gemini-2.0-pro"))
 
     # Load PDF and ask initial question
     response = await bot.load_pdf("report.pdf", "Summarize the key findings.")
@@ -157,7 +181,7 @@ async def compare_images(image_paths: list[str], question: str) -> str:
         })
 
     result = await generate_text(
-        model=anthropic("claude-4-5-sonnet-20250929"),
+        model=anthropic("claude-3-5-sonnet-20241022"),
         messages=[{"role": "user", "content": content}]
     )
 
@@ -205,7 +229,7 @@ async def debug_screenshot(
         })
 
     result = await generate_text(
-        model=google("gemini-2.5-pro"),
+        model=google("gemini-2.0-pro"),
         system="You are a debugging expert. Analyze the screenshot and logs to identify issues.",
         messages=[{"role": "user", "content": content}]
     )
@@ -218,39 +242,6 @@ async def main():
         error_log = f.read()
 
     response = await debug_screenshot("error_screenshot.png", error_log)
-    print(response)
-
-asyncio.run(main())
-```
-
-## Image URL Support
-
-Images can be provided as URLs instead of base64:
-
-```python
-import asyncio
-from ai_query import generate_text, google
-
-async def analyze_url_image(url: str, question: str) -> str:
-    result = await generate_text(
-        model=google("gemini-2.5-flash"),
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": question},
-                    {"type": "image", "image": url}
-                ]
-            }
-        ]
-    )
-    return result.text
-
-async def main():
-    response = await analyze_url_image(
-        "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg",
-        "What species is this insect?"
-    )
     print(response)
 
 asyncio.run(main())

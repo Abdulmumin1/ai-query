@@ -104,18 +104,6 @@
               "api-reference/types/results",
               "api-reference/types/stop-conditions"
             ]
-          },
-          {
-            "group": "Providers",
-            "pages": [
-              "api-reference/providers/openai",
-              "api-reference/providers/anthropic",
-              "api-reference/providers/google",
-              "api-reference/providers/openrouter",
-              "api-reference/providers/deepseek",
-              "api-reference/providers/groq",
-              "api-reference/providers/bedrock"
-            ]
           }
         ]
       },
@@ -134,7 +122,6 @@
           {
             "group": "Agents",
             "pages": [
-              "cookbook/wikipedia-agent",
               "cookbook/task-planner",
               "cookbook/code-executor",
               "cookbook/rag-agent",
@@ -149,7 +136,9 @@
               "cookbook/realtime-agent",
               "cookbook/per-user-assistant",
               "cookbook/custom-agent-streaming",
-              "cookbook/mcp-agent"
+              "cookbook/mcp-agent",
+              "cookbook/agent-communication",
+              "cookbook/serverless-agents"
             ]
           }
         ]
