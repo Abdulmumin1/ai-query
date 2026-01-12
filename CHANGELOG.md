@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.6.0
+
+- minor: refactor(agents): implement mailbox pattern and expand server endpoints
+
 ## 1.5.0
 
 - minor: Added xai, groq, deepseek and openrouter as openai compat endpoints
