@@ -311,7 +311,71 @@ See [Multi-Agent Server](/core/agent-server) for details.
 async def start(self) -> None
 ```
 
-Initialize the agent. Loads state/messages from storage and calls `on_start` hook.
+Initialize the agent. Loads state/messages from storage, starts the message processor, and calls `on_start` hook.
+
+### stop
+
+```python
+async def stop(self) -> None
+```
+
+Stop the agent's message processing loop. Drains remaining messages and cancels the processor task. Called automatically when using the context manager.
+
+## Actor Model Methods
+
+Agents implement the Actor model - all messages are processed sequentially through a mailbox, eliminating race conditions.
+
+### enqueue
+
+```python
+def enqueue(
+    self,
+    kind: str,
+    payload: Any,
+    connection: Connection | None = None,
+    ctx: ConnectionContext | None = None,
+) -> None
+```
+
+Enqueue a message for sequential processing (fire-and-forget).
+
+**Parameters:**
+- `kind` - Message type: `"message"`, `"connect"`, `"close"`, `"error"`
+- `payload` - The message payload
+- `connection` - Associated WebSocket connection
+- `ctx` - Connection context (for `"connect"` kind)
+
+**Example:**
+```python
+# Typically called by the server, not directly
+agent.enqueue("message", "Hello", connection=conn)
+```
+
+### enqueue_invoke
+
+```python
+async def enqueue_invoke(
+    self,
+    payload: dict[str, Any],
+    timeout: float = 30.0,
+) -> dict[str, Any]
+```
+
+Enqueue an invoke and wait for the result with timeout enforcement.
+
+**Parameters:**
+- `payload` - The invoke payload
+- `timeout` - Maximum time to wait in seconds (default: 30)
+
+**Returns:** The response from `handle_invoke`.
+
+**Raises:** `asyncio.TimeoutError` if the invoke times out.
+
+**Example:**
+```python
+# Used internally by transports - typically use invoke() instead
+result = await agent.enqueue_invoke({"task": "analyze"}, timeout=60.0)
+```
 
 ## Lifecycle Hooks
 

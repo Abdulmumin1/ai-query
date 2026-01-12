@@ -42,11 +42,7 @@ TaskAgent.serve_many(port=8080)
 
 ## Architecture
 
-```
-Single Server ──► Agent Router ──┬──► Agent "user-alice" (state, tools, history)
-                                 ├──► Agent "user-bob" (state, tools, history)
-                                 └──► Agent "worker-1" (state, tools, history)
-```
+![Agent Router](https://rawcontent.dearfutureself.me/agent-router.png)
 
 ## Two Ways to Start
 
@@ -80,6 +76,8 @@ AgentServer(TaskAgent, config=config).serve(port=8080)
 |----------|------|-------------|
 | `/agent/{id}/ws` | WebSocket | Bidirectional communication |
 | `/agent/{id}/events` | SSE | AI streaming (server-sent events) |
+| `/agent/{id}/chat` | REST | Chat with the agent (supports `?stream=true`) |
+| `/agent/{id}/invoke` | REST | Invoke agent tasks |
 | `/agent/{id}/state` | REST | Get/PUT agent state |
 | `/agent/{id}` | REST | DELETE to evict agent |
 | `/agents` | REST | List active agents (if enabled) |

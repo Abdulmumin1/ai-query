@@ -7,13 +7,7 @@ Agents can call other agents using `invoke()`. This is useful when you want to s
 
 ## How It Works
 
-```
-┌─────────────────┐     ┌─────────────────┐
-│   Coordinator   │────▶│   Researcher    │
-│     Agent       │◀────│     Agent       │
-└─────────────────┘     └─────────────────┘
-     invoke()              handle_invoke()
-```
+![Invoke-Mechanism](https://rawcontent.dearfutureself.me/inoke-handle_request-mechanism.png)
 
 1. **Agent A** calls `self.invoke("agent-b", payload)`
 2. **Agent B** receives the call in `handle_invoke(payload)`

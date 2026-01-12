@@ -1,10 +1,16 @@
-"""Abstract base Agent class with state management and WebSocket support."""
+"""Abstract base Agent class with state management and WebSocket support.
+
+Implements the Actor model: each agent has a mailbox (queue) and processes
+messages sequentially, eliminating race conditions.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any, Generic, TypeVar, TYPE_CHECKING, AsyncIterator
 
 from ai_query.types import Message
 from ai_query.agents.websocket import Connection, ConnectionContext
@@ -15,6 +21,16 @@ if TYPE_CHECKING:
     from ai_query.agents.message import IncomingMessage
 
 State = TypeVar("State")
+
+
+@dataclass
+class _Envelope:
+    """Internal message envelope for the actor mailbox."""
+    kind: str  # "message", "invoke", "connect", "close", "error"
+    payload: Any
+    connection: Connection | None = None
+    ctx: ConnectionContext | None = None
+    future: asyncio.Future | None = None  # For invoke responses
 
 
 class Agent(ABC, Generic[State]):
@@ -44,7 +60,7 @@ class Agent(ABC, Generic[State]):
     def __init__(self, agent_id: str, *, env: Any = None):
         """
         Initialize the agent.
-        
+
         Args:
             agent_id: Unique identifier for this agent instance.
             env: Optional environment bindings (for Cloudflare Durable Objects).
@@ -55,10 +71,15 @@ class Agent(ABC, Generic[State]):
         self._connections: set[Connection] = set()
         self._sse_connections: set[Any] = set()  # SSE stream responses
         self.env = env
-        
+
         # Actor primitives (injected by AgentServer or manually)
         self._transport: "AgentTransport | None" = None
         self._event_bus: "EventBus | None" = None
+
+        # Actor mailbox for sequential message processing
+        self._mailbox: asyncio.Queue[_Envelope] = asyncio.Queue()
+        self._processor_task: asyncio.Task | None = None
+        self._running = False
     
     @property
     def id(self) -> str:
@@ -180,14 +201,106 @@ class Agent(ABC, Generic[State]):
     
     async def on_error(self, connection: Connection, error: Exception) -> None:
         """Called when a WebSocket error occurs.
-        
+
         Override this to handle errors.
-        
+
         Args:
             connection: The WebSocket connection where the error occurred.
             error: The exception that was raised.
         """
         pass
+
+    # ─── Actor Mailbox (Sequential Processing) ─────────────────────────
+
+    async def _process_mailbox(self) -> None:
+        """Process messages from the mailbox sequentially.
+
+        This is the actor's main loop. It processes one message at a time,
+        ensuring no concurrent state modifications.
+        """
+        while self._running:
+            try:
+                envelope = await self._mailbox.get()
+            except asyncio.CancelledError:
+                break
+
+            try:
+                result = await self._handle_envelope(envelope)
+                if envelope.future is not None and not envelope.future.done():
+                    envelope.future.set_result(result)
+            except Exception as e:
+                if envelope.future is not None and not envelope.future.done():
+                    envelope.future.set_exception(e)
+                # For non-invoke messages, call error handler
+                elif envelope.connection is not None:
+                    await self.on_error(envelope.connection, e)
+            finally:
+                self._mailbox.task_done()
+
+    async def _handle_envelope(self, envelope: _Envelope) -> Any:
+        """Route envelope to the appropriate handler."""
+        if envelope.kind == "connect":
+            await self.on_connect(envelope.connection, envelope.ctx)  # type: ignore
+        elif envelope.kind == "message":
+            await self.on_message(envelope.connection, envelope.payload)  # type: ignore
+        elif envelope.kind == "close":
+            code, reason = envelope.payload
+            await self.on_close(envelope.connection, code, reason)  # type: ignore
+        elif envelope.kind == "error":
+            await self.on_error(envelope.connection, envelope.payload)  # type: ignore
+        elif envelope.kind == "invoke":
+            return await self.handle_invoke(envelope.payload)
+        return None
+
+    def enqueue(
+        self,
+        kind: str,
+        payload: Any,
+        connection: Connection | None = None,
+        ctx: ConnectionContext | None = None,
+    ) -> None:
+        """Enqueue a message for sequential processing.
+
+        Args:
+            kind: Message type ("message", "connect", "close", "error").
+            payload: The message payload.
+            connection: Associated WebSocket connection.
+            ctx: Connection context (for "connect" kind).
+        """
+        self._mailbox.put_nowait(_Envelope(
+            kind=kind,
+            payload=payload,
+            connection=connection,
+            ctx=ctx,
+        ))
+
+    async def enqueue_invoke(
+        self,
+        payload: dict[str, Any],
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Enqueue an invoke and wait for the result.
+
+        Args:
+            payload: The invoke payload.
+            timeout: Maximum time to wait for response.
+
+        Returns:
+            The response from handle_invoke.
+
+        Raises:
+            asyncio.TimeoutError: If the invoke times out.
+        """
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        self._mailbox.put_nowait(_Envelope(
+            kind="invoke",
+            payload=payload,
+            future=future,
+        ))
+
+        return await asyncio.wait_for(future, timeout=timeout)
     
     # ─── Agent Lifecycle Hooks ──────────────────────────────────────────
     
@@ -360,12 +473,65 @@ class Agent(ABC, Generic[State]):
             payload = request.get("payload", {})
             result = await self.handle_invoke(payload)
             return {"agent_id": self.id, "result": result}
-        
+
         elif action == "state":
             return {"agent_id": self.id, "state": self.state}
-        
+
         return {"error": f"Unknown action: {action}"}
-    
+
+    async def handle_request_stream(self, request: dict[str, Any]) -> "AsyncIterator[str]":
+        """Serverless streaming request handler.
+
+        Handles streaming requests, primarily for 'chat' action.
+        Yields SSE-formatted events:
+        - event: start (empty data)
+        - event: chunk (text delta)
+        - event: end (full accumulated text)
+        - event: error (error message)
+
+        Args:
+            request: The request with 'action' and action-specific fields.
+
+        Yields:
+            SSE formatted strings.
+        """
+        # Ensure agent is started
+        if self._state is None:
+            await self.start()
+
+        action = request.get("action", "chat")
+
+        if action == "chat":
+            if not hasattr(self, "stream_chat"):
+                yield "event: error\ndata: Agent does not support stream_chat\n\n"
+                return
+
+            message = request.get("message", "")
+
+            try:
+                # Start event
+                yield "event: start\ndata: \n\n"
+
+                full_text = ""
+                # Stream chunks
+                async for chunk in self.stream_chat(message):  # type: ignore
+                    full_text += chunk
+                    # SSE format: data must be a single line or multiple data: lines
+                    # We escape newlines to keep it simple JSON string would be safer but this is raw text stream
+                    safe_chunk = chunk.replace("\n", "\\n")
+                    yield f"event: chunk\ndata: {safe_chunk}\n\n"
+
+                # End event with full text
+                # Use JSON to safely encode newlines
+                safe_full = json.dumps(full_text)
+                yield f"event: end\ndata: {safe_full}\n\n"
+
+            except Exception as e:
+                yield f"event: error\ndata: {str(e)}\n\n"
+
+        else:
+            yield f"event: error\ndata: Streaming not supported for action: {action}\n\n"
+
     # ─── Broadcast to Connections ───────────────────────────────────────
     
     async def broadcast(self, message: str | bytes) -> None:
@@ -411,28 +577,53 @@ class Agent(ABC, Generic[State]):
                 self._sse_connections.discard(conn)
     
     # ─── Agent Lifecycle ────────────────────────────────────────────────
-    
+
     async def start(self) -> None:
         """Initialize the agent.
-        
+
         This loads state and messages from storage, sets initial state
-        if none exists, and calls the on_start hook.
-        
+        if none exists, starts the message processing loop, and calls
+        the on_start hook.
+
         Must be called before interacting with the agent, or use the
         async context manager.
         """
         loaded_state = await self._load_state()
         self._state = loaded_state if loaded_state is not None else self.initial_state
         self._messages = await self._load_messages()
+
+        # Start the actor message processing loop
+        self._running = True
+        self._processor_task = asyncio.create_task(self._process_mailbox())
+
         await self.on_start()
-    
+
+    async def stop(self) -> None:
+        """Stop the agent's message processing loop.
+
+        Drains remaining messages and cancels the processor task.
+        """
+        self._running = False
+
+        if self._processor_task is not None:
+            self._processor_task.cancel()
+            try:
+                await self._processor_task
+            except asyncio.CancelledError:
+                pass
+            self._processor_task = None
+
     async def __aenter__(self) -> "Agent[State]":
         """Async context manager entry - starts the agent."""
         await self.start()
         return self
-    
+
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Async context manager exit - closes all connections."""
+        """Async context manager exit - stops agent and closes connections."""
+        # Stop the message processor
+        await self.stop()
+
+        # Close all WebSocket connections
         for conn in list(self._connections):
             try:
                 await conn.close()

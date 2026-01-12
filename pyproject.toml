@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.9.0",
+    "aiosqlite>=0.20.0",
     "mcp>=1.25.0",
 ]
 license = { file = "LICENSE" }
@@ -27,4 +28,5 @@ dev = [
     "semversioner>=2.0.8",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-aiohttp>=1.1.0",
 ]

@@ -1,13 +1,17 @@
 ---
 title: "Stateful Agents"
-description: "Build persistent, stateful AI agents with built in WebSocket and Durable Object support"
+description: "Build persistent, stateful AI agents with built-in WebSocket, HTTP, and storage support"
 ---
 
-ai-query provides an [`Agent`](/api-reference/agent) class for building stateful AI agents with persistent storage, WebSocket support, and lifecycle hooks. This is similar to Cloudflare's Durable Objects but works with any storage backend.
+ai-query provides a powerful `Agent` class for building stateful AI applications. Unlike standard LLM calls, **Agents** maintain memory, state, and identity over time.
+
+They can be deployed in two main ways:
+1. **Long-running Servers** (WebSocket/SSE) - ideal for real-time chat, collaboration
+2. **Serverless Functions** (HTTP) - ideal for REST APIs, webhooks, and scale-to-zero
 
 ## Quick Start
 
-Create a simple chat agent with in-memory storage:
+Here's a simple chat agent that remembers conversation history in memory:
 
 ```python
 from ai_query.agents import ChatAgent, InMemoryAgent
@@ -16,639 +20,114 @@ class MyBot(ChatAgent, InMemoryAgent):
     initial_state = {"message_count": 0}
     system = "You are a helpful assistant."
 
-async def main():
-    async with MyBot("bot-1") as bot:
-        response = await bot.chat("Hello!")
-        print(response)
-```
-
-## Choosing a Storage Backend
-
-Select your backend by extending the appropriate agent class:
-
-<CardGroup cols={2}>
-  <Card title="InMemoryAgent" icon="memory" href="#inmemoryagent">
-    For development and testing. Data resets when the process exits.
-  </Card>
-  <Card title="SQLiteAgent" icon="database" href="#sqliteagent">
-    For persistent local storage with SQL query support.
-  </Card>
-  <Card title="DurableObjectAgent" icon="cloud" href="#durableobjectagent">
-    For Cloudflare Workers with Durable Objects.
-  </Card>
-  <Card title="Custom Backend" icon="code" href="#custom-backend">
-    Extend Agent for Redis, PostgreSQL, or any storage.
-  </Card>
-</CardGroup>
-
-### InMemoryAgent
-
-```python
-from ai_query.agents import ChatAgent, InMemoryAgent
-
-class DevBot(ChatAgent, InMemoryAgent):
-    initial_state = {"debug": True}
-
-async with DevBot("dev-1") as bot:
-    await bot.chat("Hello!")
-```
-
-### SQLiteAgent
-
-```python
-from ai_query.agents import ChatAgent, SQLiteAgent
-
-class PersistentBot(ChatAgent, SQLiteAgent):
-    db_path = "./data/my_bot.db"
-    initial_state = {"user_prefs": {}}
-
-async with PersistentBot("bot-123") as bot:
-    # State and messages persist across restarts
-    await bot.chat("Remember I like Python")
-    
-    # Custom SQL queries
-    bot.sql("CREATE TABLE IF NOT EXISTS logs (msg TEXT)")
-    bot.sql("INSERT INTO logs VALUES (?)", "User logged in")
-```
-
-### DurableObjectAgent
-
-```python
-from ai_query import ChatAgent, DurableObjectAgent
-
-class MyCloudflareBot(ChatAgent, DurableObjectAgent):
-    initial_state = {"sessions": []}
-    
     async def on_message(self, conn, message):
+        # Handle WebSocket message
         response = await self.chat(message)
         await conn.send(response)
+
+# Run as a local server
+MyBot.serve_many(port=8080)
 ```
 
-## State Management
+## Core Concepts
 
-Access and update agent state:
+### 1. State & Persistence
+
+Every agent has a `state` dictionary and a `messages` list that are automatically persisted to your chosen backend.
 
 ```python
-class CounterAgent(InMemoryAgent):
-    initial_state = {"count": 0}
-    
-    async def increment(self):
-        await self.set_state({
-            "count": self.state["count"] + 1
-        })
+async with MyBot("agent-1") as bot:
+    # State is automatically saved when set
+    await bot.set_state({"status": "active"})
 
-async with CounterAgent("counter-1") as agent:
-    print(agent.state["count"])  # 0
-    await agent.increment()
-    print(agent.state["count"])  # 1
+    # Access current state
+    print(bot.state["status"])
 ```
 
-State is automatically persisted when you call `set_state()`.
+### 2. Storage Backends
 
-## WebSocket Support
+Choose where your data lives. Switch backends by changing the base class:
 
-Agents have built-in WebSocket lifecycle hooks:
+| Backend | Description | Best For |
+|---------|-------------|----------|
+| `InMemoryAgent` | RAM-only storage | Testing, local dev |
+| `SQLiteAgent` | Local file or `:memory:` | Single-server apps, prototypes |
+| `DurableObjectAgent` | Cloudflare Storage | Edge deployment |
+| **Custom** | Redis, Postgres, DynamoDB | Production, Serverless |
+
+### 3. The Actor Model
+
+Agents run as **Actors**. This means:
+- **Sequential Processing**: Messages are processed one at a time (no race conditions).
+- **Mailbox**: Requests (HTTP, WebSocket, internal calls) go into a queue.
+- **Identity**: Each agent has a unique ID (e.g., `user-123`, `room-abc`).
+
+## Deployment Patterns
+
+### Real-time Server (WebSocket/SSE)
+
+Ideal for chatbots and collaborative apps. The agent stays alive in memory while clients are connected.
 
 ```python
-from ai_query.agents import InMemoryAgent, ConnectionContext
-
-class RealtimeAgent(InMemoryAgent):
-    initial_state = {}
-    
-    async def on_connect(self, connection, ctx: ConnectionContext):
-        """Called when a client connects."""
-        await super().on_connect(connection, ctx)
-        await connection.send("Welcome!")
-    
-    async def on_message(self, connection, message):
-        """Called when a message is received."""
-        # Echo the message back
-        await connection.send(f"You said: {message}")
-    
-    async def on_close(self, connection, code, reason):
-        """Called when a client disconnects."""
-        await super().on_close(connection, code, reason)
-        print(f"Client left: {reason}")
+# Start a server for this agent class
+MyBot.serve_many(port=8080)
 ```
 
-### Built-in WebSocket Server
+Clients connect to:
+- `ws://localhost:8080/agent/{id}/ws` (Bidirectional)
+- `http://localhost:8080/agent/{id}/events` (Server-Sent Events)
 
-Run any agent as a WebSocket server with one line:
+### Serverless (HTTP / REST)
+
+Ideal for AWS Lambda, Vercel, or Google Cloud Run. The agent loads state, processes one request, saves state, and shuts down.
+
+Use the `handle_request()` lifecycle method:
 
 ```python
-from ai_query.agents import ChatAgent, InMemoryAgent
-
-class TaskAssistant(ChatAgent, InMemoryAgent):
-    system = "You are a helpful task assistant."
-    
-    async def on_message(self, connection, message):
-        response = await self.chat(message)
-        await connection.send(response)
-
-# Start the server!
-TaskAssistant("assistant-1").serve(port=8080)
-```
-
-Connect at `ws://localhost:8080/ws`.
-
-<Tip>
-**Need multiple independent agents?** Use [`serve_many()`](/core/agent-server) to route clients to different agent instances—perfect for per-user assistants or multi-tenant apps.
-</Tip>
-
-### Broadcasting
-
-Send messages to all connected clients:
-
-```python
-async with MyAgent("agent-1") as agent:
-    # Send to all connected WebSocket clients
-    await agent.broadcast("Hello everyone!")
-    
-    # State changes automatically broadcast to clients
-    await agent.set_state({"status": "active"})
-```
-
-## SSE Streaming
-
-For efficient AI streaming, use Server-Sent Events (SSE) alongside WebSocket:
-
-- **WebSocket** (`/ws`) → Chat messages, user events (bidirectional)
-- **SSE** (`/events`) → AI streaming responses (one-way, efficient)
-
-```python
-from ai_query.agents import ChatAgent, InMemoryAgent
-
-class AIChat(ChatAgent, InMemoryAgent):
-    system = "You are helpful."
-    
-    async def on_message(self, connection, message):
-        if "@ai" in message.lower():
-            # Stream via SSE - more efficient than broadcasting chunks
-            await self.stream_chat_sse(message)
-        else:
-            await self.broadcast(message)
-
-AIChat("room").serve(port=8080)
-# WebSocket: ws://localhost:8080/ws
-# SSE: http://localhost:8080/events
-```
-
-**Client-side (JavaScript):**
-
-```javascript
-// WebSocket for chat
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-// SSE for AI streaming
-const sse = new EventSource('http://localhost:8080/events');
-sse.addEventListener('ai_start', () => console.log('AI thinking...'));
-sse.addEventListener('ai_chunk', (e) => process.stdout.write(e.data));
-sse.addEventListener('ai_end', () => console.log('\nDone'));
-```
-
-## Custom Framework Integration
-
-Use agents with FastAPI, Flask, or any framework by implementing the [`Connection`](/api-reference/agent#connection-protocol) interface:
-
-```python
-from fastapi import FastAPI, WebSocket
-from ai_query.agents import ChatAgent, InMemoryAgent, Connection, ConnectionContext
-
-class FastAPIConnection(Connection):
-    def __init__(self, ws: WebSocket):
-        self._ws = ws
-    
-    async def send(self, message: str | bytes) -> None:
-        await self._ws.send_text(message)
-    
-    async def close(self, code: int = 1000, reason: str = "") -> None:
-        await self._ws.close(code)
-
-app = FastAPI()
-agent = ChatAgent("my-agent")
-
-@app.on_event("startup")
-async def startup():
-    await agent.start()
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    conn = FastAPIConnection(websocket)
-    ctx = ConnectionContext(request=websocket, metadata={})
-    
-    await agent.on_connect(conn, ctx)
-    try:
-        while True:
-            message = await websocket.receive_text()
-            await agent.on_message(conn, message)
-    except:
-        pass
-    finally:
-        await agent.on_close(conn, 1000, "Disconnected")
-```
-
-## Lifecycle Hooks
-
-Override these methods to customize agent behavior:
-
-| Hook | When Called |
-|------|-------------|
-| `on_start()` | Agent starts (state loaded) |
-| `on_state_update(state, source)` | State changes |
-| `on_step_start(event)` | AI generation step starts (ChatAgent) |
-| `on_step_finish(event)` | AI generation step finishes (ChatAgent) |
-| `on_connect(conn, ctx)` | WebSocket client connects |
-| `on_message(conn, message)` | WebSocket message received |
-| `on_close(conn, code, reason)` | WebSocket client disconnects |
-| `on_error(conn, error)` | WebSocket error occurs |
-
-## Custom Backend
-
-Create your own storage backend by extending [`Agent`](/api-reference/agent):
-
-```python
-from ai_query.agents import Agent
-import redis.asyncio as redis
-
-class RedisAgent(Agent):
-    """Agent with Redis storage."""
-    
-    def __init__(self, agent_id: str, redis_url: str):
-        super().__init__(agent_id)
-        self._redis = redis.from_url(redis_url)
-    
-    async def _load_state(self):
-        data = await self._redis.get(f"agent:{self._id}:state")
-        return json.loads(data) if data else None
-    
-    async def _save_state(self, state):
-        await self._redis.set(f"agent:{self._id}:state", json.dumps(state))
-    
-    async def _load_messages(self):
-        data = await self._redis.get(f"agent:{self._id}:messages")
-        return json.loads(data) if data else []
-    
-    async def _save_messages(self, messages):
-        data = [{"role": m.role, "content": m.content} for m in messages]
-        await self._redis.set(f"agent:{self._id}:messages", json.dumps(data))
-```
-
-## ChatAgent Mixin
-
-Add AI chat capabilities to any agent:
-
-```python
-from ai_query.agents import ChatAgent, SQLiteAgent
-
-class SupportBot(ChatAgent, SQLiteAgent):
-    db_path = "./support.db"
-    model = "gemini-2.0-flash"
-    system = """You are a customer support agent.
-    Be helpful and professional."""
-    
-    async def on_start(self):
-        self.sql("CREATE TABLE IF NOT EXISTS tickets (id INTEGER, status TEXT)")
-
-async with SupportBot("support-1") as bot:
-    response = await bot.chat("I need help with my order #12345")
-    print(response)
-    
-    # Streaming chat
-    async for chunk in bot.stream_chat("Tell me more"):
-        print(chunk, end="")
-```
-
-### ChatAgent with Tools
-
-To use tools with ChatAgent, define them inside a `tools` property using closures:
-
-```python
-from ai_query.agents import ChatAgent, SQLiteAgent
-from ai_query import tool, Field
-
-class ToolBot(ChatAgent, SQLiteAgent):
-    db_path = "./toolbot.db"
-    system = "You are a helpful assistant. Use tools when needed."
-    
-    async def on_start(self):
-        self.sql("CREATE TABLE IF NOT EXISTS orders (id TEXT, status TEXT)")
-        self.sql("INSERT OR IGNORE INTO orders VALUES ('12345', 'shipped')")
-    
-    @property
-    def tools(self):
-        # Define tools inside property - they can access self via closure
-        @tool(description="Look up an order by ID")
-        def lookup_order(order_id: str = Field(description="Order ID")) -> str:
-            rows = self.sql("SELECT * FROM orders WHERE id = ?", order_id)
-            if rows:
-                return f"Order {order_id}: Status is {rows[0]['status']}"
-            return f"Order {order_id} not found"
-        
-        @tool(description="Update order status")
-        def update_order(
-            order_id: str = Field(description="Order ID"),
-            status: str = Field(description="New status")
-        ) -> str:
-            self.sql("UPDATE orders SET status = ? WHERE id = ?", status, order_id)
-            return f"Updated order {order_id} to {status}"
-        
-        return {
-            "lookup_order": lookup_order,
-            "update_order": update_order,
-        }
-
-async with ToolBot("tool-bot") as bot:
-    # The AI can now use tools
-    response = await bot.chat("What's the status of order 12345?")
-    print(response)  # Will call lookup_order tool
-    
-    response = await bot.chat("Mark it as delivered")
-    print(response)  # Will call update_order tool
-```
-
-### Step Hooks
-
-Monitor AI generation steps with `on_step_start` and `on_step_finish`:
-
-```python
-class VerboseBot(ChatAgent, InMemoryAgent):
-    system = "You are helpful."
-    
-    def on_step_start(self, event):
-        print(f"Step {event.step_number} starting...")
-    
-    def on_step_finish(self, event):
-        print(f"Step {event.step_number} finished")
-        if event.step.tool_calls:
-            for tc in event.step.tool_calls:
-                print(f"  Called tool: {tc.name}")
-```
-
-## Using generate_text Directly
-
-For full control, use `generate_text` or `stream_text` directly within your agent:
-
-```python
-from ai_query.agents import InMemoryAgent
-from ai_query import generate_text, google, tool, Field, step_count_is
-
-class ResearchAgent(InMemoryAgent):
-    """Agent that uses generate_text directly for AI calls."""
-    
-    initial_state = {"research_topic": None, "findings": [], "status": "idle"}
-    
-    async def research(self, topic: str) -> str:
-        """Run a research task with full control over the AI call."""
-        await self.set_state({
-            **self.state,
-            "research_topic": topic,
-            "status": "researching"
-        })
-        
-        # Define tools inside method - can access self via closure
-        @tool(description="Search the web for information")
-        async def search_web(query: str = Field(description="Search query")) -> str:
-            return f"Found info about: {query}"
-        
-        @tool(description="Save a research finding")
-        async def save_finding(finding: str = Field(description="Finding to save")) -> str:
-            # Access agent state via closure
-            findings = self.state["findings"] + [finding]
-            await self.set_state({**self.state, "findings": findings})
-            return f"Saved finding #{len(findings)}"
-        
-        @tool(description="Complete the research")
-        async def complete_research(summary: str = Field(description="Summary")) -> str:
-            await self.set_state({**self.state, "status": "complete"})
-            return f"Research complete: {summary}"
-        
-        # Use generate_text directly with tools
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),
-            system="You are a research assistant. Search, save findings, then complete.",
-            prompt=f"Research: {topic}",
-            tools={
-                "search_web": search_web,
-                "save_finding": save_finding,
-                "complete_research": complete_research,
-            },
-            stop_when=step_count_is(5),
-        )
-        
-        return result.text
-
-async def main():
-    async with ResearchAgent("researcher-1") as agent:
-        result = await agent.research("quantum computing")
-        
-        print(f"Status: {agent.state['status']}")
-        print(f"Findings: {agent.state['findings']}")
-        print(f"Summary: {result}")
-```
-
-### Streaming with State Updates
-
-```python
-from ai_query.agents import InMemoryAgent
-from ai_query import stream_text, google
-
-class StreamingAgent(InMemoryAgent):
-    initial_state = {"tokens_generated": 0}
-    
-    async def generate_with_tracking(self, prompt: str):
-        """Stream a response while tracking token count."""
-        
-        result = stream_text(
-            model=google("gemini-2.0-flash"),
-            prompt=prompt,
-        )
-        
-        full_text = ""
-        async for chunk in result.text_stream:
-            full_text += chunk
-            yield chunk
-        
-        # Update state after completion
-        usage = await result.usage
-        await self.set_state({
-            "tokens_generated": self.state["tokens_generated"] + usage.total_tokens
-        })
-        
-        # Save to message history
-        await self.save_messages(self.messages + [
-            Message(role="user", content=prompt),
-            Message(role="assistant", content=full_text),
-        ])
-
-async with StreamingAgent("streamer-1") as agent:
-    async for chunk in agent.generate_with_tracking("Write a poem"):
-        print(chunk, end="")
-    
-    print(f"\nTotal tokens used: {agent.state['tokens_generated']}")
-```
-
-### Multi-Step Agent Workflow
-
-Combine state management with agentic loops:
-
-```python
-from ai_query.agents import SQLiteAgent
-from ai_query import generate_text, google, tool, Field, step_count_is
-
-class TaskAgent(SQLiteAgent):
-    """Agent that executes multi-step tasks with persistence."""
-    
-    db_path = "./tasks.db"
-    initial_state = {"current_task": None, "completed_steps": []}
-    
-    async def execute_task(self, task: str) -> str:
-        await self.set_state({"current_task": task, "completed_steps": []})
-        
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),
-            system="You are a task executor. Break down and complete tasks step by step.",
-            prompt=f"Execute this task: {task}",
-            tools={
-                "execute_step": self.execute_step,
-                "mark_complete": self.mark_complete,
-            },
-            stop_when=step_count_is(10),  # Safety limit
-            on_step_finish=lambda e: print(f"Step {e.step_number} complete"),
-        )
-        
-        # Log to database
-        self.sql(
-            "INSERT INTO task_log (task, steps, result) VALUES (?, ?, ?)",
-            task, len(self.state["completed_steps"]), result.text
-        )
-        
-        return result.text
-    
-    async def execute_step(self, step: str = Field(description="Step to execute")) -> str:
-        steps = self.state["completed_steps"] + [step]
-        await self.set_state({**self.state, "completed_steps": steps})
-        return f"Completed: {step}"
-    
-    async def mark_complete(self) -> str:
-        await self.set_state({**self.state, "current_task": None})
-        return "Task marked complete"
-```
-
-## Agent-to-Agent Communication
-
-Agents can call other agents using `invoke()`. This is useful for splitting work across specialized agents.
-
-### How It Works
-
-1. **Agent A** calls `await self.invoke("agent-b", payload)`
-2. **Agent B** receives the call in its `handle_invoke(payload)` method
-3. **Agent B** returns a response dict
-4. **Agent A** gets the response
-
-### Example: Coordinator + Researcher
-
-```python
-# Agent 1: Receives user messages, delegates research
-class CoordinatorAgent(ChatAgent, InMemoryAgent):
-    async def on_message(self, conn, msg):
-        # Call the researcher agent
-        result = await self.invoke("researcher", {
-            "task": "search",
-            "query": msg
-        })
-        await conn.send(f"Found: {result['answer']}")
-
-# Agent 2: Handles research requests from other agents
-class ResearcherAgent(ChatAgent, InMemoryAgent):
-    async def handle_invoke(self, payload: dict) -> dict:
-        """
-        Receives: {"task": "search", "query": "..."}
-        Returns:  {"answer": "..."}
-        """
-        if payload.get("task") == "search":
-            answer = await self.chat(f"Research: {payload['query']}")
-            return {"answer": answer}
-        return {"error": "Unknown task"}
-```
-
-### Serverless with handle_request()
-
-For AWS Lambda, Vercel, etc. (stateless environments):
-
-```python
-# Your agent
-class MyAgent(ChatAgent, SQLiteAgent):
-    system = "You are helpful"
-
-# Lambda handler
+# AWS Lambda Handler
 def handler(event, context):
-    agent = MyAgent(event["pathParameters"]["agent_id"])
+    agent_id = event["pathParameters"]["id"]
+    agent = MyBot(agent_id)
+
     return asyncio.run(agent.handle_request({
-        "action": "chat",           # or "invoke" or "state"
-        "message": event["body"]    # for chat action
+        "action": "chat",
+        "message": event["body"]
     }))
 ```
 
-<CardGroup cols={2}>
-  <Card title="Agent Communication" icon="messages" href="/cookbook/agent-communication">
-    Complete patterns: pipelines, fan-out, events
-  </Card>
-  <Card title="Serverless Agents" icon="cloud" href="/cookbook/serverless-agents">
-    Deploy to Lambda, Vercel, Cloud Run
-  </Card>
-</CardGroup>
+<Card title="Serverless Cookbook" icon="cloud" href="/cookbook/serverless-agents">
+  See full examples for AWS Lambda, Vercel, and FastAPI
+</Card>
 
+## Agent Communication
+
+Agents can call other agents using `invoke()`. This works regardless of whether they are in the same process or distributed.
+
+```python
+class ManagerAgent(ChatAgent, InMemoryAgent):
+    async def on_message(self, conn, msg):
+        # Delegate work to a researcher agent
+        result = await self.invoke("researcher-1", {
+            "task": "search",
+            "query": msg
+        })
+        await conn.send(f"Research found: {result['summary']}")
+```
+
+<Card title="Agent Communication Patterns" icon="messages" href="/cookbook/agent-communication">
+  Learn about pipelines, fan-out, and event-driven architectures
+</Card>
 
 ## API Reference
 
-### Agent
-
-| Property/Method | Description |
-|----------------|-------------|
-| `state` | Current agent state |
-| `messages` | Conversation history |
-| `set_state(state)` | Update and persist state |
-| `save_messages(messages)` | Persist messages |
-| `clear_messages()` | Clear conversation history |
-| `broadcast(message)` | Send to all WebSocket clients |
-| `stream_to_sse(event, data)` | Send SSE event to all SSE clients |
-| `invoke(agent_id, payload)` | Call another agent, wait for response |
-| `emit(event, data)` | Fire event to subscribers |
-| `handle_invoke(payload)` | Handle incoming invoke calls |
-| `handle_request(request)` | Serverless lifecycle handler |
-| `on_receive(message)` | Unified message handler |
-| `serve(port, path)` | Start built-in WebSocket/SSE server |
-| `serve_many(port, config)` | Start multi-agent server (class method) |
-| `start()` | Initialize the agent |
-
-### ChatAgent
-
-| Property/Method | Description |
-|----------------|-------------|
-| `model` | LanguageModel to use (default: `google("gemini-2.0-flash")`) |
-| `stop_when` | Stop condition(s) for tool loops |
-| `system` | System prompt |
-| `tools` | Available tools dict |
-| `chat(message)` | Send message, get response |
-| `stream_chat(message)` | Stream response (yields chunks) |
-| `stream_chat_sse(message)` | Stream via SSE, returns full response |
-| `on_step_start(event)` | Hook called when AI step starts |
-| `on_step_finish(event)` | Hook called when AI step finishes |
-
-## Next Steps
-
 <CardGroup cols={2}>
-  <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
-    Run multiple independent agents on a single server with routing
+  <Card title="Agent API" icon="book" href="/api-reference/agent">
+    Full methods and hooks documentation
   </Card>
-  <Card title="Agent Communication" icon="messages" href="/cookbook/agent-communication">
-    Build multi-agent systems with invoke, emit, and event patterns
+  <Card title="Storage Backends" icon="database" href="/api-reference/agent-backends">
+    InMemory, SQLite, and Durable Objects
   </Card>
-  <Card title="Serverless Agents" icon="cloud" href="/cookbook/serverless-agents">
-    Deploy to AWS Lambda, Vercel, and other serverless platforms
-  </Card>
-  <Card title="Agent API Reference" icon="code" href="/api-reference/agent">
-    Full API documentation for the Agent class
+  <Card title="Multi-Agent Server" icon="server" href="/api-reference/agent-server">
+    Routing and server configuration
   </Card>
 </CardGroup>

@@ -3,7 +3,7 @@ title: "Agent Backends"
 description: "Built-in storage backends for agents"
 ---
 
-ai-query provides three built-in agent backends for different use cases.
+ai-query provides three built-in agent backends for different use cases. All agents implement the **Actor model** - messages are processed sequentially through a mailbox, eliminating race conditions.
 
 ## InMemoryAgent
 
@@ -23,7 +23,13 @@ async with MyAgent("agent-1") as agent:
     await agent.set_state({"count": 1})
 ```
 
-### Class Methods
+### Class Attributes
+
+<ParamField path="_store" type="ClassVar[dict]">
+  Class-level storage shared across all instances. Protected by an async lock for thread-safety.
+</ParamField>
+
+### Methods
 
 #### clear_all
 
@@ -32,7 +38,16 @@ async with MyAgent("agent-1") as agent:
 def clear_all(cls) -> None
 ```
 
-Clear all stored data. Useful for testing.
+Clear all stored data synchronously. Useful for testing.
+
+#### clear_all_async
+
+```python
+@classmethod
+async def clear_all_async(cls) -> None
+```
+
+Clear all stored data asynchronously with lock protection. Preferred in async contexts.
 
 #### clear
 
@@ -40,13 +55,25 @@ Clear all stored data. Useful for testing.
 def clear(self) -> None
 ```
 
-Clear this agent's stored data.
+Clear this agent's stored data synchronously.
+
+#### clear_async
+
+```python
+async def clear_async(self) -> None
+```
+
+Clear this agent's stored data asynchronously with lock protection.
+
+### Thread Safety
+
+`InMemoryAgent` uses a class-level `asyncio.Lock` to protect the shared storage. All storage operations (`_load_state`, `_save_state`, `_load_messages`, `_save_messages`) acquire this lock, making it safe for concurrent access across multiple agent instances.
 
 ---
 
 ## SQLiteAgent
 
-SQLite-based persistent storage with SQL query support.
+Async SQLite persistence using `aiosqlite`. Non-blocking database operations that won't freeze your event loop.
 
 ```python
 from ai_query.agents import SQLiteAgent
@@ -75,10 +102,10 @@ def __init__(
 #### sql
 
 ```python
-def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
+async def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
 ```
 
-Execute a SQL query against the agent's database.
+Execute a SQL query against the agent's database asynchronously.
 
 **Parameters:**
 - `query`: SQL query string with `?` placeholders
@@ -86,27 +113,51 @@ Execute a SQL query against the agent's database.
 
 **Returns:** List of rows as dictionaries.
 
+<Warning>
+The `sql()` method is now **async** and must be awaited.
+</Warning>
+
+#### close
+
+```python
+async def close(self) -> None
+```
+
+Close the database connection. Called automatically when using the context manager.
+
 ### Usage
 
 ```python
 class DataAgent(SQLiteAgent):
     db_path = "./data/agents.db"
     initial_state = {}
-    
-    async def setup(self):
-        self.sql("CREATE TABLE IF NOT EXISTS logs (id INTEGER, msg TEXT)")
-    
-    def log(self, message: str):
-        self.sql("INSERT INTO logs (msg) VALUES (?)", message)
-    
-    def get_logs(self) -> list[dict]:
-        return self.sql("SELECT * FROM logs ORDER BY id DESC LIMIT 10")
+
+    async def on_start(self):
+        # Create custom tables
+        await self.sql("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, msg TEXT, ts REAL)")
+
+    async def log(self, message: str):
+        import time
+        await self.sql("INSERT INTO logs (msg, ts) VALUES (?, ?)", message, time.time())
+
+    async def get_logs(self, limit: int = 10) -> list[dict]:
+        return await self.sql(
+            "SELECT * FROM logs ORDER BY ts DESC LIMIT ?",
+            limit
+        )
 
 async with DataAgent("data-1") as agent:
-    await agent.setup()
-    agent.log("Hello world")
-    print(agent.get_logs())
+    await agent.log("Application started")
+    await agent.log("User logged in")
+
+    logs = await agent.get_logs()
+    for log in logs:
+        print(f"{log['ts']}: {log['msg']}")
 ```
+
+### Connection Management
+
+`SQLiteAgent` uses lazy connection initialization via `_ensure_connection()`. The connection is created on first database access and closed when the agent exits.
 
 ---
 
@@ -136,7 +187,7 @@ def __init__(self, ctx: Any, env: Any)
 def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
 ```
 
-Execute SQL against the DO's embedded SQLite.
+Execute SQL against the DO's embedded SQLite. Synchronous (DO's SQLite is synchronous).
 
 #### fetch
 
@@ -161,14 +212,14 @@ from ai_query.agents import ChatAgent, DurableObjectAgent
 
 class MyDurableBot(ChatAgent, DurableObjectAgent):
     initial_state = {"sessions": 0}
-    
+
     async def on_connect(self, conn, ctx):
         await super().on_connect(conn, ctx)
         await self.set_state({
             "sessions": self.state["sessions"] + 1
         })
         await conn.send("Welcome!")
-    
+
     async def on_message(self, conn, message):
         response = await self.chat(message)
         await conn.send(response)
@@ -181,37 +232,87 @@ class MyDurableBot(ChatAgent, DurableObjectAgent):
 
 ---
 
+## Actor Model
+
+All agents implement the Actor model for safe concurrent operation:
+
+```
+┌─────────────────────────────────────────┐
+│              Agent                      │
+│  ┌─────────────────────────────────┐   │
+│  │  Mailbox (asyncio.Queue)        │   │
+│  │  ┌───┐ ┌───┐ ┌───┐ ┌───┐       │   │
+│  │  │msg│→│msg│→│msg│→│msg│→ ...  │   │
+│  │  └───┘ └───┘ └───┘ └───┘       │   │
+│  └─────────────────────────────────┘   │
+│              │                          │
+│              ▼                          │
+│  ┌─────────────────────────────────┐   │
+│  │  Processor (sequential loop)    │   │
+│  │  - Processes ONE message at a   │   │
+│  │    time                         │   │
+│  │  - No concurrent state access   │   │
+│  │  - No race conditions           │   │
+│  └─────────────────────────────────┘   │
+└─────────────────────────────────────────┘
+```
+
+### How It Works
+
+1. **Messages are enqueued** - WebSocket messages, HTTP requests, and agent invokes all go into the mailbox
+2. **Sequential processing** - The processor loop handles one message at a time
+3. **No races** - State is only accessed by one handler at a time
+4. **Timeout enforcement** - `invoke()` calls have enforced timeouts
+
+### Methods
+
+```python
+# Enqueue a message (fire-and-forget)
+agent.enqueue("message", data, connection=conn)
+
+# Enqueue an invoke and wait for result
+result = await agent.enqueue_invoke(payload, timeout=30.0)
+
+# Stop the processor
+await agent.stop()
+```
+
+---
+
 ## Creating Custom Backends
 
 Extend `Agent` and implement the abstract methods:
 
 ```python
 from ai_query.agents import Agent
+from ai_query.types import Message
 import redis.asyncio as redis
 
 class RedisAgent(Agent):
+    """Agent with Redis persistence."""
+
     redis_url: str = "redis://localhost:6379"
-    
+
     def __init__(self, agent_id: str, **kwargs):
         super().__init__(agent_id, **kwargs)
         self._redis = redis.from_url(self.redis_url)
-    
+
     async def _load_state(self):
         data = await self._redis.get(f"agent:{self._id}:state")
         return json.loads(data) if data else None
-    
+
     async def _save_state(self, state):
         await self._redis.set(
             f"agent:{self._id}:state",
             json.dumps(state)
         )
-    
+
     async def _load_messages(self):
         data = await self._redis.get(f"agent:{self._id}:messages")
         if data:
             return [Message(**m) for m in json.loads(data)]
         return []
-    
+
     async def _save_messages(self, messages):
         data = [{"role": m.role, "content": m.content} for m in messages]
         await self._redis.set(
@@ -220,10 +321,19 @@ class RedisAgent(Agent):
         )
 ```
 
+---
+
 ## Comparison
 
-| Backend | Persistence | SQL | Best For |
-|---------|-------------|-----|----------|
-| `InMemoryAgent` | ❌ | ❌ | Development, testing |
-| `SQLiteAgent` | ✅ | ✅ | Local apps, prototypes |
-| `DurableObjectAgent` | ✅ | ✅ | Cloudflare Workers |
+| Backend | Persistence | Async SQL | Best For |
+|---------|-------------|-----------|----------|
+| `InMemoryAgent` | ❌ | N/A | Development, testing, ephemeral state |
+| `SQLiteAgent` | ✅ | ✅ | Local apps, prototypes, single-instance servers |
+| `DurableObjectAgent` | ✅ | ❌ (sync) | Cloudflare Workers, edge computing |
+
+### Choosing a Backend
+
+- **Development/Testing**: Use `InMemoryAgent` - fast, no setup
+- **Local Deployment**: Use `SQLiteAgent` - simple persistence, SQL queries
+- **Cloudflare Workers**: Use `DurableObjectAgent` - built-in persistence, global distribution
+- **Multi-Instance/Scaling**: Create a custom backend with Redis, DynamoDB, or PostgreSQL

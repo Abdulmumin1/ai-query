@@ -52,40 +52,44 @@ class AgentTransport(ABC):
 
 class LocalTransport(AgentTransport):
     """In-process transport via AgentServer.
-    
+
     This is the default transport used when agents are running in the same
-    process. It directly calls the target agent's handle method.
+    process. It enqueues invokes to the target agent's mailbox, ensuring
+    sequential processing.
     """
-    
+
     def __init__(self, server: "AgentServer"):
         """Initialize with reference to the AgentServer.
-        
+
         Args:
             server: The AgentServer managing agents.
         """
         self._server = server
-    
+
     async def invoke(
-        self, 
-        agent_id: str, 
-        payload: dict[str, Any], 
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
         timeout: float = 30.0
     ) -> dict[str, Any]:
         """Invoke another agent in the same process.
-        
+
         Args:
             agent_id: The target agent's identifier.
             payload: The request payload.
-            timeout: Timeout (unused for local calls, but kept for interface).
-        
+            timeout: Maximum time to wait for response.
+
         Returns:
             The response from the target agent.
+
+        Raises:
+            asyncio.TimeoutError: If the agent doesn't respond within timeout.
         """
         agent = self._server.get_or_create(agent_id)
-        
+
         # Ensure agent is started
         if agent._state is None:
             await agent.start()
-        
-        # Call the agent's invoke handler
-        return await agent.handle_invoke(payload)
+
+        # Enqueue the invoke and wait for response with timeout
+        return await agent.enqueue_invoke(payload, timeout=timeout)
