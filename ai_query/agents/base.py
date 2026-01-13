@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, TYPE_CHECKING, AsyncIterator
 
-from ai_query.types import Message
+from ai_query.types import Message, AgentEvent
 from ai_query.agents.websocket import Connection, ConnectionContext
 
 if TYPE_CHECKING:
@@ -36,27 +36,30 @@ class _Envelope:
 class Agent(ABC, Generic[State]):
     """
     Abstract base class for AI agents.
-    
+
     Provides:
     - Persistent state management (`state`, `set_state`)
     - Message history (`messages`)
+    - Event logging and replay (`enable_event_log`, `replay_events`)
     - WebSocket connection handling (`on_connect`, `on_message`, `on_close`)
     - Lifecycle hooks (`on_start`, `on_state_update`)
-    
+
     To create a custom agent, extend this class along with a storage backend
     like InMemoryAgent, SQLiteAgent, or DurableObjectAgent.
-    
+
     Example:
         class MyBot(ChatAgent, InMemoryAgent):
             initial_state = {"counter": 0}
-            
+
             async def on_message(self, conn, msg):
                 response = await self.chat(msg)
                 await conn.send(response)
     """
-    
+
     initial_state: State = {}  # type: ignore  # Override in subclass
-    
+    enable_event_log: bool = False  # Set to True to enable event persistence and replay
+    event_retention: float = 86400.0  # Retention period in seconds (default: 24h)
+
     def __init__(self, agent_id: str, *, env: Any = None):
         """
         Initialize the agent.
@@ -80,34 +83,78 @@ class Agent(ABC, Generic[State]):
         self._mailbox: asyncio.Queue[_Envelope] = asyncio.Queue()
         self._processor_task: asyncio.Task | None = None
         self._running = False
-    
+
     @property
     def id(self) -> str:
         """The agent's unique identifier."""
         return self._id
-    
+
     # ─── Abstract Storage Methods ───────────────────────────────────────
-    
+
     @abstractmethod
     async def _load_state(self) -> State | None:
         """Load state from storage. Implement in backend-specific subclass."""
         ...
-    
+
     @abstractmethod
     async def _save_state(self, state: State) -> None:
         """Save state to storage. Implement in backend-specific subclass."""
         ...
-    
+
     @abstractmethod
     async def _load_messages(self) -> list[Message]:
         """Load message history. Implement in backend-specific subclass."""
         ...
-    
+
     @abstractmethod
     async def _save_messages(self, messages: list[Message]) -> None:
         """Save message history. Implement in backend-specific subclass."""
         ...
-    
+
+    async def _save_event(self, event: AgentEvent) -> None:
+        """Save an event to the persistent log.
+
+        Override in backend-specific subclass if enable_event_log is True.
+        """
+        if self.enable_event_log:
+            raise NotImplementedError(
+                f"Agent {self.__class__.__name__} enables event log but does not implement _save_event"
+            )
+
+    async def _get_events(self, after_id: int | None = None) -> list[AgentEvent]:
+        """Get events from the persistent log.
+
+        Override in backend-specific subclass if enable_event_log is True.
+
+        Args:
+            after_id: Only return events with ID greater than this.
+        """
+        if self.enable_event_log:
+            raise NotImplementedError(
+                f"Agent {self.__class__.__name__} enables event log but does not implement _get_events"
+            )
+        return []
+
+    async def replay_events(self, connection: Connection, after_id: int) -> None:
+        """Replay events from the log to a connection.
+
+        Args:
+            connection: The connection to send events to.
+            after_id: The last event ID the client has seen.
+        """
+        if not self.enable_event_log:
+            return
+
+        events = await self._get_events(after_id=after_id)
+        for event in events:
+            # We assume events stored in the log are ready to be sent as JSON
+            # This matches the WebSocketOutput format
+            try:
+                await connection.send(json.dumps(event.data))
+            except Exception:
+                # Connection might be closed
+                break
+
     # ─── State API ──────────────────────────────────────────────────────
     
     @property

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol, runtime_checkable
+import time
+from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
 
 from ai_query.agents.websocket import Connection
+
+if TYPE_CHECKING:
+    from ai_query.agents.base import Agent
+    from ai_query.types import AgentEvent
 
 
 @runtime_checkable
@@ -93,3 +98,48 @@ class SSEOutput(AgentOutput):
 
     async def send_error(self, error: str) -> None:
         await self.writer.write(f"event: error\ndata: {error}\n\n".encode("utf-8"))
+
+
+class PersistingOutput(AgentOutput):
+    """Wrapper that persists events to the agent's log before sending.
+
+    Automatically used by ChatAgent when enable_event_log is True.
+    """
+
+    def __init__(self, wrapped: AgentOutput, agent: "Agent"):
+        self.wrapped = wrapped
+        self.agent = agent
+        # Simple monotonic counter for this session - ideal would be database sequence
+        # For MVP, we'll use timestamp * 1000 to be roughly unique and ordered
+        self._seq = int(time.time() * 1000)
+
+    def _next_id(self) -> int:
+        self._seq += 1
+        return self._seq
+
+    async def _save(self, type: str, data: dict[str, Any]) -> None:
+        # Import here to avoid circular imports if any
+        from ai_query.types import AgentEvent
+
+        event = AgentEvent(
+            id=self._next_id(),
+            type=type,
+            data=data,
+            created_at=time.time()
+        )
+        await self.agent._save_event(event)
+
+    async def send_message(self, content: str) -> None:
+        await self._save("message", {"content": content})
+        await self.wrapped.send_message(content)
+
+    async def send_status(self, status: str, details: dict[str, Any] | None = None) -> None:
+        data = {"status": status}
+        if details:
+            data["details"] = details
+        await self._save("status", data)
+        await self.wrapped.send_status(status, details)
+
+    async def send_error(self, error: str) -> None:
+        await self._save("error", {"error": error})
+        await self.wrapped.send_error(error)

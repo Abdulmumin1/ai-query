@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import aiosqlite
 
 from ai_query.agents.base import Agent
-from ai_query.types import Message
+from ai_query.types import Message, AgentEvent
 
 State = TypeVar("State")
 
@@ -81,6 +82,16 @@ class SQLiteAgent(Agent[State], Generic[State]):
             CREATE TABLE IF NOT EXISTS agent_messages (
                 id TEXT PRIMARY KEY,
                 messages TEXT NOT NULL
+            )
+        """)
+        await self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_events (
+                agent_id TEXT NOT NULL,
+                event_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (agent_id, event_id)
             )
         """)
         await self._conn.commit()
@@ -162,6 +173,52 @@ class SQLiteAgent(Agent[State], Generic[State]):
             (self._id, json.dumps(messages_data))
         )
         await conn.commit()
+
+    async def _save_event(self, event: AgentEvent) -> None:
+        """Save an event to the persistent log."""
+        conn = await self._ensure_connection()
+
+        # Prune expired events (lazy cleanup)
+        if self.event_retention > 0:
+            cutoff = time.time() - self.event_retention
+            await conn.execute(
+                "DELETE FROM agent_events WHERE agent_id = ? AND created_at < ?",
+                (self._id, cutoff)
+            )
+
+        await conn.execute(
+            """
+            INSERT INTO agent_events (agent_id, event_id, event_type, data, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (self._id, event.id, event.type, json.dumps(event.data), event.created_at)
+        )
+        await conn.commit()
+
+    async def _get_events(self, after_id: int | None = None) -> list[AgentEvent]:
+        """Get events from the persistent log."""
+        conn = await self._ensure_connection()
+        query = "SELECT * FROM agent_events WHERE agent_id = ?"
+        params = [self._id]
+
+        if after_id is not None:
+            query += " AND event_id > ?"
+            params.append(after_id)
+
+        query += " ORDER BY event_id ASC"
+
+        cursor = await conn.execute(query, tuple(params))
+        rows = await cursor.fetchall()
+
+        events = []
+        for row in rows:
+            events.append(AgentEvent(
+                id=row["event_id"],
+                type=row["event_type"],
+                data=json.loads(row["data"]),
+                created_at=row["created_at"]
+            ))
+        return events
 
     async def close(self) -> None:
         """Close the database connection."""

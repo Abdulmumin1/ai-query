@@ -566,6 +566,26 @@ class GenerateTextResult:
 
 
 @dataclass
+class AgentEvent:
+    """A durable event emitted by an agent.
+
+    These events are persisted to the Event Log and can be replayed to clients
+    upon reconnection.
+
+    Attributes:
+        id: Monotonically increasing sequence ID.
+        type: Event type (e.g., "message", "status", "error").
+        data: Event payload.
+        created_at: Timestamp of creation.
+    """
+
+    id: int
+    type: str
+    data: dict[str, Any]
+    created_at: float
+
+
+@dataclass
 class StreamTextResult:
     """Final result from stream_text after streaming completes."""
 

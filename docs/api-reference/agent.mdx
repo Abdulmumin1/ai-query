@@ -30,6 +30,12 @@ class Agent(ABC, Generic[State]):
   Optional environment bindings. Used for Cloudflare Durable Objects integration.
 </ParamField>
 
+### Class Attributes
+
+<ParamField path="enable_event_log" type="bool" default="False">
+  Set to `True` to enable persistent event logging and connection recovery.
+</ParamField>
+
 ## Properties
 
 ### state
@@ -154,6 +160,22 @@ Fire an event to all subscribers. Events are namespaced: `"{agent_id}:{event}"`.
 ```python
 await self.emit("task.complete", {"result": analysis_result})
 ```
+
+### replay_events
+
+```python
+async def replay_events(self, connection: Connection, after_id: int) -> None
+```
+
+Replay events from the persistent log to a specific connection.
+
+**Parameters:**
+- `connection`: The connection to send events to.
+- `after_id`: The last event ID the client has seen.
+
+<Note>
+This method is called automatically by `AgentServer` when a client connects with `?last_event_id=...`. You typically don't need to call it manually.
+</Note>
 
 ### handle_invoke
 

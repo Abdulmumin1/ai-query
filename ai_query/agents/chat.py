@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, AsyncIterator, Generic, TypeVar, TYPE_CHECKING
 
 from ai_query.agents.base import Agent
-from ai_query.agents.output import AgentOutput, NullOutput
+from ai_query.agents.output import AgentOutput, NullOutput, PersistingOutput
 from ai_query.types import Message, StopCondition, StepStartEvent, StepFinishEvent
 from ai_query.model import LanguageModel
 
@@ -94,6 +94,11 @@ class ChatAgent(Agent[State], Generic[State]):
 
         # Set output context
         previous_output = self._output
+
+        # Wrap output if event logging is enabled
+        if self.enable_event_log and output:
+            output = PersistingOutput(output, self)
+
         self._output = output
 
         try:
@@ -141,6 +146,11 @@ class ChatAgent(Agent[State], Generic[State]):
 
         # Set output context
         previous_output = self._output
+
+        # Wrap output if event logging is enabled
+        if self.enable_event_log and output:
+            output = PersistingOutput(output, self)
+
         self._output = output
 
         try:
@@ -172,26 +182,25 @@ class ChatAgent(Agent[State], Generic[State]):
             # Restore previous output context
             self._output = previous_output
 
-    
     async def stream_chat_sse(self, message: str) -> str:
         """
         Stream an AI response via SSE to connected clients.
-        
+
         Uses SSE (Server-Sent Events) for efficient streaming to clients
         while processing the AI response. Returns the full response.
-        
+
         Args:
             message: The user's message.
-            
+
         Returns:
             The complete AI response text.
         """
         await self.stream_to_sse("ai_start", "")
-        
+
         full_response = ""
         async for chunk in self.stream_chat(message):
             full_response += chunk
             await self.stream_to_sse("ai_chunk", chunk)
-        
+
         await self.stream_to_sse("ai_end", full_response)
         return full_response

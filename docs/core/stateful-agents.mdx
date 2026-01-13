@@ -55,7 +55,21 @@ Choose where your data lives. Switch backends by changing the base class:
 | `DurableObjectAgent` | Cloudflare Storage | Edge deployment |
 | **Custom** | Redis, Postgres, DynamoDB | Production, Serverless |
 
-### 3. The Actor Model
+### 3. Durability & Recovery
+
+Agents support **Event Sourcing** for connection recovery. By enabling the event log, all outgoing messages and status updates are persisted.
+
+```python
+class MyBot(ChatAgent, SQLiteAgent):
+    enable_event_log = True  # Enable persistent event log
+```
+
+**How it works:**
+1.  **Persistence**: Every message sent via `self.output` is saved to an append-only log.
+2.  **Recovery**: If a client disconnects, they can reconnect with `?last_event_id=123`.
+3.  **Replay**: The agent automatically replays all missed events to the new connection.
+
+### 4. The Actor Model
 
 Agents run as **Actors**. This means:
 - **Sequential Processing**: Messages are processed one at a time (no race conditions).

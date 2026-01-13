@@ -305,6 +305,17 @@ class AgentServer(Generic[State]):
         # Connect
         agent.enqueue("connect", None, connection=connection, ctx=ctx)
 
+        # Handle event replay for connection recovery
+        last_event_id_str = request.query.get("last_event_id")
+        if last_event_id_str:
+            try:
+                last_event_id = int(last_event_id_str)
+                # Replay events in the background to not block the connection
+                asyncio.create_task(agent.replay_events(connection, last_event_id))
+            except ValueError:
+                # Ignore invalid ID
+                pass
+
         try:
             async for msg in ws:
                 meta.last_activity = time.time()
