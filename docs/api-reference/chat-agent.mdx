@@ -41,19 +41,24 @@ class ChatAgent(Agent[State], Generic[State]):
 
 ## Methods
 
+### output
+
+```python
+@property
+def output(self) -> AgentOutput
+```
+
+Get the current output channel adapter. Use this in hooks to send feedback (status updates, tool execution info) regardless of the transport (WebSocket, SSE, etc.).
+
+Returns `NullOutput` if no output channel is active.
+
 ### chat
 
 ```python
-async def chat(self, message: str) -> str
+async def chat(self, message: str, output: AgentOutput | None = None) -> str
 ```
 
 Send a message and get an AI response.
-
-This method:
-1. Adds the user message to history
-2. Calls the AI model with the full conversation
-3. Adds the assistant response to history
-4. Persists the updated history
 
 **Parameters:**
 
@@ -61,12 +66,16 @@ This method:
   The user's message.
 </ParamField>
 
+<ParamField path="output" type="AgentOutput | None" default="None">
+  Optional output adapter for intermediate feedback (e.g., status updates).
+</ParamField>
+
 **Returns:** The AI's response text.
 
 ### stream_chat
 
 ```python
-async def stream_chat(self, message: str) -> AsyncIterator[str]
+async def stream_chat(self, message: str, output: AgentOutput | None = None) -> AsyncIterator[str]
 ```
 
 Stream an AI response.
@@ -75,6 +84,10 @@ Stream an AI response.
 
 <ParamField path="message" type="str" required>
   The user's message.
+</ParamField>
+
+<ParamField path="output" type="AgentOutput | None" default="None">
+  Optional output adapter for intermediate feedback.
 </ParamField>
 
 **Yields:** Response text chunks as they arrive.
