@@ -261,23 +261,26 @@ class TestChatAgentIntegration:
     async def test_chat_agent_message_history(self):
         """ChatAgent should manage message history."""
         from unittest.mock import patch, MagicMock, AsyncMock
-        
-        # Mock generate_text at the module where it's imported
+
+        # Mock stream_text (chat() uses streaming internally)
+        async def mock_text_stream():
+            yield "I'm doing well, "
+            yield "thank you!"
+
         mock_result = MagicMock()
-        mock_result.text = "I'm doing well, thank you!"
-        
-        with patch("ai_query.generate_text", new=AsyncMock(return_value=mock_result)):
-            with patch("ai_query.providers.google.google", return_value=MagicMock()):
-                class MyBot(ChatAgent, InMemoryAgent):
-                    initial_state = {}
-                    system = "You are a helpful bot."
-                
-                async with MyBot("bot-1") as bot:
-                    response = await bot.chat("How are you?")
-                    
-                    assert response == "I'm doing well, thank you!"
-                    assert len(bot.messages) == 2
-                    assert bot.messages[0].role == "user"
-                    assert bot.messages[0].content == "How are you?"
-                    assert bot.messages[1].role == "assistant"
-                    assert bot.messages[1].content == "I'm doing well, thank you!"
+        mock_result.text_stream = mock_text_stream()
+
+        with patch("ai_query.stream_text", return_value=mock_result):
+            class MyBot(ChatAgent, InMemoryAgent):
+                initial_state = {}
+                system = "You are a helpful bot."
+
+            async with MyBot("bot-1") as bot:
+                response = await bot.chat("How are you?")
+
+                assert response == "I'm doing well, thank you!"
+                assert len(bot.messages) == 2
+                assert bot.messages[0].role == "user"
+                assert bot.messages[0].content == "How are you?"
+                assert bot.messages[1].role == "assistant"
+                assert bot.messages[1].content == "I'm doing well, thank you!"
