@@ -156,12 +156,116 @@ Override hooks on `AgentServer` for custom logic:
 class MyServer(AgentServer):
     async def on_agent_create(self, agent):
         print(f"Created agent: {agent.id}")
-    
+
     async def on_agent_evict(self, agent):
         print(f"Evicting agent: {agent.id}")
         # Save important data before eviction
 
 MyServer(TaskAgent, config=config).serve(port=8080)
+```
+
+## Custom Routes
+
+Add your own endpoints alongside the agent routes using either the `on_app_setup` hook or `create_app()` method.
+
+### Option 1: Override `on_app_setup`
+
+The simplest way to add custom routes:
+
+```python
+from aiohttp import web
+from ai_query.agents import AgentServer, ChatAgent, InMemoryAgent
+
+class MyBot(ChatAgent, InMemoryAgent):
+    system = "You are helpful."
+
+class MyServer(AgentServer):
+    def on_app_setup(self, app):
+        """Add custom routes after agent routes are registered."""
+        app.router.add_get("/health", self.health_check)
+        app.router.add_post("/webhook", self.handle_webhook)
+
+    async def health_check(self, request):
+        return web.json_response({
+            "status": "ok",
+            "active_agents": len(self._agents)
+        })
+
+    async def handle_webhook(self, request):
+        data = await request.json()
+        # Process webhook, maybe notify an agent
+        agent = self.get_or_create(data["agent_id"])
+        await agent.broadcast(f"Webhook received: {data['event']}")
+        return web.json_response({"received": True})
+
+MyServer(MyBot).serve(port=8080)
+```
+
+### Option 2: Use `create_app()` Directly
+
+For full control over the aiohttp application:
+
+```python
+from aiohttp import web
+from ai_query.agents import AgentServer
+
+server = AgentServer(MyBot)
+app = server.create_app()
+
+# Add custom routes
+async def health_handler(request):
+    return web.json_response({"status": "ok"})
+
+app.router.add_get("/health", health_handler)
+app.router.add_static("/static", "./static")
+
+# Add custom middleware
+@web.middleware
+async def timing_middleware(request, handler):
+    import time
+    start = time.time()
+    response = await handler(request)
+    response.headers["X-Response-Time"] = str(time.time() - start)
+    return response
+
+app.middlewares.append(timing_middleware)
+
+# Run with aiohttp directly
+web.run_app(app, port=8080)
+```
+
+### Accessing Agents from Custom Routes
+
+Your custom routes can interact with agents:
+
+```python
+class MyServer(AgentServer):
+    def on_app_setup(self, app):
+        app.router.add_post("/broadcast", self.broadcast_to_all)
+        app.router.add_get("/agent/{agent_id}/custom", self.custom_agent_endpoint)
+
+    async def broadcast_to_all(self, request):
+        """Send a message to all active agents."""
+        data = await request.json()
+        for agent_id in self.list_agents():
+            agent = self.get_or_create(agent_id)
+            await agent.broadcast(data["message"])
+        return web.json_response({"sent_to": len(self._agents)})
+
+    async def custom_agent_endpoint(self, request):
+        """Custom endpoint that works with a specific agent."""
+        agent_id = request.match_info["agent_id"]
+        agent = self.get_or_create(agent_id)
+
+        # Start agent if needed
+        if agent._state is None:
+            await agent.start()
+
+        return web.json_response({
+            "agent_id": agent_id,
+            "state": agent.state,
+            "message_count": len(agent.messages)
+        })
 ```
 
 ## Complete Example: Per-User Research Assistant

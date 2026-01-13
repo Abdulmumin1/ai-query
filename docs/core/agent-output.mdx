@@ -27,15 +27,18 @@ ai-query provides adapters for common protocols:
 
 | Class | Transport | Format |
 |-------|-----------|--------|
-| `WebSocketOutput` | `ai_query.agents.websocket.Connection` | JSON frames |
-| `SSEOutput` | `aiohttp.web.StreamResponse` | Server-Sent Events |
-| `NullOutput` | None | No-op (default) |
+| `BroadcastOutput` | All connected clients | JSON (WS) / SSE |
+| `WebSocketOutput` | Single WebSocket connection | JSON frames |
+| `SSEOutput` | Single SSE stream | Server-Sent Events |
+| `NullOutput` | None | No-op |
 
 ## Usage
 
 ### 1. In Your Agent (The Logic)
 
-Use `self.output` in your hooks or tools. It is always available (defaults to `NullOutput` if not set).
+Use `self.output` in your hooks or tools.
+
+**By default, this uses `BroadcastOutput`**, which sends updates to **ALL** connected WebSocket and SSE clients.
 
 ```python
 from ai_query.agents import ChatAgent, InMemoryAgent
@@ -44,12 +47,13 @@ class MyBot(ChatAgent, InMemoryAgent):
     async def on_step_finish(self, event):
         if event.step.tool_calls:
             for tc in event.step.tool_calls:
+                # Broadcasts to everyone connected to this agent
                 await self.output.send_status(f"🛠️ Executing: {tc.name}")
 ```
 
-### 2. When Calling the Agent (The Transport)
+### 2. Targeted Output (Optional)
 
-Pass the appropriate output adapter when calling `chat()` or `stream_chat()`.
+If you want to send output to a *specific* connection (e.g., only the user who sent the message), pass a specific adapter.
 
 **WebSocket Example:**
 
@@ -58,10 +62,11 @@ from ai_query.agents.output import WebSocketOutput
 
 class MyBot(ChatAgent, InMemoryAgent):
     async def on_message(self, conn, message):
-        # Create adapter for this connection
+        # 1. Create adapter for THIS connection only
         output = WebSocketOutput(conn)
 
-        # Pass it to chat()
+        # 2. Pass it to chat()
+        # The agent will use this output instead of broadcasting
         await self.chat(message, output=output)
 ```
 
@@ -76,6 +81,8 @@ async def handle_sse(request):
     await response.prepare(request)
 
     output = SSEOutput(response)
+
+    # Stream only to this HTTP response
     await agent.stream_chat(message, output=output)
 ```
 
@@ -109,6 +116,7 @@ class AgentOutput(Protocol):
     async def send_message(self, content: str) -> None: ...
     async def send_status(self, status: str, details: dict | None = None) -> None: ...
     async def send_error(self, error: str) -> None: ...
+    async def send_event(self, event: str, data: dict[str, Any]) -> None: ...
 ```
 
 ### ChatAgent.output

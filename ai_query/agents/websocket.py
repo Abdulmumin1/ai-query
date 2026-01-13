@@ -20,6 +20,10 @@ class Connection(Protocol):
         """Close the connection."""
         ...
 
+    async def send_event(self, event: str, data: dict[str, Any]) -> None:
+        """Send a structured event (optional)."""
+        ...
+
 
 @dataclass
 class ConnectionContext:

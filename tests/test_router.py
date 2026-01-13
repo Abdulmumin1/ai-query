@@ -19,7 +19,7 @@ async def test_streaming_chat_endpoint(aiohttp_client):
     """Test POST /agent/{id}/chat?stream=true endpoint."""
 
     # Mock stream_chat to yield chunks
-    async def mock_stream_chat(message):
+    async def mock_stream_chat(message, output=None):
         yield "Hello"
         yield " "
         yield "World"
@@ -61,15 +61,121 @@ async def test_streaming_chat_endpoint(aiohttp_client):
     content = await resp.text()
 
     expected_chunks = [
-        "event: start\ndata: \n\n",
-        "event: chunk\ndata: Hello\n\n",
-        "event: chunk\ndata:  \n\n",
-        "event: chunk\ndata: World\n\n",
-        'event: end\ndata: "Hello World"\n\n'
+        'event: start\ndata: {}\n\n',
+        'event: chunk\ndata: {"content": "Hello"}\n\n',
+        'event: chunk\ndata: {"content": " "}\n\n',
+        'event: chunk\ndata: {"content": "World"}\n\n',
+        'event: end\ndata: {"content": "Hello World"}\n\n'
     ]
 
     for chunk in expected_chunks:
         assert chunk in content
+
+@pytest.mark.asyncio
+async def test_streaming_chat_unified(aiohttp_client):
+    """Test POST /agent/{id}/chat?stream=true with status events."""
+
+    # Mock stream_chat to yield chunks AND send status
+    async def mock_stream_chat(message, output=None):
+        print(f"DEBUG: mock_stream_chat called with output={output}")
+        if output:
+            print("DEBUG: Sending status...")
+            await output.send_status("Thinking...")
+        yield "Hello"
+        yield " "
+        yield "World"
+
+    class MyBot(ChatAgent, InMemoryAgent):
+        initial_state = {}
+
+    bot = MyBot("test-unified")
+    bot.stream_chat = mock_stream_chat  # type: ignore
+
+    server = AgentServer(MyBot)
+    server.get_or_create = MagicMock(return_value=bot)  # type: ignore
+
+    config = AgentServerConfig()
+    app = web.Application()
+    base = config.base_path.rstrip("/")
+    app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
+
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        f"/agent/test-unified/chat?stream=true",
+        json={"message": "Hi"},
+        headers={"Content-Type": "application/json"}
+    )
+
+    assert resp.status == 200
+    assert resp.headers["Content-Type"] == "text/event-stream"
+
+    content = await resp.text()
+
+    # Check for status event (side effect)
+    assert 'event: status' in content
+    assert '"status": "Thinking..."' in content
+
+    # Check for standard AI events (start, chunk, end)
+    assert 'event: start' in content
+    assert 'event: chunk' in content
+    assert '"content": "Hello"' in content
+    assert '"content": "World"' in content
+    assert 'event: end' in content
+    assert '"content": "Hello World"' in content
+
+@pytest.mark.asyncio
+async def test_chat_broadcasting(aiohttp_client):
+    """Test that POST /chat (non-streaming) broadcasts events to SSE."""
+
+    # Mock stream_text
+    async def mock_generator():
+        yield "Hello"
+        yield " "
+        yield "World"
+
+    mock_result = MagicMock()
+    mock_result.text_stream = mock_generator()
+    mock_result.text = "Hello World" # fallback if needed
+
+    with patch("ai_query.stream_text", return_value=mock_result):
+        class MyBot(ChatAgent, InMemoryAgent):
+            initial_state = {}
+
+        bot = MyBot("test-broadcast")
+        bot.stream_to_sse_with_id = AsyncMock()  # Spy on this (preferred over stream_to_sse)
+
+        server = AgentServer(MyBot)
+        server.get_or_create = MagicMock(return_value=bot)  # type: ignore
+
+        config = AgentServerConfig()
+        app = web.Application()
+        base = config.base_path.rstrip("/")
+        app.router.add_get(f"{base}/{{agent_id}}/events", server._handle_sse)
+        app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
+
+        client = await aiohttp_client(app)
+
+        # 2. Send Chat Request
+        resp = await client.post(
+            f"/agent/test-broadcast/chat",
+            json={"message": "Hi"},
+            headers={"Content-Type": "application/json"}
+        )
+
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["response"] == "Hello World"
+
+        # 3. Verify Broadcasts
+        # Expect calls: ai_start, ai_chunk (x3), ai_end
+        calls = bot.stream_to_sse_with_id.call_args_list
+        assert len(calls) >= 5
+        assert calls[0].args[0] == "ai_start"
+        assert calls[1].args[0] == "ai_chunk"
+        assert json.loads(calls[1].args[1])["content"] == "Hello"
+        assert calls[-1].args[0] == "ai_end"
+        assert json.loads(calls[-1].args[1])["content"] == "Hello World"
 
 @pytest.mark.asyncio
 async def test_chat_endpoint_no_stream(aiohttp_client):
