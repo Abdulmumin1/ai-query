@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.6.2
+
+- patch: feat(transport): implemented a durable event replay mechanism
+
 ## 1.6.1
 
 - patch: feat(transport): implemented a safer transport transport mechanism
