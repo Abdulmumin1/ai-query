@@ -319,7 +319,41 @@ class RedisAgent(Agent):
             f"agent:{self._id}:messages",
             json.dumps(data)
         )
+
+    async def _save_event(self, event: AgentEvent) -> None:
+        """Persist an event to the log."""
+        # Simple list append for Redis
+        await self._redis.rpush(
+            f"agent:{self._id}:events",
+            json.dumps({
+                "id": event.id,
+                "type": event.type,
+                "data": event.data,
+                "created_at": event.created_at
+            })
+        )
+        # Optional: Trim log to respect retention
+        # await self._redis.ltrim(f"agent:{self._id}:events", -1000, -1)
+
+    async def _get_events(self, after_id: int | None = None) -> list[AgentEvent]:
+        """Retrieve events from the log."""
+        raw_events = await self._redis.lrange(f"agent:{self._id}:events", 0, -1)
+        events = []
+        for raw in raw_events:
+            data = json.loads(raw)
+            if after_id is None or data["id"] > after_id:
+                events.append(AgentEvent(**data))
+        return events
 ```
+
+### Supporting Event Log
+
+To support `enable_event_log = True` in your custom backend, you must implement:
+
+1.  `_save_event(self, event: AgentEvent) -> None`
+2.  `_get_events(self, after_id: int | None = None) -> list[AgentEvent]`
+
+The `AgentEvent` class is available in `ai_query.types`.
 
 ---
 

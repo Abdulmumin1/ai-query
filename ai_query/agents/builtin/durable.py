@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Generic, TypeVar
 
 from ai_query.agents.base import Agent
 from ai_query.agents.transport import AgentTransport
 from ai_query.agents.websocket import Connection, ConnectionContext
-from ai_query.types import Message
+from ai_query.types import Message, AgentEvent
 
 State = TypeVar("State")
 
@@ -139,22 +140,75 @@ class DurableObjectAgent(Agent[State], Generic[State]):
             for msg in messages
         ]
         await self._storage.put("messages", messages_data)
-    
+
     def sql(self, query: str, *params: Any) -> list[dict[str, Any]]:
         """
         Execute SQL against the Durable Object's embedded SQLite.
-        
+
         Note: Requires Durable Objects SQL API (check CF docs for availability).
-        
+
         Args:
             query: The SQL query to execute.
             *params: Query parameters.
-            
+
         Returns:
             List of rows as dictionaries.
         """
         # The DO storage.sql API returns results directly
         return self._storage.sql(query, *params)
+
+    def _ensure_events_table(self) -> None:
+        """Ensure the agent_events table exists."""
+        self.sql("""
+            CREATE TABLE IF NOT EXISTS agent_events (
+                event_id INTEGER PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+
+    async def _save_event(self, event: AgentEvent) -> None:
+        """Save an event to Durable Object storage (via SQL)."""
+        self._ensure_events_table()
+
+        # Lazy cleanup of expired events
+        if self.event_retention > 0:
+            cutoff = time.time() - self.event_retention
+            self.sql("DELETE FROM agent_events WHERE created_at < ?", cutoff)
+
+        self.sql(
+            """
+            INSERT INTO agent_events (event_id, event_type, data, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            event.id, event.type, json.dumps(event.data), event.created_at
+        )
+
+    async def _get_events(self, after_id: int | None = None) -> list[AgentEvent]:
+        """Get events from Durable Object storage (via SQL)."""
+        self._ensure_events_table()
+
+        query = "SELECT * FROM agent_events"
+        params = []
+
+        if after_id is not None:
+            query += " WHERE event_id > ?"
+            params.append(after_id)
+
+        query += " ORDER BY event_id ASC"
+
+        rows = self.sql(query, *params)
+
+        events = []
+        for row in rows:
+            events.append(AgentEvent(
+                id=row["event_id"],
+                type=row["event_type"],
+                data=json.loads(row["data"]),
+                created_at=row["created_at"]
+            ))
+        return events
     
     # ─── Durable Object HTTP/WebSocket Handling ─────────────────────────
     

@@ -139,7 +139,8 @@
               "cookbook/custom-agent-streaming",
               "cookbook/mcp-agent",
               "cookbook/agent-communication",
-              "cookbook/serverless-agents"
+              "cookbook/serverless-agents",
+              "cookbook/profile-research-agent"
             ]
           }
         ]

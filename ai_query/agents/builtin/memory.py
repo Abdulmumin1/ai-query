@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, ClassVar, Generic, TypeVar
 
 from ai_query.agents.base import Agent
-from ai_query.types import Message
+from ai_query.types import Message, AgentEvent
 
 State = TypeVar("State")
 
@@ -59,6 +60,33 @@ class InMemoryAgent(Agent[State], Generic[State]):
             if self._id not in self._store:
                 self._store[self._id] = {}
             self._store[self._id]["messages"] = messages
+
+    async def _save_event(self, event: AgentEvent) -> None:
+        """Save an event to the persistent log."""
+        async with self._store_lock:
+            if self._id not in self._store:
+                self._store[self._id] = {}
+
+            events = self._store[self._id].get("events", [])
+
+            # Prune expired events
+            if self.event_retention > 0:
+                cutoff = time.time() - self.event_retention
+                events = [e for e in events if e.created_at > cutoff]
+
+            events.append(event)
+            self._store[self._id]["events"] = events
+
+    async def _get_events(self, after_id: int | None = None) -> list[AgentEvent]:
+        """Get events from the persistent log."""
+        async with self._store_lock:
+            agent_data = self._store.get(self._id, {})
+            events = agent_data.get("events", [])
+
+            if after_id is None:
+                return events
+
+            return [e for e in events if e.id > after_id]
 
     @classmethod
     async def clear_all_async(cls) -> None:
