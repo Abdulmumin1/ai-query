@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "feat(transport): implemented a safer transport transport mechanism"
+}

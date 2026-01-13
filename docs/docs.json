@@ -35,7 +35,8 @@
             "group": "Stateful Agents",
             "pages": [
               "core/stateful-agents",
-              "core/agent-server"
+              "core/agent-server",
+              "core/agent-output"
             ]
           }
         ]
