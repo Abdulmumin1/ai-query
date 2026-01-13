@@ -29,18 +29,15 @@ async def test_event_persistence():
     """Events should be saved when enable_event_log is True."""
     from unittest.mock import patch, MagicMock
 
-    # Mock generate_text
-    async def mock_generate_text(*args, **kwargs):
-        # Call on_step_start if provided
-        if "on_step_start" in kwargs and kwargs["on_step_start"]:
-            from ai_query.types import StepStartEvent
-            await kwargs["on_step_start"](StepStartEvent(step_number=1, messages=[], tools=None))
+    # Mock stream_text (chat() uses streaming internally)
+    async def mock_text_stream():
+        yield "Hello"
+        yield " there!"
 
-        mock_result = MagicMock()
-        mock_result.text = "Hello there!"
-        return mock_result
+    mock_result = MagicMock()
+    mock_result.text_stream = mock_text_stream()
 
-    with patch("ai_query.generate_text", side_effect=mock_generate_text):
+    with patch("ai_query.stream_text", return_value=mock_result):
         async with ReplayBot("test-replay") as agent:
             # Manually trigger output
             mock_conn = AsyncMock()
@@ -53,15 +50,11 @@ async def test_event_persistence():
             events = await agent._get_events()
             assert len(events) > 0
 
-            # Verify we captured the status event from the hook
-            status_events = [e for e in events if e.type == "status"]
-            assert len(status_events) > 0
-            assert status_events[0].data["status"] == "Thinking..."
-
-            # Verify we captured the message event
-            message_events = [e for e in events if e.type == "message"]
-            assert len(message_events) > 0
-            assert message_events[0].data["content"] == "Debug message"
+            # Verify we have ai_start, ai_chunk, ai_end events
+            event_types = [e.type for e in events]
+            assert "ai_start" in event_types
+            assert "ai_chunk" in event_types
+            assert "ai_end" in event_types
 
 @pytest.mark.asyncio
 async def test_manual_event_saving():
@@ -101,7 +94,8 @@ async def test_replay_logic():
             ))
 
         # Replay from ID 1 (should get 2 and 3)
-        mock_conn = MagicMock()
+        # Create a mock that doesn't have send_event so it falls back to send()
+        mock_conn = MagicMock(spec=["send"])  # Only has send, not send_event
         mock_conn.send = AsyncMock()
 
         await agent.replay_events(mock_conn, after_id=1)

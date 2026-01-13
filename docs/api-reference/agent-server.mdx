@@ -139,11 +139,60 @@ async def serve_async(
 
 Start the multi-agent server (async).
 
+### create_app
+
+```python
+def create_app(self) -> web.Application
+```
+
+Create and return the configured aiohttp `Application` with all agent routes registered.
+
+Use this method when you need full control over the app, such as:
+- Adding custom routes or middleware
+- Integrating with existing aiohttp applications
+- Running with custom server configurations
+
+**Returns:** Configured `aiohttp.web.Application` instance.
+
+**Example:**
+```python
+from aiohttp import web
+from ai_query.agents import AgentServer
+
+server = AgentServer(MyBot)
+app = server.create_app()
+
+# Add custom routes
+app.router.add_get("/health", health_handler)
+
+# Run with aiohttp
+web.run_app(app, port=8080)
+```
+
 ---
 
 ## Lifecycle Hooks
 
 Override these methods in a subclass for custom behavior:
+
+### on_app_setup
+
+```python
+def on_app_setup(self, app: web.Application) -> None
+```
+
+Called after the aiohttp app is created but before serving. Use this to add custom routes, middleware, or configuration.
+
+**Example:**
+```python
+class MyServer(AgentServer):
+    def on_app_setup(self, app):
+        app.router.add_get("/health", self.health_check)
+        app.router.add_post("/webhook", self.handle_webhook)
+
+    async def health_check(self, request):
+        return web.json_response({"status": "ok"})
+```
 
 ### on_agent_create
 

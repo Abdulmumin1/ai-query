@@ -145,22 +145,27 @@ class Agent(ABC, Generic[State]):
         if not self.enable_event_log:
             return
 
+
         events = await self._get_events(after_id=after_id)
         for event in events:
-            # We assume events stored in the log are ready to be sent as JSON
-            # This matches the WebSocketOutput format
             try:
-                await connection.send(json.dumps(event.data))
+                # Use send_event if available to preserve event type (essential for SSE)
+                if hasattr(connection, "send_event"):
+                    await connection.send_event(event.type, event.data)
+                else:
+                    # Fallback for simple connections: wrap type in payload
+                    payload = {"type": event.type, **event.data}
+                    await connection.send(json.dumps(payload))
             except Exception:
                 # Connection might be closed
                 break
 
     # ─── State API ──────────────────────────────────────────────────────
-    
+
     @property
     def state(self) -> State:
         """Current agent state.
-        
+
         Raises:
             RuntimeError: If the agent hasn't been started yet.
         """
@@ -170,17 +175,17 @@ class Agent(ABC, Generic[State]):
                 "'async with agent:' context manager."
             )
         return self._state
-    
+
     async def set_state(self, state: State) -> None:
         """
         Update the agent's state.
-        
+
         This will:
         1. Update the in-memory state
         2. Persist to storage
         3. Call on_state_update hook
         4. Broadcast the new state to all connected clients
-        
+
         Args:
             state: The new state to set.
         """
@@ -188,64 +193,64 @@ class Agent(ABC, Generic[State]):
         await self._save_state(state)
         self.on_state_update(state, source="server")
         await self._broadcast_state(state)
-    
+
     # ─── Message API ────────────────────────────────────────────────────
-    
+
     @property
     def messages(self) -> list[Message]:
         """Conversation history for this agent."""
         return self._messages
-    
+
     async def save_messages(self, messages: list[Message]) -> None:
         """Persist messages to storage."""
         self._messages = messages
         await self._save_messages(messages)
-    
+
     async def clear_messages(self) -> None:
         """Clear the conversation history."""
         self._messages = []
         await self._save_messages([])
-    
+
     # ─── WebSocket Lifecycle Hooks ──────────────────────────────────────
-    
+
     async def on_connect(self, connection: Connection, ctx: ConnectionContext) -> None:
         """Called when a WebSocket client connects.
-        
+
         Override this to handle new connections. The default implementation
         adds the connection to the internal connection set.
-        
+
         Args:
             connection: The WebSocket connection.
             ctx: Context containing the original request and metadata.
         """
         self._connections.add(connection)
-    
+
     async def on_message(self, connection: Connection, message: str | bytes) -> None:
         """Called when a message is received from a WebSocket client.
-        
+
         Override this to handle incoming messages.
-        
+
         Args:
             connection: The WebSocket connection that sent the message.
             message: The message content (string or bytes).
         """
         pass
-    
+
     async def on_close(
         self, connection: Connection, code: int, reason: str
     ) -> None:
         """Called when a WebSocket client disconnects.
-        
+
         Override this to handle disconnections. The default implementation
         removes the connection from the internal connection set.
-        
+
         Args:
             connection: The WebSocket connection that closed.
             code: The close code.
             reason: The close reason.
         """
         self._connections.discard(connection)
-    
+
     async def on_error(self, connection: Connection, error: Exception) -> None:
         """Called when a WebSocket error occurs.
 
@@ -348,53 +353,53 @@ class Agent(ABC, Generic[State]):
         ))
 
         return await asyncio.wait_for(future, timeout=timeout)
-    
+
     # ─── Agent Lifecycle Hooks ──────────────────────────────────────────
-    
+
     async def on_start(self) -> None:
         """Called when the agent starts.
-        
+
         Override this for initialization logic that needs to run after
         state has been loaded.
         """
         pass
-    
+
     def on_state_update(self, state: State, source: str | Connection) -> None:
         """Called when state changes from any source.
-        
+
         Override this to react to state updates.
-        
+
         Args:
             state: The new state.
             source: "server" if updated by the agent, or a Connection if
                    updated by a client.
         """
         pass
-    
+
     # ─── Actor Communication ─────────────────────────────────────────────
-    
+
     async def invoke(
-        self, 
-        agent_id: str, 
+        self,
+        agent_id: str,
         payload: dict[str, Any],
         timeout: float = 30.0
     ) -> dict[str, Any]:
         """Call another agent and wait for response.
-        
+
         Sends a request to another agent via the configured transport and
         waits for the response.
-        
+
         Args:
             agent_id: The target agent's identifier.
             payload: The request payload to send.
             timeout: Maximum time to wait for response in seconds.
-        
+
         Returns:
             The response from the target agent.
-        
+
         Raises:
             RuntimeError: If no transport is configured.
-        
+
         Example:
             result = await self.invoke("agent:researcher", {
                 "task": "search",
@@ -406,17 +411,17 @@ class Agent(ABC, Generic[State]):
                 "No transport configured. Use AgentServer or set _transport manually."
             )
         return await self._transport.invoke(agent_id, payload, timeout)
-    
+
     async def emit(self, event: str, data: dict[str, Any]) -> None:
         """Emit an event to subscribers.
-        
+
         Events are namespaced with the agent ID: "agent-id:event-name".
         If no event bus is configured, this is a no-op.
-        
+
         Args:
             event: The event name (e.g., "task.complete").
             data: The event payload.
-        
+
         Example:
             await self.emit("analysis.complete", {
                 "result": analysis_result
@@ -424,22 +429,22 @@ class Agent(ABC, Generic[State]):
         """
         if self._event_bus is not None:
             await self._event_bus.emit(f"{self.id}:{event}", data)
-    
+
     async def on_receive(self, message: "IncomingMessage") -> Any:
         """Unified handler for all incoming messages.
-        
+
         Override this for a single handler that processes messages from
         any source (WebSocket clients, other agents, HTTP requests).
-        
+
         The default implementation routes to legacy handlers for backward
         compatibility.
-        
+
         Args:
             message: The incoming message with source metadata.
-        
+
         Returns:
             Response for agent invokes, None for client messages.
-        
+
         Example:
             async def on_receive(self, message: IncomingMessage) -> Any:
                 if message.source == "client":
@@ -454,21 +459,21 @@ class Agent(ABC, Generic[State]):
             return await self.handle_invoke(
                 message.content if isinstance(message.content, dict) else {}
             )
-    
+
     async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle an invoke() call from another agent.
-        
+
         Override this to process requests from other agents.
-        
+
         Args:
             payload: The request payload from the calling agent.
-        
+
         Returns:
             Response to send back to the calling agent.
-        
+
         Raises:
             NotImplementedError: If not overridden.
-        
+
         Example:
             async def handle_invoke(self, payload: dict) -> dict:
                 task = payload.get("task")
@@ -481,22 +486,22 @@ class Agent(ABC, Generic[State]):
             f"Agent {self.id} does not implement handle_invoke(). "
             "Override this method to handle invoke() calls from other agents."
         )
-    
+
     async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Serverless request lifecycle handler.
-        
+
         Use this for stateless serverless environments (Lambda, Cloud Run).
         Handles the full lifecycle: load state → process → save state → respond.
-        
+
         Args:
             request: The request with 'action' and action-specific fields.
                 - action='chat': requires 'message'
                 - action='invoke': requires 'payload'
                 - action='state': returns current state
-        
+
         Returns:
             Response dict with action-specific results.
-        
+
         Example (AWS Lambda):
             def handler(event, context):
                 agent = MyAgent(event["agent_id"])
@@ -505,9 +510,9 @@ class Agent(ABC, Generic[State]):
         # Ensure agent is started
         if self._state is None:
             await self.start()
-        
+
         action = request.get("action", "chat")
-        
+
         if action == "chat":
             # Import here to avoid circular import
             if hasattr(self, "chat"):
@@ -515,7 +520,7 @@ class Agent(ABC, Generic[State]):
                 response = await self.chat(message)  # type: ignore
                 return {"agent_id": self.id, "response": response}
             return {"error": "Agent does not support chat"}
-        
+
         elif action == "invoke":
             payload = request.get("payload", {})
             result = await self.handle_invoke(payload)
@@ -580,10 +585,10 @@ class Agent(ABC, Generic[State]):
             yield f"event: error\ndata: Streaming not supported for action: {action}\n\n"
 
     # ─── Broadcast to Connections ───────────────────────────────────────
-    
+
     async def broadcast(self, message: str | bytes) -> None:
         """Send a message to all connected WebSocket clients.
-        
+
         Args:
             message: The message to broadcast.
         """
@@ -593,10 +598,10 @@ class Agent(ABC, Generic[State]):
             except Exception:
                 # Connection may have closed, remove it
                 self._connections.discard(conn)
-    
+
     async def _broadcast_state(self, state: State) -> None:
         """Broadcast state update to all connected clients.
-        
+
         Sends a JSON message with type "state" and the new state data.
         """
         if self._connections:
@@ -606,12 +611,12 @@ class Agent(ABC, Generic[State]):
             except (TypeError, ValueError):
                 # State is not JSON serializable, skip broadcast
                 pass
-    
+
     # ─── SSE Streaming ─────────────────────────────────────────────────
-    
+
     async def stream_to_sse(self, event: str, data: str) -> None:
         """Send an SSE event to all connected SSE clients.
-        
+
         Args:
             event: The event type (e.g., "ai_chunk", "ai_start", "ai_end").
             data: The event data to send.
@@ -622,7 +627,29 @@ class Agent(ABC, Generic[State]):
                 await conn.write(message.encode())
             except Exception:
                 self._sse_connections.discard(conn)
-    
+
+    async def stream_to_sse_with_id(self, event: str, data: str, event_id: int | None = None) -> None:
+        """Send an SSE event with optional ID to all connected SSE clients.
+
+        Args:
+            event: The event type (e.g., "ai_chunk", "ai_start", "ai_end").
+            data: The event data to send.
+            event_id: Optional event ID for client-side tracking and replay.
+        """
+        lines = []
+        if event_id is not None:
+            lines.append(f"id: {event_id}")
+        lines.append(f"event: {event}")
+        lines.append(f"data: {data}")
+        lines.append("")
+        lines.append("")
+        message = "\n".join(lines)
+        for conn in list(self._sse_connections):
+            try:
+                await conn.write(message.encode())
+            except Exception:
+                self._sse_connections.discard(conn)
+
     # ─── Agent Lifecycle ────────────────────────────────────────────────
 
     async def start(self) -> None:
@@ -677,9 +704,9 @@ class Agent(ABC, Generic[State]):
             except Exception:
                 pass
         self._connections.clear()
-    
+
     # ─── WebSocket Server ──────────────────────────────────────────────
-    
+
     def serve(
         self,
         host: str = "localhost",
@@ -687,23 +714,23 @@ class Agent(ABC, Generic[State]):
         path: str = "/ws",
     ) -> None:
         """Start a WebSocket server for this agent.
-        
+
         Uses aiohttp by default. This is a blocking call that runs forever.
-        
+
         Args:
             host: Host to bind to (default: localhost).
             port: Port to bind to (default: 8080).
             path: WebSocket endpoint path (default: /ws).
-        
+
         Example:
             class MyBot(ChatAgent, InMemoryAgent):
                 system = "Hello!"
-            
+
             MyBot("my-bot").serve(port=8080)
         """
         from ai_query.agents.server import run_agent_server
         run_agent_server(self, host=host, port=port, path=path)
-    
+
     async def serve_async(
         self,
         host: str = "localhost",
@@ -711,7 +738,7 @@ class Agent(ABC, Generic[State]):
         path: str = "/ws",
     ) -> None:
         """Start a WebSocket server for this agent (async version).
-        
+
         Args:
             host: Host to bind to (default: localhost).
             port: Port to bind to (default: 8080).
@@ -719,7 +746,7 @@ class Agent(ABC, Generic[State]):
         """
         from ai_query.agents.server import run_agent_server_async
         await run_agent_server_async(self, host=host, port=port, path=path)
-    
+
     @classmethod
     def serve_many(
         cls,
@@ -728,26 +755,25 @@ class Agent(ABC, Generic[State]):
         config: "AgentServerConfig | None" = None,
     ) -> None:
         """Start a multi-agent server for this agent class.
-        
+
         Each client connects to a unique agent instance via URL path:
         - ws://{host}:{port}/agent/{agent_id}/ws (WebSocket)
         - http://{host}:{port}/agent/{agent_id}/events (SSE)
         - http://{host}:{port}/agent/{agent_id}/state (REST API)
-        
+
         This is a blocking call that runs forever.
-        
+
         Args:
             host: Host to bind to (default: localhost).
             port: Port to bind to (default: 8080).
             config: Optional AgentServerConfig for lifecycle and security.
-        
+
         Example:
             class ChatRoom(ChatAgent, InMemoryAgent):
                 system = "You are helpful"
-            
+
             # Clients connect to ws://localhost:8080/agent/room-1/ws
             ChatRoom.serve_many(port=8080)
         """
         from ai_query.agents.router import AgentServer, AgentServerConfig
         AgentServer(cls, config=config).serve(host=host, port=port)
-

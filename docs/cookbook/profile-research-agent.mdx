@@ -98,8 +98,23 @@ class ProfileResearchAgent(ChatAgent, SQLiteAgent):
         return {"search_web": search_web, "save_profile": save_profile}
 
     async def on_step_start(self, event):
-        # Notify user when thinking starts
-        await self.output.send_status(f"🤔 Analyzing (Step {event.step_number})...")
+        # Notify user when thinking starts - use a custom event type!
+        await self.output.send_event("step_start", {
+            "step_number": event.step_number,
+            "status": "started"
+        })
+
+    async def on_step_finish(self, event):
+        # Send detailed step info
+        tool_calls = []
+        if event.step.tool_calls:
+            tool_calls = [{"name": tc.name, "args": tc.arguments} for tc in event.step.tool_calls]
+
+        await self.output.send_event("step_finish", {
+            "step_number": event.step_number,
+            "tool_calls": tool_calls,
+            "text": event.step.text or ""
+        })
 
 # Start the server
 if __name__ == "__main__":
@@ -153,6 +168,19 @@ function connect() {
     if (data.details?.url) {
       addProfileLink(data.details.url);
     }
+  });
+
+  // Listen for custom step events!
+  evtSource.addEventListener("step_start", (e) => {
+    const data = JSON.parse(e.data);
+    console.log(`Step ${data.step_number} started`);
+    showSpinner(true);
+  });
+
+  evtSource.addEventListener("step_finish", (e) => {
+    const data = JSON.parse(e.data);
+    console.log(`Step ${data.step_number} finished`, data.tool_calls);
+    showSpinner(false);
   });
 
   evtSource.onerror = (err) => {
