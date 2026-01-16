@@ -10,8 +10,8 @@ import json
 import aiohttp
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart
-from ai_query.model import LanguageModel
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart, EmbedResult, EmbedManyResult, EmbeddingUsage
+from ai_query.model import LanguageModel, EmbeddingModel
 
 
 # Cached provider instance
@@ -50,6 +50,67 @@ def google(
         provider = _default_provider
 
     return LanguageModel(provider=provider, model_id=model_id)
+
+
+# Cached embedding provider instance
+_default_embedding_provider: GoogleProvider | None = None
+
+
+class _GoogleNamespace:
+    """Namespace for Google provider functions.
+
+    Provides both language model and embedding model factory functions.
+
+    Example:
+        >>> from ai_query import google
+        >>> # Language model
+        >>> model = google("gemini-2.0-flash")
+        >>> # Embedding model
+        >>> embedding_model = google.embedding("text-embedding-004")
+    """
+
+    def __call__(
+        self,
+        model_id: str,
+        *,
+        api_key: str | None = None,
+    ) -> LanguageModel:
+        """Create a Google language model."""
+        return google(model_id, api_key=api_key)
+
+    def embedding(
+        self,
+        model_id: str,
+        *,
+        api_key: str | None = None,
+    ) -> EmbeddingModel:
+        """Create a Google embedding model.
+
+        Args:
+            model_id: The embedding model identifier (e.g., "text-embedding-004",
+                "embedding-001").
+            api_key: Google API key. Falls back to GOOGLE_API_KEY env var.
+
+        Returns:
+            An EmbeddingModel instance for use with embed().
+
+        Example:
+            >>> from ai_query import embed, google
+            >>> result = await embed(
+            ...     model=google.embedding("text-embedding-004"),
+            ...     value="Hello world"
+            ... )
+        """
+        global _default_embedding_provider
+
+        if api_key:
+            provider = GoogleProvider(api_key=api_key)
+        else:
+            if _default_embedding_provider is None:
+                _default_embedding_provider = GoogleProvider()
+            provider = _default_embedding_provider
+
+        return EmbeddingModel(provider=provider, model_id=model_id)
 
 
 class GoogleProvider(BaseProvider):
@@ -576,4 +637,117 @@ class GoogleProvider(BaseProvider):
             usage=usage,
             finish_reason=finish_reason,
             tool_calls=tool_calls if tool_calls else None
+        )
+
+    async def embed(
+        self,
+        *,
+        model: str,
+        value: str,
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> EmbedResult:
+        """Generate an embedding for a single value using Google API.
+
+        Args:
+            model: Embedding model name (e.g., "text-embedding-004").
+            value: The text to embed.
+            provider_options: Google-specific options under "google" key.
+            **kwargs: Additional params (taskType, title, outputDimensionality, etc.).
+
+        Returns:
+            EmbedResult with embedding vector and metadata.
+        """
+        google_options = self.get_provider_options(provider_options)
+
+        url = f"{self.base_url}/models/{model}:embedContent?key={self.api_key}"
+
+        async with aiohttp.ClientSession() as session:
+            request_body: dict[str, Any] = {
+                "model": f"models/{model}",
+                "content": {
+                    "parts": [{"text": value}]
+                },
+                **kwargs,
+                **google_options,
+            }
+
+            async with session.post(url, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Google API error ({resp.status}): {error_text}")
+                response = await resp.json()
+
+        # Extract result
+        embedding = response["embedding"]["values"]
+
+        # Google doesn't return token count in embed response, estimate from text
+        # Rough estimate: 1 token per 4 characters
+        estimated_tokens = len(value) // 4 + 1
+
+        return EmbedResult(
+            value=value,
+            embedding=embedding,
+            usage=EmbeddingUsage(tokens=estimated_tokens),
+            provider_metadata={"model": model},
+        )
+
+    async def embed_many(
+        self,
+        *,
+        model: str,
+        values: list[str],
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> EmbedManyResult:
+        """Generate embeddings for multiple values using Google API.
+
+        Google supports batch embedding via batchEmbedContents endpoint.
+
+        Args:
+            model: Embedding model name (e.g., "text-embedding-004").
+            values: List of texts to embed.
+            provider_options: Google-specific options under "google" key.
+            **kwargs: Additional params (taskType, title, outputDimensionality, etc.).
+
+        Returns:
+            EmbedManyResult with embedding vectors and metadata.
+        """
+        google_options = self.get_provider_options(provider_options)
+
+        url = f"{self.base_url}/models/{model}:batchEmbedContents?key={self.api_key}"
+
+        async with aiohttp.ClientSession() as session:
+            # Build batch request
+            requests = []
+            for value in values:
+                req = {
+                    "model": f"models/{model}",
+                    "content": {
+                        "parts": [{"text": value}]
+                    },
+                    **kwargs,
+                    **google_options,
+                }
+                requests.append(req)
+
+            request_body = {"requests": requests}
+
+            async with session.post(url, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Google API error ({resp.status}): {error_text}")
+                response = await resp.json()
+
+        # Extract embeddings
+        embeddings = [item["embedding"]["values"] for item in response["embeddings"]]
+
+        # Estimate tokens
+        estimated_tokens = sum(len(v) // 4 + 1 for v in values)
+
+        return EmbedManyResult(
+            values=values,
+            embeddings=embeddings,
+            usage=EmbeddingUsage(tokens=estimated_tokens),
+            provider_metadata={"model": model},
         )

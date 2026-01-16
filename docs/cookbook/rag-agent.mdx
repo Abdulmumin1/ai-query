@@ -1,33 +1,69 @@
 ---
 title: "RAG Agent"
-description: "Build a retrieval-augmented generation agent with search tools"
+description: "Build a retrieval-augmented generation agent with embeddings and search tools"
 ---
 
 Build an AI agent that retrieves relevant information before answering, reducing hallucinations and providing accurate, sourced responses.
 
 ## The Pattern
 
-Give the AI a search tool to retrieve information, then let it synthesize a response from the results.
+Give the AI a search tool backed by vector embeddings to retrieve semantically similar information, then let it synthesize a response from the results.
 
 ```python
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text, embed, embed_many, openai, tool, Field
+import numpy as np
 
-# Your retrieval function (could be vector DB, search API, etc.)
-async def search_documents(query: str) -> list[str]:
-    # Replace with your actual retrieval logic
-    return ["Document 1 content...", "Document 2 content..."]
+# Pre-compute document embeddings
+documents = [
+    "Our refund policy allows returns within 30 days of purchase.",
+    "Shipping takes 3-5 business days for domestic orders.",
+    "Premium members get free shipping on all orders.",
+]
+
+# Embed documents at startup
+doc_embeddings = None
+
+async def init_embeddings():
+    global doc_embeddings
+    result = await embed_many(
+        model=openai.embedding("text-embedding-3-small"),
+        values=documents
+    )
+    doc_embeddings = result.embeddings
+
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+async def search_documents(query: str, top_k: int = 2) -> list[str]:
+    # Embed the query
+    query_result = await embed(
+        model=openai.embedding("text-embedding-3-small"),
+        value=query
+    )
+
+    # Find most similar documents
+    similarities = [
+        (i, cosine_similarity(query_result.embedding, doc_emb))
+        for i, doc_emb in enumerate(doc_embeddings)
+    ]
+    similarities.sort(key=lambda x: x[1], reverse=True)
+
+    return [documents[i] for i, _ in similarities[:top_k]]
 
 @tool(description="Search the knowledge base for relevant information")
 async def search(query: str = Field(description="Search query")) -> str:
     results = await search_documents(query)
     return "\n\n".join([f"[Result {i+1}]: {r}" for i, r in enumerate(results)])
 
+# Initialize embeddings before use
+await init_embeddings()
+
 result = await generate_text(
-    model=google("gemini-2.0-flash"),
+    model=openai("gpt-4o"),
     system="""You are a helpful assistant with access to a knowledge base.
     Always search for information before answering questions.
     Cite your sources in your response.""",
-    prompt="What is our company's refund policy?",
+    prompt="What is your refund policy?",
     tools={"search": search},
 )
 print(result.text)
@@ -35,55 +71,66 @@ print(result.text)
 
 ## Complete Example: Documentation Assistant
 
-A full RAG agent that answers questions about your documentation:
+A full RAG agent with vector search that answers questions about your documentation:
 
 ```python
 import asyncio
-from ai_query import generate_text, google, tool, Field, step_count_is
+import numpy as np
+from ai_query import generate_text, embed, embed_many, openai, tool, Field, step_count_is
 
-# Simulated document store (replace with your vector DB)
-DOCS = {
-    "installation": "To install ai-query, run: pip install ai-query",
-    "quickstart": "Import with: from ai_query import generate_text",
-    "streaming": "Use stream_text() for streaming responses",
-    "tools": "Define tools with @tool decorator and Field() for parameters",
-    "agents": "Use Agent class for stateful, persistent AI agents",
-}
+# Document store with embeddings
+class VectorStore:
+    def __init__(self):
+        self.documents: list[dict] = []
+        self.embeddings: list[list[float]] = []
+        self.model = openai.embedding("text-embedding-3-small")
 
-def simple_search(query: str, top_k: int = 3) -> list[tuple[str, str]]:
-    """Simple keyword search (replace with vector similarity)."""
-    query_words = set(query.lower().split())
-    scores = []
-    for title, content in DOCS.items():
-        doc_words = set((title + " " + content).lower().split())
-        score = len(query_words & doc_words)
-        scores.append((score, title, content))
-    scores.sort(reverse=True)
-    return [(title, content) for _, title, content in scores[:top_k]]
+    async def add_documents(self, docs: list[dict]):
+        """Add documents with title and content."""
+        texts = [f"{d['title']}: {d['content']}" for d in docs]
+        result = await embed_many(model=self.model, values=texts)
+
+        self.documents.extend(docs)
+        self.embeddings.extend(result.embeddings)
+
+    async def search(self, query: str, top_k: int = 3) -> list[dict]:
+        """Search for similar documents."""
+        query_result = await embed(model=self.model, value=query)
+
+        # Calculate similarities
+        similarities = []
+        for i, emb in enumerate(self.embeddings):
+            sim = np.dot(query_result.embedding, emb) / (
+                np.linalg.norm(query_result.embedding) * np.linalg.norm(emb)
+            )
+            similarities.append((sim, self.documents[i]))
+
+        # Return top-k results
+        similarities.sort(reverse=True, key=lambda x: x[0])
+        return [doc for _, doc in similarities[:top_k]]
 
 
 class DocsAssistant:
-    def __init__(self):
-        self.context = []
-    
+    def __init__(self, store: VectorStore):
+        self.store = store
+
     async def answer(self, question: str) -> str:
         @tool(description="Search the documentation for relevant information")
         async def search_docs(
             query: str = Field(description="Search query for documentation"),
         ) -> str:
-            results = simple_search(query)
-            self.context = results
+            results = await self.store.search(query)
             if not results:
                 return "No relevant documentation found."
             return "\n\n".join([
-                f"**{title}**: {content}" 
-                for title, content in results
+                f"**{doc['title']}**: {doc['content']}"
+                for doc in results
             ])
-        
+
         result = await generate_text(
-            model=google("gemini-2.0-flash"),
+            model=openai("gpt-4o"),
             system="""You are a documentation assistant for ai-query.
-            
+
             Instructions:
             1. Search the docs to find relevant information
             2. Answer the user's question based on the search results
@@ -93,20 +140,33 @@ class DocsAssistant:
             tools={"search_docs": search_docs},
             stop_when=step_count_is(3),
         )
-        
+
         return result.text
 
 
 async def main():
-    assistant = DocsAssistant()
-    
+    # Initialize vector store
+    store = VectorStore()
+
+    # Add documentation
+    await store.add_documents([
+        {"title": "Installation", "content": "To install ai-query, run: pip install ai-query"},
+        {"title": "Quickstart", "content": "Import with: from ai_query import generate_text"},
+        {"title": "Streaming", "content": "Use stream_text() for streaming responses"},
+        {"title": "Tools", "content": "Define tools with @tool decorator and Field() for parameters"},
+        {"title": "Agents", "content": "Use Agent class for stateful, persistent AI agents"},
+        {"title": "Embeddings", "content": "Use embed() and embed_many() for vector embeddings"},
+    ])
+
+    assistant = DocsAssistant(store)
+
     # Ask questions
     questions = [
         "How do I install this library?",
         "How do I create streaming responses?",
-        "What are agents used for?",
+        "How do I generate embeddings?",
     ]
-    
+
     for q in questions:
         print(f"\n**Q: {q}**")
         answer = await assistant.answer(q)
@@ -116,31 +176,64 @@ async def main():
 asyncio.run(main())
 ```
 
+## Using Different Embedding Providers
+
+You can use any supported embedding provider:
+
+```python
+from ai_query import embed, embed_many, openai, google
+
+# OpenAI embeddings (1536 dimensions)
+openai_result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world"
+)
+
+# OpenAI with reduced dimensions (faster, less storage)
+openai_small = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world",
+    dimensions=256
+)
+
+# Google embeddings (768 dimensions)
+google_result = await embed(
+    model=google.embedding("text-embedding-004"),
+    value="Hello world"
+)
+```
+
 ## Multi-Source RAG
 
 Search multiple sources and combine results:
 
 ```python
-from ai_query import generate_text, google, tool, Field, step_count_is
+from ai_query import generate_text, embed, openai, tool, Field, step_count_is
+import numpy as np
+
+# Multiple vector stores for different sources
+docs_store = VectorStore()  # Documentation
+tickets_store = VectorStore()  # Support tickets
+faq_store = VectorStore()  # FAQ
 
 @tool(description="Search internal documentation")
 async def search_docs(query: str = Field(description="Search query")) -> str:
-    # Your docs search
-    return "Documentation results..."
+    results = await docs_store.search(query)
+    return "\n".join([f"[DOC] {r['title']}: {r['content']}" for r in results])
 
 @tool(description="Search support tickets and past issues")
 async def search_tickets(query: str = Field(description="Search query")) -> str:
-    # Your ticket search
-    return "Ticket search results..."
+    results = await tickets_store.search(query)
+    return "\n".join([f"[TICKET] {r['title']}: {r['content']}" for r in results])
 
 @tool(description="Search the FAQ database")
 async def search_faq(query: str = Field(description="Search query")) -> str:
-    # Your FAQ search
-    return "FAQ results..."
+    results = await faq_store.search(query)
+    return "\n".join([f"[FAQ] {r['title']}: {r['content']}" for r in results])
 
 result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    system="""You are a support agent. Use the available search tools to find 
+    model=openai("gpt-4o"),
+    system="""You are a support agent. Use the available search tools to find
     relevant information before answering. You can search multiple sources.""",
     prompt="How do I reset my password?",
     tools={
@@ -154,19 +247,49 @@ result = await generate_text(
 
 ## With Citations
 
-Track which documents were used:
+Track which documents were used and include citations:
 
 ```python
-from ai_query import generate_text, google, tool, Field, has_tool_call
+from ai_query import generate_text, embed, openai, tool, Field, has_tool_call
+import numpy as np
 
+class CitableVectorStore:
+    def __init__(self):
+        self.documents = []
+        self.embeddings = []
+        self.model = openai.embedding("text-embedding-3-small")
+
+    async def add(self, doc_id: str, title: str, content: str, url: str):
+        result = await embed(model=self.model, value=content)
+        self.documents.append({
+            "id": doc_id,
+            "title": title,
+            "content": content,
+            "url": url
+        })
+        self.embeddings.append(result.embedding)
+
+    async def search(self, query: str, top_k: int = 3) -> list[dict]:
+        query_result = await embed(model=self.model, value=query)
+
+        similarities = [
+            (np.dot(query_result.embedding, emb) /
+             (np.linalg.norm(query_result.embedding) * np.linalg.norm(emb)), doc)
+            for emb, doc in zip(self.embeddings, self.documents)
+        ]
+        similarities.sort(reverse=True, key=lambda x: x[0])
+        return [doc for _, doc in similarities[:top_k]]
+
+
+store = CitableVectorStore()
 citations = []
 
 @tool(description="Search and retrieve relevant documents")
 async def retrieve(query: str = Field(description="Search query")) -> str:
-    results = await vector_search(query)
+    results = await store.search(query)
     for doc in results:
-        citations.append({"id": doc.id, "title": doc.title, "url": doc.url})
-    return "\n".join([f"[{doc.id}] {doc.content}" for doc in results])
+        citations.append({"id": doc["id"], "title": doc["title"], "url": doc["url"]})
+    return "\n".join([f"[{doc['id']}] {doc['content']}" for doc in results])
 
 @tool(description="Submit the final answer with citations")
 def answer(
@@ -176,38 +299,126 @@ def answer(
     return response
 
 result = await generate_text(
-    model=google("gemini-2.0-flash"),
+    model=openai("gpt-4o"),
     system="Search for information, then submit your answer with source citations.",
-    prompt=question,
+    prompt="How do I configure authentication?",
     tools={"retrieve": retrieve, "answer": answer},
     stop_when=has_tool_call("answer"),
 )
 
 # Access final answer and citations
-final_answer = result.steps[-1].tool_calls[0].args
+final_answer = result.steps[-1].tool_calls[0].arguments
 print(f"Answer: {final_answer['response']}")
 print(f"Sources: {final_answer['sources']}")
+print(f"Citations: {citations}")
+```
+
+## Hybrid Search
+
+Combine keyword and vector search for better results:
+
+```python
+from ai_query import embed, openai
+import numpy as np
+
+class HybridStore:
+    def __init__(self):
+        self.documents = []
+        self.embeddings = []
+        self.model = openai.embedding("text-embedding-3-small")
+
+    async def add_documents(self, docs: list[dict]):
+        texts = [d["content"] for d in docs]
+        result = await embed_many(model=self.model, values=texts)
+        self.documents.extend(docs)
+        self.embeddings.extend(result.embeddings)
+
+    def keyword_search(self, query: str, top_k: int = 10) -> list[tuple[int, float]]:
+        """Simple keyword matching."""
+        query_words = set(query.lower().split())
+        scores = []
+        for i, doc in enumerate(self.documents):
+            doc_words = set(doc["content"].lower().split())
+            score = len(query_words & doc_words) / len(query_words)
+            scores.append((i, score))
+        scores.sort(key=lambda x: x[1], reverse=True)
+        return scores[:top_k]
+
+    async def hybrid_search(self, query: str, top_k: int = 5, alpha: float = 0.5):
+        """Combine keyword and vector search with alpha weighting."""
+        # Keyword scores
+        keyword_results = self.keyword_search(query, top_k=len(self.documents))
+        keyword_scores = {i: score for i, score in keyword_results}
+
+        # Vector scores
+        query_result = await embed(model=self.model, value=query)
+        vector_scores = {}
+        for i, emb in enumerate(self.embeddings):
+            sim = np.dot(query_result.embedding, emb) / (
+                np.linalg.norm(query_result.embedding) * np.linalg.norm(emb)
+            )
+            vector_scores[i] = sim
+
+        # Combine scores
+        combined = []
+        for i in range(len(self.documents)):
+            hybrid_score = (
+                alpha * keyword_scores.get(i, 0) +
+                (1 - alpha) * vector_scores.get(i, 0)
+            )
+            combined.append((hybrid_score, self.documents[i]))
+
+        combined.sort(reverse=True, key=lambda x: x[0])
+        return [doc for _, doc in combined[:top_k]]
 ```
 
 ## Tips
 
 <AccordionGroup>
-  <Accordion title="Use vector search for better retrieval">
-    Simple keyword matching works for demos, but use embeddings and vector 
-    similarity for production RAG systems.
+  <Accordion title="Pre-compute embeddings for static content">
+    Embed your documents once at startup using `embed_many()` and cache the results.
+    This avoids re-computing embeddings on every query.
   </Accordion>
-  
-  <Accordion title="Limit context size">
-    Only include the most relevant chunks to avoid hitting context limits
-    and to keep responses focused.
+
+  <Accordion title="Use reduced dimensions for large collections">
+    OpenAI's v3 models support custom dimensions. Use 256 or 512 dimensions instead
+    of 1536 to reduce storage and improve search speed:
+    ```python
+    result = await embed(
+        model=openai.embedding("text-embedding-3-small"),
+        value="text",
+        dimensions=256
+    )
+    ```
   </Accordion>
-  
+
+  <Accordion title="Chunk long documents">
+    Split long documents into smaller chunks (e.g., 500-1000 tokens) before
+    embedding. This improves retrieval precision.
+  </Accordion>
+
   <Accordion title="Let the AI decide what to search">
-    Don't pre-search—let the AI formulate its own queries based on the 
+    Don't pre-search—let the AI formulate its own queries based on the
     user's question for better results.
   </Accordion>
-  
+
   <Accordion title="Add source metadata">
     Include document titles, URLs, and IDs so the AI can cite sources.
   </Accordion>
+
+  <Accordion title="Consider hybrid search">
+    Combine vector similarity with keyword matching for better results,
+    especially for exact term matching.
+  </Accordion>
 </AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Embeddings Guide" icon="cube" href="/core/embeddings">
+    Learn more about generating embeddings
+  </Card>
+  <Card title="embed() Reference" icon="code" href="/api-reference/embed">
+    Full API reference for embed functions
+  </Card>
+</CardGroup>

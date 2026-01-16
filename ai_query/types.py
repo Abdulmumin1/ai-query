@@ -706,3 +706,53 @@ class TextStreamResult:
 # Provider options type - allows provider-specific configuration
 # Example: {"google": {"safety_settings": {...}}, "anthropic": {"top_k": 10}}
 ProviderOptions = dict[str, dict[str, Any]]
+
+
+# =============================================================================
+# Embedding Types
+# =============================================================================
+
+
+@dataclass
+class EmbeddingUsage:
+    """Token usage statistics for embedding operations."""
+
+    tokens: int = 0
+
+
+@dataclass
+class EmbedResult:
+    """Result from embed() call for a single value.
+
+    Example:
+        >>> result = await embed(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     value="Hello world"
+        ... )
+        >>> print(len(result.embedding))  # e.g., 1536
+        >>> print(result.usage.tokens)
+    """
+
+    value: str
+    embedding: list[float]
+    usage: EmbeddingUsage
+    provider_metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EmbedManyResult:
+    """Result from embed_many() call for multiple values.
+
+    Example:
+        >>> result = await embed_many(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     values=["Hello", "World"]
+        ... )
+        >>> print(len(result.embeddings))  # 2
+        >>> print(len(result.embeddings[0]))  # e.g., 1536
+    """
+
+    values: list[str]
+    embeddings: list[list[float]]
+    usage: EmbeddingUsage
+    provider_metadata: dict[str, Any] = field(default_factory=dict)

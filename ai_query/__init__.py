@@ -34,8 +34,12 @@ from ai_query.types import (
     StepFinishEvent,
     OnStepStart,
     OnStepFinish,
+    # Embedding types
+    EmbedResult,
+    EmbedManyResult,
+    EmbeddingUsage,
 )
-from ai_query.model import LanguageModel
+from ai_query.model import LanguageModel, EmbeddingModel
 from ai_query.providers.base import BaseProvider
 from ai_query.providers.openai import OpenAIProvider, openai
 from ai_query.providers.anthropic import AnthropicProvider, anthropic
@@ -586,10 +590,125 @@ def stream_text(
     return TextStreamResult(_stream_generator(), steps=shared_steps)
 
 
+async def embed(
+    *,
+    model: EmbeddingModel,
+    value: str,
+    provider_options: ProviderOptions | None = None,
+    **kwargs: Any,
+) -> EmbedResult:
+    """Generate an embedding for a single value.
+
+    This function creates a vector representation of the input text using
+    an embedding model. The resulting embedding can be used for semantic
+    search, similarity comparisons, clustering, and other ML tasks.
+
+    Args:
+        model: An EmbeddingModel instance created by a provider's embedding function
+            (e.g., openai.embedding("text-embedding-3-small"), google.embedding("text-embedding-004")).
+        value: The text to embed.
+        provider_options: Provider-specific options.
+            Example: {"openai": {"dimensions": 256}}
+        **kwargs: Additional parameters passed to the embedding API.
+
+    Returns:
+        EmbedResult containing:
+            - value: The original input text
+            - embedding: List of floats representing the embedding vector
+            - usage: Token usage statistics
+            - provider_metadata: Provider-specific metadata
+
+    Examples:
+        Basic usage:
+        >>> from ai_query import embed, openai
+        >>> result = await embed(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     value="Hello world"
+        ... )
+        >>> print(len(result.embedding))  # e.g., 1536
+
+        With custom dimensions (OpenAI):
+        >>> result = await embed(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     value="Hello world",
+        ...     dimensions=256
+        ... )
+
+        Using Google:
+        >>> from ai_query import embed, google
+        >>> result = await embed(
+        ...     model=google.embedding("text-embedding-004"),
+        ...     value="Hello world"
+        ... )
+    """
+    return await model.provider.embed(
+        model=model.model_id,
+        value=value,
+        provider_options=provider_options,
+        **kwargs,
+    )
+
+
+async def embed_many(
+    *,
+    model: EmbeddingModel,
+    values: list[str],
+    provider_options: ProviderOptions | None = None,
+    **kwargs: Any,
+) -> EmbedManyResult:
+    """Generate embeddings for multiple values.
+
+    This function creates vector representations for multiple texts in a single
+    call. Most providers support batch embedding, which is more efficient than
+    calling embed() for each value individually.
+
+    Args:
+        model: An EmbeddingModel instance created by a provider's embedding function
+            (e.g., openai.embedding("text-embedding-3-small"), google.embedding("text-embedding-004")).
+        values: List of texts to embed.
+        provider_options: Provider-specific options.
+            Example: {"openai": {"dimensions": 256}}
+        **kwargs: Additional parameters passed to the embedding API.
+
+    Returns:
+        EmbedManyResult containing:
+            - values: The original input texts
+            - embeddings: List of embedding vectors (same order as input)
+            - usage: Token usage statistics
+            - provider_metadata: Provider-specific metadata
+
+    Examples:
+        Basic usage:
+        >>> from ai_query import embed_many, openai
+        >>> result = await embed_many(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     values=["Hello", "World", "How are you?"]
+        ... )
+        >>> print(len(result.embeddings))  # 3
+        >>> print(len(result.embeddings[0]))  # e.g., 1536
+
+        For semantic search:
+        >>> documents = ["Python is great", "JavaScript is cool", "Rust is fast"]
+        >>> doc_embeddings = await embed_many(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     values=documents
+        ... )
+        >>> # Now use embeddings for similarity search
+    """
+    return await model.provider.embed_many(
+        model=model.model_id,
+        values=values,
+        provider_options=provider_options,
+        **kwargs,
+    )
+
+
 __all__ = [
     # Main functions
     "generate_text",
     "stream_text",
+    "embed",
+    "embed_many",
     # Provider factory functions
     "openai",
     "anthropic",
@@ -601,6 +720,7 @@ __all__ = [
     "groq",
     # Types
     "LanguageModel",
+    "EmbeddingModel",
     "GenerateTextResult",
     "TextStreamResult",
     "Message",
@@ -609,6 +729,10 @@ __all__ = [
     "ImagePart",
     "FilePart",
     "Usage",
+    # Embedding types
+    "EmbedResult",
+    "EmbedManyResult",
+    "EmbeddingUsage",
     # Tool types
     "Tool",
     "tool",
