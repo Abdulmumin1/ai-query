@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.6.4
+
+- patch: Added embed and embed_many functions
+
 ## 1.6.3
 
 - patch: feat(transport): implemented a durable event replay mechanism
