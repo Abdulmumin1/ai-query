@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "feat(transport): implemented a durable event replay mechanism",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-13T11:12:46+00:00",
+  "version": "1.6.2"
+}

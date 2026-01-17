@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "docs: add comprehensive usage guide and provider configuration details",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-06T11:03:08+00:00",
+  "version": "0.0.2"
+}

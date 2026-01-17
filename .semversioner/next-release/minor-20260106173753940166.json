@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "Refactor tool definition to use `@tool` decorator and `Field` for parameters, updating examples and adding new tests and agent"
-}

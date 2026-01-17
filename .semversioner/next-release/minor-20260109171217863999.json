@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "feat: added multi-tenacy kinda logic for websocket and sse"
-}
