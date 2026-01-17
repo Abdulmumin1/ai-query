@@ -5,7 +5,11 @@ description: "Practical recipes and examples for building with ai-query"
 
 The cookbook contains practical, copy-paste recipes for common use cases. Each recipe is a complete, working example you can adapt for your projects.
 
-## Basics
+<Info>
+Looking for runnable code? Check out the [examples folder](https://github.com/Abdulmumin1/ai-query/tree/main/examples) on GitHub for complete, standalone scripts.
+</Info>
+
+## Core Patterns
 
 <CardGroup cols={2}>
   <Card title="Chatbot" icon="comments" href="/cookbook/chatbot">
@@ -14,14 +18,28 @@ The cookbook contains practical, copy-paste recipes for common use cases. Each r
   <Card title="Multimodal Chatbot" icon="image" href="/cookbook/multimodal-chatbot">
     Handle images and files in conversations
   </Card>
+  <Card title="Without the Agent Class" icon="function" href="/cookbook/without-agent-class">
+    Use generate_text and stream_text directly for maximum flexibility
+  </Card>
 </CardGroup>
 
-## Agents
+## Agents & Servers
 
 <CardGroup cols={2}>
+  <Card title="Profile Research Agent" icon="user-secret" href="/cookbook/profile-research-agent">
+    OSINT agent with durable SSE streaming and event replay
+  </Card>
+  <Card title="FastAPI Integration" icon="bolt" href="/cookbook/fastapi-integration">
+    Custom HTTP endpoints, middleware, and serverless patterns
+  </Card>
   <Card title="Wikipedia Agent" icon="wikipedia-w" href="/cookbook/wikipedia-agent">
     Research agent that searches Wikipedia
   </Card>
+</CardGroup>
+
+## Tools & Tasks
+
+<CardGroup cols={2}>
   <Card title="Task Planner" icon="list-check" href="/cookbook/task-planner">
     AI-powered task breakdown and planning
   </Card>

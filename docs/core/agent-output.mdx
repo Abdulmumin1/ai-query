@@ -1,129 +1,494 @@
 ---
-title: "Agent Output"
-description: "Protocol-agnostic feedback for agents"
+title: "Agent Events"
+description: "Emit events from agents for real-time client updates"
 ---
 
-Agents often need to provide feedback to the user *during* execution—like "Thinking...", "Running tool...", or intermediate results.
+Agents often need to provide feedback to clients *during* execution—like "Thinking...", "Running tool...", or intermediate results.
 
-The `AgentOutput` abstraction allows you to write this logic once and have it work across WebSockets, SSE, HTTP, or any other transport.
+The `emit()` method lets you send events from anywhere in your agent logic. How those events reach clients is handled automatically by the transport layer.
 
 ## The Concept
 
-Instead of coupling your agent to a specific transport (like `Connection`), you use the abstract `self.output` interface.
+Use `emit()` to send events. The transport layer (`serve()`, `AgentServer`) handles delivery to all connected clients.
 
 ```python
-class ResearchBot(ChatAgent, InMemoryAgent):
-    async def on_step_start(self, event):
-        # Works on WebSocket, SSE, or Console!
-        await self.output.send_status(
-            f"Thinking (Step {event.step_number})...",
-            details={"tools": list(event.tools.keys())}
+from ai_query import Agent, openai, MemoryStorage
+
+class ResearchBot(Agent):
+    async def research(self, query: str):
+        # Emit status update
+        await self.emit("status", {"text": "Searching..."})
+
+        results = await self.search(query)
+
+        # Emit results
+        await self.emit("results", {"count": len(results)})
+
+        return results
+
+# Start server - events are delivered to all connected clients
+bot = ResearchBot("assistant", storage=MemoryStorage())
+bot.serve(port=8080)
+```
+
+## How It Works
+
+```
+┌────────────────────────────────────────────────────────┐
+│                       Agent                            │
+│                                                        │
+│   await self.emit("status", {"text": "Thinking..."})   │
+│                         │                              │
+│                         ▼                              │
+│              ┌──────────────────┐                      │
+│              │   _emit_handler   │◄─── Injected by     │
+│              │   (callback)      │     transport layer │
+│              └────────┬─────────┘                      │
+└───────────────────────┼────────────────────────────────┘
+                        │
+                        ▼
+        ┌───────────────────────────────┐
+        │      Transport Layer          │
+        │  (serve(), AgentServer, etc.) │
+        └───────────────┬───────────────┘
+                        │
+           ┌────────────┼────────────┐
+           ▼            ▼            ▼
+      WebSocket        SSE         HTTP
+      Clients       Clients      Response
+```
+
+The key insight: **Your agent code never knows about WebSockets, SSE, or HTTP.** It just emits events.
+
+## Basic Usage
+
+### Emitting Events
+
+```python
+from ai_query import Agent, MemoryStorage
+
+class MyBot(Agent):
+    async def process_task(self, task: str):
+        # Status updates
+        await self.emit("status", {"text": "Starting..."})
+
+        # Progress
+        for i, step in enumerate(steps):
+            await self.emit("progress", {"step": i + 1, "total": len(steps)})
+            await self.process_step(step)
+
+        # Streaming content
+        await self.emit("chunk", {"content": "Hello "})
+        await self.emit("chunk", {"content": "World!"})
+
+        # Completion
+        await self.emit("done", {"result": "Task complete"})
+```
+
+### Event Structure
+
+Events have a type and data payload:
+
+```python
+# Simple status
+await self.emit("status", {"text": "Processing..."})
+
+# Structured data
+await self.emit("tool_call", {
+    "name": "search",
+    "arguments": {"query": "AI news"},
+    "result": "Found 10 results"
+})
+
+# Streaming chunk
+await self.emit("chunk", {"content": "Hello", "index": 0})
+```
+
+### Event IDs
+
+Every event gets a unique, incrementing ID:
+
+```python
+event_id = await self.emit("status", {"text": "Hello"})
+print(event_id)  # 1
+
+event_id = await self.emit("status", {"text": "World"})
+print(event_id)  # 2
+```
+
+These IDs enable [event replay](#durability--replay) for reconnecting clients.
+
+## Common Event Types
+
+While you can use any event type, here are common conventions:
+
+| Event Type | Purpose | Example Data |
+|------------|---------|--------------|
+| `status` | Status messages | `{"text": "Thinking..."}` |
+| `chunk` | Streaming content | `{"content": "Hello "}` |
+| `progress` | Task progress | `{"step": 2, "total": 5}` |
+| `tool_start` | Tool execution start | `{"name": "search", "args": {...}}` |
+| `tool_end` | Tool execution end | `{"name": "search", "result": ...}` |
+| `error` | Error occurred | `{"message": "Failed", "code": "E001"}` |
+| `done` | Task complete | `{"result": {...}}` |
+| `state` | State changed | `{"state": {...}}` (auto-emitted) |
+
+## Transport Delivery
+
+When you use `serve()` or `AgentServer`, events are automatically delivered to clients:
+
+### REST + SSE Pattern
+
+The recommended pattern for web clients: connect to SSE for real-time events, send messages via REST.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Client                               │
+│                                                             │
+│   1. Connect to /events (SSE)  ◄─── Real-time events        │
+│   2. POST to /chat             ───► Send message            │
+│   3. Receive chunks via SSE    ◄─── Streaming response      │
+│   4. Get final JSON response   ◄─── Complete response       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+When you POST to `/chat`, the server:
+1. Emits `chat_start` event to all SSE/WebSocket subscribers
+2. Streams the response, emitting `chunk` events for each piece
+3. Emits tool events (like `status`) during tool execution
+4. Emits `chat_complete` when done
+5. Returns the complete response as JSON
+
+```javascript
+// 1. Connect to SSE first
+const evtSource = new EventSource("http://localhost:8080/events");
+
+evtSource.addEventListener("chat_start", () => {
+  showSpinner();
+});
+
+evtSource.addEventListener("chunk", (e) => {
+  const data = JSON.parse(e.data);
+  appendToOutput(data.content);  // Real-time streaming!
+});
+
+evtSource.addEventListener("status", (e) => {
+  const data = JSON.parse(e.data);
+  showStatus(data.text);  // "Searching: query"
+});
+
+evtSource.addEventListener("chat_complete", () => {
+  hideSpinner();
+});
+
+// 2. Send message via REST
+const response = await fetch("http://localhost:8080/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ message: "Research quantum computing" })
+});
+
+// 3. Get complete response (optional - you already have it from chunks)
+const data = await response.json();
+console.log(data.response);
+```
+
+### Built-in Events
+
+The `/chat` endpoint automatically emits these events:
+
+| Event | When | Data |
+|-------|------|------|
+| `chat_start` | Request received | `{"message": "..."}` |
+| `chunk` | Each response piece | `{"content": "..."}` |
+| `chat_complete` | Response finished | `{"response": "..."}` |
+| `chat_error` | Error occurred | `{"error": "..."}` |
+
+Plus any events your tools emit (like `status`, `progress`, etc.).
+
+### WebSocket
+
+Events arrive as JSON messages:
+
+```json
+{"type": "status", "id": 1, "text": "Processing..."}
+{"type": "chunk", "id": 2, "content": "Hello "}
+{"type": "chunk", "id": 3, "content": "World!"}
+{"type": "done", "id": 4, "result": "Complete"}
+```
+
+### SSE (Server-Sent Events)
+
+Events arrive in SSE format with IDs:
+
+```
+id: 1
+event: status
+data: {"text": "Processing..."}
+
+id: 2
+event: chunk
+data: {"content": "Hello "}
+
+id: 3
+event: chunk
+data: {"content": "World!"}
+```
+
+### Client Examples
+
+<Tabs>
+  <Tab title="JavaScript (WebSocket)">
+```javascript
+const ws = new WebSocket("ws://localhost:8080/ws");
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  switch (data.type) {
+    case "status":
+      showStatus(data.text);
+      break;
+    case "chunk":
+      appendContent(data.content);
+      break;
+    case "done":
+      hideStatus();
+      break;
+  }
+};
+```
+  </Tab>
+  <Tab title="JavaScript (SSE)">
+```javascript
+const evtSource = new EventSource("http://localhost:8080/events");
+
+evtSource.addEventListener("status", (e) => {
+  showStatus(JSON.parse(e.data).text);
+});
+
+evtSource.addEventListener("chunk", (e) => {
+  appendContent(JSON.parse(e.data).content);
+});
+
+evtSource.addEventListener("done", (e) => {
+  hideStatus();
+});
+```
+  </Tab>
+  <Tab title="Python (WebSocket)">
+```python
+import asyncio
+import websockets
+
+async def listen():
+    async with websockets.connect("ws://localhost:8080/ws") as ws:
+        async for message in ws:
+            data = json.loads(message)
+            if data["type"] == "chunk":
+                print(data["content"], end="", flush=True)
+            elif data["type"] == "done":
+                print("\nDone!")
+                break
+
+asyncio.run(listen())
+```
+  </Tab>
+</Tabs>
+
+## Durability & Replay
+
+Enable event persistence for reliable delivery across reconnections.
+
+### Enabling Persistence
+
+Set `enable_event_log = True` on your agent class:
+
+```python
+class DurableBot(Agent):
+    enable_event_log = True  # Persist events to storage
+
+    async def process(self, task: str):
+        await self.emit("status", {"text": "Starting..."})
+        # ... events are persisted and can be replayed
+```
+
+### How Replay Works
+
+1. Client connects with `last_event_id` parameter
+2. Server replays missed events before streaming new ones
+3. Client continues seamlessly from where it left off
+
+```
+Client A connects, receives events 1, 2, 3
+Client A disconnects after event 2
+
+─── Client A reconnects with last_event_id=2 ───
+
+Server replays event 3
+Server streams new events 4, 5, 6...
+```
+
+### Client Reconnection
+
+<Tabs>
+  <Tab title="WebSocket">
+```javascript
+let lastEventId = 0;
+
+function connect() {
+  const ws = new WebSocket(
+    `ws://localhost:8080/ws?last_event_id=${lastEventId}`
+  );
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    lastEventId = data.id;  // Track latest ID
+    handleEvent(data);
+  };
+
+  ws.onclose = () => {
+    setTimeout(connect, 1000);  // Reconnect
+  };
+}
+```
+  </Tab>
+  <Tab title="SSE">
+```javascript
+// SSE handles reconnection automatically using Last-Event-ID header
+const evtSource = new EventSource("http://localhost:8080/events");
+
+evtSource.onmessage = (e) => {
+  // e.lastEventId is automatically sent on reconnect
+  handleEvent(JSON.parse(e.data));
+};
+```
+  </Tab>
+</Tabs>
+
+### Clearing the Event Log
+
+Clear events after a conversation ends or task completes:
+
+```python
+async def on_conversation_end(self):
+    await self.clear_event_log()  # Resets log and counter
+```
+
+## Using Without serve()
+
+If you're handling transport yourself (custom WebSocket server, Lambda, etc.), inject an emit handler:
+
+```python
+from ai_query import Agent, MemoryStorage
+
+agent = Agent("bot", storage=MemoryStorage())
+
+# Inject your own delivery handler
+async def my_handler(event: str, data: dict, event_id: int):
+    # Your delivery logic here
+    await my_websocket.send(json.dumps({
+        "type": event,
+        "id": event_id,
+        **data
+    }))
+
+agent._emit_handler = my_handler
+await agent.start()
+
+# Now emit() calls your handler
+await agent.emit("status", {"text": "Hello"})
+```
+
+## Example: Research Assistant
+
+```python
+from ai_query import Agent, openai, MemoryStorage, tool, Field
+
+class ResearchBot(Agent):
+    enable_event_log = True  # Enable replay
+
+    def __init__(self):
+        @tool(description="Search the web")
+        async def search(query: str = Field(description="Search query")) -> str:
+            await self.emit("tool_start", {"name": "search", "query": query})
+            results = await do_search(query)
+            await self.emit("tool_end", {"name": "search", "count": len(results)})
+            return format_results(results)
+
+        super().__init__(
+            "research-bot",
+            model=openai("gpt-4o"),
+            system="You are a research assistant.",
+            storage=MemoryStorage(),
+            tools={"search": search}
         )
-```
 
-## Built-in Outputs
+    async def on_message(self, connection, message):
+        await self.emit("status", {"text": "Thinking..."})
 
-ai-query provides adapters for common protocols:
+        async for chunk in self.stream(message):
+            await self.emit("chunk", {"content": chunk})
 
-| Class | Transport | Format |
-|-------|-----------|--------|
-| `BroadcastOutput` | All connected clients | JSON (WS) / SSE |
-| `WebSocketOutput` | Single WebSocket connection | JSON frames |
-| `SSEOutput` | Single SSE stream | Server-Sent Events |
-| `NullOutput` | None | No-op |
+        await self.emit("done", {})
 
-## Usage
-
-### 1. In Your Agent (The Logic)
-
-Use `self.output` in your hooks or tools.
-
-**By default, this uses `BroadcastOutput`**, which sends updates to **ALL** connected WebSocket and SSE clients.
-
-```python
-from ai_query.agents import ChatAgent, InMemoryAgent
-
-class MyBot(ChatAgent, InMemoryAgent):
-    async def on_step_finish(self, event):
-        if event.step.tool_calls:
-            for tc in event.step.tool_calls:
-                # Broadcasts to everyone connected to this agent
-                await self.output.send_status(f"🛠️ Executing: {tc.name}")
-```
-
-### 2. Targeted Output (Optional)
-
-If you want to send output to a *specific* connection (e.g., only the user who sent the message), pass a specific adapter.
-
-**WebSocket Example:**
-
-```python
-from ai_query.agents.output import WebSocketOutput
-
-class MyBot(ChatAgent, InMemoryAgent):
-    async def on_message(self, conn, message):
-        # 1. Create adapter for THIS connection only
-        output = WebSocketOutput(conn)
-
-        # 2. Pass it to chat()
-        # The agent will use this output instead of broadcasting
-        await self.chat(message, output=output)
-```
-
-**SSE Example:**
-
-```python
-from ai_query.agents.output import SSEOutput
-
-# Inside an aiohttp handler
-async def handle_sse(request):
-    response = web.StreamResponse(...)
-    await response.prepare(request)
-
-    output = SSEOutput(response)
-
-    # Stream only to this HTTP response
-    await agent.stream_chat(message, output=output)
-```
-
-## Custom Output Adapters
-
-Implement the `AgentOutput` protocol to support custom transports (e.g., Slack, Discord, Terminal).
-
-```python
-from typing import Any
-from ai_query.agents.output import AgentOutput
-
-class TerminalOutput(AgentOutput):
-    async def send_message(self, content: str) -> None:
-        print(f"🤖 {content}")
-
-    async def send_status(self, status: str, details: dict | None = None) -> None:
-        print(f"🔄 {status}")
-        if details:
-            print(f"   {details}")
-
-    async def send_error(self, error: str) -> None:
-        print(f"❌ {error}")
+# Start server
+bot = ResearchBot()
+bot.serve(port=8080)
 ```
 
 ## API Reference
 
-### AgentOutput Protocol
+### emit()
 
 ```python
-class AgentOutput(Protocol):
-    async def send_message(self, content: str) -> None: ...
-    async def send_status(self, status: str, details: dict | None = None) -> None: ...
-    async def send_error(self, error: str) -> None: ...
-    async def send_event(self, event: str, data: dict[str, Any]) -> None: ...
+async def emit(self, event: str, data: dict[str, Any]) -> int
 ```
 
-### ChatAgent.output
+Emit an event. Returns the assigned event ID.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event` | `str` | Event type (e.g., "status", "chunk") |
+| `data` | `dict` | Event payload |
+
+### replay_events()
 
 ```python
-@property
-def output(self) -> AgentOutput
+async def replay_events(self, after_id: int = 0) -> AsyncIterator[Event]
 ```
 
-Returns the current output adapter. If none is set, returns `NullOutput` so calls are safe.
+Yield events for replay. Used by transport layer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `after_id` | `int` | Only yield events with ID > after_id |
+
+### clear_event_log()
+
+```python
+async def clear_event_log() -> None
+```
+
+Clear the event log and reset the counter.
+
+### enable_event_log
+
+```python
+class MyAgent(Agent):
+    enable_event_log = True  # Class attribute
+```
+
+Set to `True` to persist events for replay.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent Server" icon="server" href="/core/agent-server">
+    Run multiple agents with routing
+  </Card>
+  <Card title="Stateful Agents" icon="database" href="/core/stateful-agents">
+    State management and storage
+  </Card>
+</CardGroup>

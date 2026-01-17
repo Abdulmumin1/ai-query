@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Any, AsyncIterator
 
@@ -38,6 +39,10 @@ from ai_query.types import (
     EmbedResult,
     EmbedManyResult,
     EmbeddingUsage,
+    # Abort
+    AbortController,
+    AbortSignal,
+    AbortError,
 )
 from ai_query.model import LanguageModel, EmbeddingModel
 from ai_query.providers.base import BaseProvider
@@ -58,6 +63,12 @@ from ai_query.mcp import (
     MCPServer,
     MCPClient,
 )
+from ai_query.agents import (
+    Agent,
+    Storage,
+    MemoryStorage,
+    SQLiteStorage,
+)
 
 
 async def generate_text(
@@ -71,6 +82,7 @@ async def generate_text(
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
     provider_options: ProviderOptions | None = None,
+    signal: AbortSignal | None = None,
     **kwargs: Any,
 ) -> GenerateTextResult:
     """Generate text using an AI model.
@@ -178,8 +190,14 @@ async def generate_text(
     final_result: GenerateTextResult | None = None
     step_number = 0
 
+    if signal:
+        signal.throw_if_aborted()
+
     while True:
         step_number += 1
+
+        if signal and signal.aborted:
+            raise AbortError(signal.reason)
 
         # Call on_step_start callback
         if on_step_start:
@@ -344,6 +362,7 @@ def stream_text(
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
     provider_options: ProviderOptions | None = None,
+    signal: AbortSignal | None = None,
     **kwargs: Any,
 ) -> TextStreamResult:
     """Stream text from an AI model.
@@ -418,16 +437,21 @@ def stream_text(
     shared_steps: list[StepResult] = []
 
     async def _stream_generator() -> AsyncIterator[StreamChunk]:
-        """Generator that handles the tool execution loop."""
         nonlocal shared_steps
-        steps: list[StepResult] = shared_steps  # Use the shared list
+        steps: list[StepResult] = shared_steps
         current_messages = list(final_messages)
         total_usage = Usage()
         accumulated_text = ""
         step_number = 0
 
+        if signal:
+            signal.throw_if_aborted()
+
         while True:
             step_number += 1
+
+            if signal and signal.aborted:
+                raise AbortError(signal.reason)
 
             # Call on_step_start callback
             if on_step_start:
@@ -468,6 +492,8 @@ def stream_text(
                 else:
                     # Yield text chunk
                     if chunk.text:
+                        if signal and signal.aborted:
+                            raise AbortError(signal.reason)
                         step_text += chunk.text
                         accumulated_text += chunk.text
                         yield StreamChunk(text=chunk.text)
@@ -595,6 +621,7 @@ async def embed(
     model: EmbeddingModel,
     value: str,
     provider_options: ProviderOptions | None = None,
+    signal: AbortSignal | None = None,
     **kwargs: Any,
 ) -> EmbedResult:
     """Generate an embedding for a single value.
@@ -605,10 +632,11 @@ async def embed(
 
     Args:
         model: An EmbeddingModel instance created by a provider's embedding function
-            (e.g., openai.embedding("text-embedding-3-small"), google.embedding("text-embedding-004")).
+            (e.g., openai.embedding("text-embedding-3-small"), google.embedding("gemini-embedding-001")).
         value: The text to embed.
         provider_options: Provider-specific options.
             Example: {"openai": {"dimensions": 256}}
+        signal: Optional AbortSignal for cancellation.
         **kwargs: Additional parameters passed to the embedding API.
 
     Returns:
@@ -617,36 +645,40 @@ async def embed(
             - embedding: List of floats representing the embedding vector
             - usage: Token usage statistics
             - provider_metadata: Provider-specific metadata
-
-    Examples:
-        Basic usage:
-        >>> from ai_query import embed, openai
-        >>> result = await embed(
-        ...     model=openai.embedding("text-embedding-3-small"),
-        ...     value="Hello world"
-        ... )
-        >>> print(len(result.embedding))  # e.g., 1536
-
-        With custom dimensions (OpenAI):
-        >>> result = await embed(
-        ...     model=openai.embedding("text-embedding-3-small"),
-        ...     value="Hello world",
-        ...     dimensions=256
-        ... )
-
-        Using Google:
-        >>> from ai_query import embed, google
-        >>> result = await embed(
-        ...     model=google.embedding("text-embedding-004"),
-        ...     value="Hello world"
-        ... )
     """
-    return await model.provider.embed(
-        model=model.model_id,
-        value=value,
-        provider_options=provider_options,
-        **kwargs,
-    )
+    if signal:
+        signal.throw_if_aborted()
+
+    if signal:
+        embed_task = asyncio.create_task(
+            model.provider.embed(
+                model=model.model_id,
+                value=value,
+                provider_options=provider_options,
+                **kwargs,
+            )
+        )
+        abort_task = asyncio.create_task(signal.wait())
+
+        done, pending = await asyncio.wait(
+            [embed_task, abort_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+
+        if abort_task in done:
+            raise AbortError(signal.reason)
+
+        return embed_task.result()
+    else:
+        return await model.provider.embed(
+            model=model.model_id,
+            value=value,
+            provider_options=provider_options,
+            **kwargs,
+        )
 
 
 async def embed_many(
@@ -654,6 +686,7 @@ async def embed_many(
     model: EmbeddingModel,
     values: list[str],
     provider_options: ProviderOptions | None = None,
+    signal: AbortSignal | None = None,
     **kwargs: Any,
 ) -> EmbedManyResult:
     """Generate embeddings for multiple values.
@@ -664,10 +697,11 @@ async def embed_many(
 
     Args:
         model: An EmbeddingModel instance created by a provider's embedding function
-            (e.g., openai.embedding("text-embedding-3-small"), google.embedding("text-embedding-004")).
+            (e.g., openai.embedding("text-embedding-3-small"), google.embedding("gemini-embedding-001")).
         values: List of texts to embed.
         provider_options: Provider-specific options.
             Example: {"openai": {"dimensions": 256}}
+        signal: Optional AbortSignal for cancellation.
         **kwargs: Additional parameters passed to the embedding API.
 
     Returns:
@@ -676,30 +710,21 @@ async def embed_many(
             - embeddings: List of embedding vectors (same order as input)
             - usage: Token usage statistics
             - provider_metadata: Provider-specific metadata
-
-    Examples:
-        Basic usage:
-        >>> from ai_query import embed_many, openai
-        >>> result = await embed_many(
-        ...     model=openai.embedding("text-embedding-3-small"),
-        ...     values=["Hello", "World", "How are you?"]
-        ... )
-        >>> print(len(result.embeddings))  # 3
-        >>> print(len(result.embeddings[0]))  # e.g., 1536
-
-        For semantic search:
-        >>> documents = ["Python is great", "JavaScript is cool", "Rust is fast"]
-        >>> doc_embeddings = await embed_many(
-        ...     model=openai.embedding("text-embedding-3-small"),
-        ...     values=documents
-        ... )
-        >>> # Now use embeddings for similarity search
     """
-    return await model.provider.embed_many(
-        model=model.model_id,
+    if signal:
+        signal.throw_if_aborted()
+
+    tasks = [
+        embed(model=model, value=v, provider_options=provider_options, signal=signal, **kwargs)
+        for v in values
+    ]
+    results = await asyncio.gather(*tasks)
+
+    total_tokens = sum(r.usage.tokens for r in results)
+    return EmbedManyResult(
         values=values,
-        provider_options=provider_options,
-        **kwargs,
+        embeddings=[r.embedding for r in results],
+        usage=EmbeddingUsage(tokens=total_tokens),
     )
 
 
@@ -709,6 +734,11 @@ __all__ = [
     "stream_text",
     "embed",
     "embed_many",
+    # Agent
+    "Agent",
+    "Storage",
+    "MemoryStorage",
+    "SQLiteStorage",
     # Provider factory functions
     "openai",
     "anthropic",
@@ -733,6 +763,10 @@ __all__ = [
     "EmbedResult",
     "EmbedManyResult",
     "EmbeddingUsage",
+    # Abort / Cancellation
+    "AbortController",
+    "AbortSignal",
+    "AbortError",
     # Tool types
     "Tool",
     "tool",

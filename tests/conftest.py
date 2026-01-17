@@ -471,3 +471,74 @@ def mock_mcp_session(mock_mcp_tools):
     )
 
     return session
+
+
+# =============================================================================
+# Agent Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def memory_storage():
+    """Create a fresh MemoryStorage instance."""
+    from ai_query.agents import MemoryStorage
+    return MemoryStorage()
+
+
+@pytest.fixture
+def sqlite_storage(tmp_path):
+    """Create a fresh SQLiteStorage instance."""
+    from ai_query.agents import SQLiteStorage
+    storage = SQLiteStorage(str(tmp_path / "test.db"))
+    yield storage
+    storage.close()
+
+
+@pytest.fixture
+def basic_agent(memory_storage, mock_model):
+    """Create a basic Agent with mock model."""
+    from ai_query.agents import Agent
+
+    return Agent(
+        "test-agent",
+        model=mock_model,
+        storage=memory_storage,
+        initial_state={"initialized": True}
+    )
+
+
+@pytest.fixture
+def agent_class():
+    """Create a reusable Agent subclass for AgentServer tests."""
+    from ai_query.agents import Agent, MemoryStorage
+
+    class TestAgent(Agent):
+        def __init__(self, agent_id: str):
+            super().__init__(
+                agent_id,
+                storage=MemoryStorage(),
+                initial_state={"count": 0}
+            )
+
+        async def handle_invoke(self, payload):
+            task = payload.get("task")
+            if task == "echo":
+                return {"echo": payload.get("data")}
+            if task == "increment":
+                await self.update_state(count=self.state.get("count", 0) + 1)
+                return {"count": self.state["count"]}
+            return {"error": f"Unknown task: {task}"}
+
+    return TestAgent
+
+
+@pytest.fixture
+def mock_connection():
+    """Create a mock WebSocket Connection."""
+    from ai_query.agents import Connection
+
+    conn = MagicMock(spec=Connection)
+    conn.send = AsyncMock()
+    conn.close = AsyncMock()
+    conn.send_event = AsyncMock()
+    return conn

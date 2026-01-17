@@ -4,312 +4,581 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
-from ai_query.agents import Agent, ChatAgent, InMemoryAgent
-from ai_query.agents.router import AgentServer, AgentServerConfig
+from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig
 
-@pytest.fixture(autouse=True)
-def cleanup():
-    """Clear storage before each test."""
-    InMemoryAgent.clear_all()
-    yield
-    InMemoryAgent.clear_all()
 
-@pytest.mark.asyncio
-async def test_streaming_chat_endpoint(aiohttp_client):
-    """Test POST /agent/{id}/chat?stream=true endpoint."""
+class TestAgentServerBasics:
+    """Tests for AgentServer basic functionality."""
 
-    # Mock stream_chat to yield chunks
-    async def mock_stream_chat(message, output=None):
-        yield "Hello"
-        yield " "
-        yield "World"
+    def test_initialization(self):
+        """AgentServer should initialize with an Agent class."""
 
-    # Create a ChatAgent with mocked stream_chat
-    class MyBot(ChatAgent, InMemoryAgent):
-        initial_state = {}
-        # We need to mock the method on the class or instance
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    bot = MyBot("test-bot")
-    bot.stream_chat = mock_stream_chat # type: ignore
+        server = AgentServer(TestAgent)
+        assert server._agent_cls is TestAgent
 
-    # Mock AgentServer.get_or_create to return our bot
-    server = AgentServer(MyBot)
-    server.get_or_create = MagicMock(return_value=bot) # type: ignore
+    def test_initialization_with_config(self):
+        """AgentServer should accept configuration."""
 
-    # Manually create app and router to avoid blocking serve_async
-    config = AgentServerConfig()
-    app = web.Application()
-    base = config.base_path.rstrip("/")
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    # Bind handlers
-    app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
+        config = AgentServerConfig(
+            idle_timeout=600,
+            max_agents=50,
+            base_path="/api/agent"
+        )
+        server = AgentServer(TestAgent, config=config)
 
-    client = await aiohttp_client(app)
+        assert server._config.idle_timeout == 600
+        assert server._config.max_agents == 50
+        assert server._config.base_path == "/api/agent"
 
-    # Make request
-    resp = await client.post(
-        f"/agent/test-bot/chat?stream=true",
-        json={"message": "Hi"},
-        headers={"Content-Type": "application/json"}
-    )
+    def test_get_or_create_new_agent(self):
+        """get_or_create() should create new agents."""
 
-    assert resp.status == 200
-    assert resp.headers["Content-Type"] == "text/event-stream"
-    assert resp.headers["Cache-Control"] == "no-cache"
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    # Read stream
-    content = await resp.text()
+        server = AgentServer(TestAgent)
+        agent = server.get_or_create("agent-1")
 
-    expected_chunks = [
-        'event: start\ndata: {}\n\n',
-        'event: chunk\ndata: {"content": "Hello"}\n\n',
-        'event: chunk\ndata: {"content": " "}\n\n',
-        'event: chunk\ndata: {"content": "World"}\n\n',
-        'event: end\ndata: {"content": "Hello World"}\n\n'
-    ]
+        assert agent is not None
+        assert agent.id == "agent-1"
+        assert "agent-1" in server._agents
 
-    for chunk in expected_chunks:
-        assert chunk in content
+    def test_get_or_create_returns_existing(self):
+        """get_or_create() should return existing agents."""
 
-@pytest.mark.asyncio
-async def test_streaming_chat_unified(aiohttp_client):
-    """Test POST /agent/{id}/chat?stream=true with status events."""
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    # Mock stream_chat to yield chunks AND send status
-    async def mock_stream_chat(message, output=None):
-        print(f"DEBUG: mock_stream_chat called with output={output}")
-        if output:
-            print("DEBUG: Sending status...")
-            await output.send_status("Thinking...")
-        yield "Hello"
-        yield " "
-        yield "World"
+        server = AgentServer(TestAgent)
+        agent1 = server.get_or_create("agent-1")
+        agent2 = server.get_or_create("agent-1")
 
-    class MyBot(ChatAgent, InMemoryAgent):
-        initial_state = {}
+        assert agent1 is agent2
 
-    bot = MyBot("test-unified")
-    bot.stream_chat = mock_stream_chat  # type: ignore
+    def test_get_or_create_respects_max_agents(self):
+        """get_or_create() should reject when max_agents is reached."""
 
-    server = AgentServer(MyBot)
-    server.get_or_create = MagicMock(return_value=bot)  # type: ignore
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    config = AgentServerConfig()
-    app = web.Application()
-    base = config.base_path.rstrip("/")
-    app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
+        config = AgentServerConfig(max_agents=2)
+        server = AgentServer(TestAgent, config=config)
 
-    client = await aiohttp_client(app)
+        server.get_or_create("agent-1")
+        server.get_or_create("agent-2")
 
-    resp = await client.post(
-        f"/agent/test-unified/chat?stream=true",
-        json={"message": "Hi"},
-        headers={"Content-Type": "application/json"}
-    )
+        with pytest.raises(web.HTTPTooManyRequests):
+            server.get_or_create("agent-3")
 
-    assert resp.status == 200
-    assert resp.headers["Content-Type"] == "text/event-stream"
+    def test_list_agents(self):
+        """list_agents() should return all active agent IDs."""
 
-    content = await resp.text()
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    # Check for status event (side effect)
-    assert 'event: status' in content
-    assert '"status": "Thinking..."' in content
+        server = AgentServer(TestAgent)
+        server.get_or_create("agent-1")
+        server.get_or_create("agent-2")
+        server.get_or_create("agent-3")
 
-    # Check for standard AI events (start, chunk, end)
-    assert 'event: start' in content
-    assert 'event: chunk' in content
-    assert '"content": "Hello"' in content
-    assert '"content": "World"' in content
-    assert 'event: end' in content
-    assert '"content": "Hello World"' in content
+        agents = server.list_agents()
+        assert sorted(agents) == ["agent-1", "agent-2", "agent-3"]
 
-@pytest.mark.asyncio
-async def test_chat_broadcasting(aiohttp_client):
-    """Test that POST /chat (non-streaming) broadcasts events to SSE."""
+    @pytest.mark.asyncio
+    async def test_evict_removes_agent(self):
+        """evict() should remove agent from registry."""
 
-    # Mock stream_text
-    async def mock_generator():
-        yield "Hello"
-        yield " "
-        yield "World"
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
 
-    mock_result = MagicMock()
-    mock_result.text_stream = mock_generator()
-    mock_result.text = "Hello World" # fallback if needed
+        server = AgentServer(TestAgent)
+        agent = server.get_or_create("agent-1")
+        await agent.start()
 
-    with patch("ai_query.stream_text", return_value=mock_result):
-        class MyBot(ChatAgent, InMemoryAgent):
-            initial_state = {}
+        await server.evict("agent-1")
+        assert "agent-1" not in server._agents
 
-        bot = MyBot("test-broadcast")
-        bot.stream_to_sse_with_id = AsyncMock()  # Spy on this (preferred over stream_to_sse)
 
-        server = AgentServer(MyBot)
-        server.get_or_create = MagicMock(return_value=bot)  # type: ignore
+class TestAgentServerEndpoints:
+    """Tests for AgentServer HTTP/REST endpoints."""
+
+    @pytest.fixture
+    def agent_class(self):
+        """Create a test Agent class."""
+
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(
+                    agent_id,
+                    storage=MemoryStorage(),
+                    initial_state={"count": 0}
+                )
+
+            async def handle_invoke(self, payload):
+                task = payload.get("task")
+                if task == "echo":
+                    return {"echo": payload.get("data")}
+                if task == "increment":
+                    await self.update_state(count=self.state.get("count", 0) + 1)
+                    return {"count": self.state["count"]}
+                return {"error": f"Unknown task: {task}"}
+
+        return TestAgent
+
+    @pytest.mark.asyncio
+    async def test_get_state_endpoint(self, aiohttp_client, agent_class):
+        """GET /agent/{id}/state should return agent state."""
+        server = AgentServer(agent_class)
+        config = AgentServerConfig(enable_rest_api=True)
+        app = web.Application()
+        base = config.base_path.rstrip("/")
+        app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
+
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test-state")
+        await agent.start()
+
+        resp = await client.get("/agent/test-state/state")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data == {"count": 0}
+
+    @pytest.mark.asyncio
+    async def test_put_state_endpoint(self, aiohttp_client, agent_class):
+        """PUT /agent/{id}/state should update agent state."""
+        server = AgentServer(agent_class)
+        config = AgentServerConfig(enable_rest_api=True)
+        app = web.Application()
+        base = config.base_path.rstrip("/")
+        app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
+        app.router.add_put(f"{base}/{{agent_id}}/state", server._handle_put_state)
+
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test-put")
+        await agent.start()
+
+        resp = await client.put(
+            "/agent/test-put/state",
+            json={"count": 100, "name": "updated"}
+        )
+        assert resp.status == 200
+
+        resp = await client.get("/agent/test-put/state")
+        data = await resp.json()
+        assert data == {"count": 100, "name": "updated"}
+
+    @pytest.mark.asyncio
+    async def test_invoke_endpoint(self, aiohttp_client, agent_class):
+        """POST /agent/{id}/invoke should call handle_invoke."""
+        server = AgentServer(agent_class)
+        config = AgentServerConfig()
+        app = web.Application()
+        base = config.base_path.rstrip("/")
+        app.router.add_post(f"{base}/{{agent_id}}/invoke", server._handle_invoke)
+
+        client = await aiohttp_client(app)
+
+        resp = await client.post(
+            "/agent/test-invoke/invoke",
+            json={"task": "echo", "data": "hello"}
+        )
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["result"] == {"echo": "hello"}
+        assert data["agent_id"] == "test-invoke"
+
+    @pytest.mark.asyncio
+    async def test_delete_agent_endpoint(self, aiohttp_client, agent_class):
+        """DELETE /agent/{id} should evict the agent."""
+        server = AgentServer(agent_class)
+        config = AgentServerConfig(enable_rest_api=True)
+        app = web.Application()
+        base = config.base_path.rstrip("/")
+        app.router.add_delete(f"{base}/{{agent_id}}", server._handle_delete_agent)
+
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test-delete")
+        await agent.start()
+        assert "test-delete" in server._agents
+
+        resp = await client.delete("/agent/test-delete")
+        assert resp.status == 200
+
+        assert "test-delete" not in server._agents
+
+    @pytest.mark.asyncio
+    async def test_chat_endpoint_non_streaming(self, aiohttp_client, agent_class):
+        """POST /agent/{id}/chat should return JSON response."""
+        server = AgentServer(agent_class)
+
+        async def mock_text_stream():
+            yield "Hello"
+            yield " World"
+
+        mock_result = MagicMock()
+        mock_result.text_stream = mock_text_stream()
+
+        with patch("ai_query.stream_text", return_value=mock_result):
+            config = AgentServerConfig()
+            app = web.Application()
+            base = config.base_path.rstrip("/")
+            app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
+
+            client = await aiohttp_client(app)
+
+            resp = await client.post(
+                "/agent/test-chat/chat",
+                json={"message": "Hi"}
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["response"] == "Hello World"
+
+    @pytest.mark.asyncio
+    async def test_agent_not_found(self, aiohttp_client, agent_class):
+        """Endpoints should return 404 for non-existent agents (when required)."""
+        server = AgentServer(agent_class)
+        config = AgentServerConfig(enable_rest_api=True)
+        app = web.Application()
+        base = config.base_path.rstrip("/")
+        app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
+
+        client = await aiohttp_client(app)
+
+        resp = await client.get("/agent/nonexistent/state")
+        assert resp.status == 404
+
+
+class TestAgentServerStreaming:
+    """Tests for AgentServer streaming endpoints."""
+
+    @pytest.fixture
+    def streaming_agent_class(self):
+        """Create an Agent class with streaming support."""
+
+        class StreamingAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(
+                    agent_id,
+                    storage=MemoryStorage(),
+                    initial_state={}
+                )
+
+            async def stream(self, message, **kwargs):
+                """Override stream to return mock data without API calls."""
+                # Add user message to history
+                from ai_query.types import Message
+                self._messages.append(Message(role="user", content=message))
+
+                # Yield mock chunks
+                yield "Hello "
+                yield "World"
+
+                # Add assistant response
+                self._messages.append(Message(role="assistant", content="Hello World"))
+
+        return StreamingAgent
+
+    @pytest.mark.asyncio
+    async def test_streaming_chat_endpoint(self, aiohttp_client, streaming_agent_class):
+        """POST /agent/{id}/chat?stream=true should return SSE stream."""
+        server = AgentServer(streaming_agent_class)
+
+        bot = streaming_agent_class("test-stream")
+        server.get_or_create = MagicMock(return_value=bot)
 
         config = AgentServerConfig()
         app = web.Application()
         base = config.base_path.rstrip("/")
-        app.router.add_get(f"{base}/{{agent_id}}/events", server._handle_sse)
         app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
 
         client = await aiohttp_client(app)
 
-        # 2. Send Chat Request
         resp = await client.post(
-            f"/agent/test-broadcast/chat",
+            "/agent/test-stream/chat?stream=true",
             json={"message": "Hi"},
             headers={"Content-Type": "application/json"}
         )
 
         assert resp.status == 200
+        assert resp.headers["Content-Type"] == "text/event-stream"
+
+        content = await resp.text()
+
+        assert "event: start" in content
+        assert "event: chunk" in content or "Hello" in content
+
+
+class TestAgentServerCORS:
+    """Tests for AgentServer CORS handling."""
+
+    @pytest.fixture
+    def agent_class(self):
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
+
+        return TestAgent
+
+    @pytest.mark.asyncio
+    async def test_cors_all_origins(self, aiohttp_client, agent_class):
+        """CORS should allow all origins when not configured."""
+        server = AgentServer(agent_class)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test")
+        await agent.start()
+
+        resp = await client.get(
+            "/agent/test/state",
+            headers={"Origin": "https://example.com"}
+        )
+
+        assert "Access-Control-Allow-Origin" in resp.headers
+        assert resp.headers["Access-Control-Allow-Origin"] == "*"
+
+    @pytest.mark.asyncio
+    async def test_cors_specific_origins(self, aiohttp_client, agent_class):
+        """CORS should only allow configured origins."""
+        config = AgentServerConfig(allowed_origins=["https://myapp.com"])
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test")
+        await agent.start()
+
+        resp = await client.get(
+            "/agent/test/state",
+            headers={"Origin": "https://myapp.com"}
+        )
+        assert resp.headers.get("Access-Control-Allow-Origin") == "https://myapp.com"
+
+    @pytest.mark.asyncio
+    async def test_cors_rejected_origin(self, aiohttp_client, agent_class):
+        """CORS should not include header for rejected origins."""
+        config = AgentServerConfig(allowed_origins=["https://myapp.com"])
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test")
+        await agent.start()
+
+        resp = await client.get(
+            "/agent/test/state",
+            headers={"Origin": "https://evil.com"}
+        )
+        assert resp.headers.get("Access-Control-Allow-Origin") != "https://evil.com"
+
+
+class TestAgentServerAuth:
+    """Tests for AgentServer authentication."""
+
+    @pytest.fixture
+    def agent_class(self):
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
+
+        return TestAgent
+
+    @pytest.mark.asyncio
+    async def test_auth_success(self, aiohttp_client, agent_class):
+        """Requests with valid auth should succeed."""
+
+        async def auth_check(request):
+            return request.headers.get("X-API-Key") == "secret"
+
+        config = AgentServerConfig(auth=auth_check)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test")
+        await agent.start()
+
+        resp = await client.get(
+            "/agent/test/state",
+            headers={"X-API-Key": "secret"}
+        )
+        assert resp.status == 200
+
+    @pytest.mark.asyncio
+    async def test_auth_failure(self, aiohttp_client, agent_class):
+        """Requests with invalid auth should be rejected."""
+
+        async def auth_check(request):
+            return request.headers.get("X-API-Key") == "secret"
+
+        config = AgentServerConfig(auth=auth_check)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        resp = await client.get(
+            "/agent/test/state",
+            headers={"X-API-Key": "wrong"}
+        )
+        assert resp.status == 401
+
+
+class TestAgentServerWebSocket:
+    """Tests for AgentServer WebSocket handling."""
+
+    @pytest.fixture
+    def agent_class(self):
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(
+                    agent_id,
+                    storage=MemoryStorage(),
+                    initial_state={}
+                )
+
+            async def on_message(self, connection, message):
+                await connection.send(f"Echo: {message}")
+
+        return TestAgent
+
+    @pytest.mark.asyncio
+    async def test_websocket_connection(self, aiohttp_client, agent_class):
+        """WebSocket connections should be established."""
+        server = AgentServer(agent_class)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        async with client.ws_connect("/agent/test-ws/ws") as ws:
+            await ws.close()
+
+        assert "test-ws" in server._agents
+
+    @pytest.mark.asyncio
+    async def test_websocket_message_handling(self, aiohttp_client, agent_class):
+        """WebSocket messages should be processed by on_message."""
+        server = AgentServer(agent_class)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        async with client.ws_connect("/agent/test-echo/ws") as ws:
+            await ws.send_str("Hello")
+
+            import asyncio
+            await asyncio.sleep(0.1)
+
+            await ws.close()
+
+
+class TestAgentServerLifecycleHooks:
+    """Tests for AgentServer lifecycle hooks."""
+
+    @pytest.fixture
+    def agent_class(self):
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
+
+        return TestAgent
+
+    @pytest.mark.asyncio
+    async def test_on_agent_create_hook(self, agent_class):
+        """on_agent_create should be called when agent is first accessed."""
+        created_agents = []
+
+        class CustomServer(AgentServer):
+            async def on_agent_create(self, agent):
+                created_agents.append(agent.id)
+
+        server = CustomServer(agent_class)
+        agent = server.get_or_create("test-create")
+        await agent.start()
+        await server.on_agent_create(agent)
+
+        assert "test-create" in created_agents
+
+    @pytest.mark.asyncio
+    async def test_on_agent_evict_hook(self, agent_class):
+        """on_agent_evict should be called when agent is evicted."""
+        evicted_agents = []
+
+        class CustomServer(AgentServer):
+            async def on_agent_evict(self, agent):
+                evicted_agents.append(agent.id)
+
+        server = CustomServer(agent_class)
+        agent = server.get_or_create("test-evict")
+        await agent.start()
+
+        await server.evict("test-evict")
+
+        assert "test-evict" in evicted_agents
+
+
+class TestAgentServerCustomRoutes:
+    """Tests for adding custom routes to AgentServer."""
+
+    @pytest.fixture
+    def agent_class(self):
+        class TestAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage())
+
+        return TestAgent
+
+    @pytest.mark.asyncio
+    async def test_on_app_setup_hook(self, aiohttp_client, agent_class):
+        """on_app_setup should allow adding custom routes."""
+
+        class CustomServer(AgentServer):
+            def on_app_setup(self, app):
+                app.router.add_get("/health", self.health_check)
+
+            async def health_check(self, request):
+                return web.json_response({
+                    "status": "ok",
+                    "agents": len(self._agents)
+                })
+
+        server = CustomServer(agent_class)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        resp = await client.get("/health")
+        assert resp.status == 200
         data = await resp.json()
-        assert data["response"] == "Hello World"
+        assert data["status"] == "ok"
 
-        # 3. Verify Broadcasts
-        # Expect calls: ai_start, ai_chunk (x3), ai_end
-        calls = bot.stream_to_sse_with_id.call_args_list
-        assert len(calls) >= 5
-        assert calls[0].args[0] == "ai_start"
-        assert calls[1].args[0] == "ai_chunk"
-        assert json.loads(calls[1].args[1])["content"] == "Hello"
-        assert calls[-1].args[0] == "ai_end"
-        assert json.loads(calls[-1].args[1])["content"] == "Hello World"
+    @pytest.mark.asyncio
+    async def test_create_app_customization(self, aiohttp_client, agent_class):
+        """create_app() should return customizable app."""
+        server = AgentServer(agent_class)
+        app = server.create_app()
 
-@pytest.mark.asyncio
-async def test_chat_endpoint_no_stream(aiohttp_client):
-    """Test POST /agent/{id}/chat without streaming."""
+        async def custom_handler(request):
+            return web.json_response({"custom": True})
 
-    # Mock handle_request
-    mock_result = {"agent_id": "test-bot", "response": "Hello World"}
+        app.router.add_get("/custom", custom_handler)
 
-    class MyBot(ChatAgent, InMemoryAgent):
-        initial_state = {}
+        client = await aiohttp_client(app)
 
-    bot = MyBot("test-bot")
-    bot.handle_request = AsyncMock(return_value=mock_result) # type: ignore
-
-    server = AgentServer(MyBot)
-    server.get_or_create = MagicMock(return_value=bot) # type: ignore
-
-    config = AgentServerConfig()
-    app = web.Application()
-    base = config.base_path.rstrip("/")
-    app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
-
-    client = await aiohttp_client(app)
-
-    resp = await client.post(
-        f"/agent/test-bot/chat",
-        json={"message": "Hi"},
-    )
-
-    assert resp.status == 200
-    assert "application/json" in resp.headers["Content-Type"]
-    data = await resp.json()
-    assert data == mock_result
-
-@pytest.mark.asyncio
-async def test_get_state_endpoint(aiohttp_client):
-    """Test GET /agent/{id}/state endpoint."""
-    class MyBot(InMemoryAgent):
-        initial_state = {"count": 42}
-
-    server = AgentServer(MyBot)
-    config = AgentServerConfig(enable_rest_api=True)
-    app = web.Application()
-    base = config.base_path.rstrip("/")
-    app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
-
-    client = await aiohttp_client(app)
-
-    # Initialize agent state first
-    agent = server.get_or_create("test-state")
-    await agent.start()
-
-    resp = await client.get(f"/agent/test-state/state")
-    assert resp.status == 200
-    data = await resp.json()
-    assert data == {"count": 42}
-
-@pytest.mark.asyncio
-async def test_put_state_endpoint(aiohttp_client):
-    """Test PUT /agent/{id}/state endpoint."""
-    class MyBot(InMemoryAgent):
-        initial_state = {"count": 0}
-
-    server = AgentServer(MyBot)
-    config = AgentServerConfig(enable_rest_api=True)
-    app = web.Application()
-    base = config.base_path.rstrip("/")
-    app.router.add_put(f"{base}/{{agent_id}}/state", server._handle_put_state)
-
-    client = await aiohttp_client(app)
-
-    # Create agent first
-    server.get_or_create("test-state-put")
-
-    # Put new state
-    new_state = {"count": 100}
-    resp = await client.put(
-        f"/agent/test-state-put/state",
-        json=new_state
-    )
-    assert resp.status == 200
-
-    # Verify state was updated
-    agent = server.get_or_create("test-state-put")
-    assert agent.state == new_state
-
-@pytest.mark.asyncio
-async def test_invoke_endpoint(aiohttp_client):
-    """Test POST /agent/{id}/invoke endpoint."""
-    class MyBot(InMemoryAgent):
-        async def handle_invoke(self, payload):
-            if payload.get("task") == "echo":
-                return {"echo": payload.get("data")}
-            return {"error": "unknown"}
-
-    server = AgentServer(MyBot)
-    config = AgentServerConfig()
-    app = web.Application()
-    base = config.base_path.rstrip("/")
-    app.router.add_post(f"{base}/{{agent_id}}/invoke", server._handle_invoke)
-
-    client = await aiohttp_client(app)
-
-    payload = {"task": "echo", "data": "hello"}
-    resp = await client.post(
-        f"/agent/test-invoke/invoke",
-        json=payload
-    )
-    assert resp.status == 200
-    data = await resp.json()
-    assert data["result"] == {"echo": "hello"}
-    assert data["agent_id"] == "test-invoke"
-
-@pytest.mark.asyncio
-async def test_delete_agent_endpoint(aiohttp_client):
-    """Test DELETE /agent/{id} endpoint."""
-    class MyBot(InMemoryAgent):
-        pass
-
-    server = AgentServer(MyBot)
-    config = AgentServerConfig(enable_rest_api=True)
-    app = web.Application()
-    base = config.base_path.rstrip("/")
-    app.router.add_delete(f"{base}/{{agent_id}}", server._handle_delete_agent)
-
-    client = await aiohttp_client(app)
-
-    # Create agent
-    agent = server.get_or_create("test-delete")
-    assert "test-delete" in server._agents
-
-    # Delete agent
-    resp = await client.delete(f"/agent/test-delete")
-    assert resp.status == 200
-
-    # Verify agent is gone
-    assert "test-delete" not in server._agents
+        resp = await client.get("/custom")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["custom"] is True

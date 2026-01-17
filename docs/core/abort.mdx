@@ -1,0 +1,339 @@
+---
+title: "Abort / Cancellation"
+description: "Cancel long-running operations with AbortController and AbortSignal"
+---
+
+ai-query provides a cancellation system inspired by JavaScript's `AbortController` and `AbortSignal`. This works with all async operations: `generate_text`, `stream_text`, `embed`, `embed_many`, and `Agent.chat`/`Agent.stream`.
+
+## Quick Start
+
+```python
+from ai_query import generate_text, openai, AbortController, AbortError
+
+controller = AbortController()
+
+try:
+    result = await generate_text(
+        model=openai("gpt-4o"),
+        prompt="Write a very long essay",
+        signal=controller.signal
+    )
+except AbortError as e:
+    print(f"Cancelled: {e.reason}")
+
+# Abort from anywhere (another task, user input, etc.)
+controller.abort("User cancelled")
+```
+
+## AbortController
+
+Creates and controls an `AbortSignal`.
+
+```python
+from ai_query import AbortController
+
+controller = AbortController()
+signal = controller.signal  # Get the signal to pass to operations
+controller.abort("reason")  # Trigger the abort
+```
+
+### Methods
+
+#### abort
+
+```python
+def abort(self, reason: str | None = None) -> None
+```
+
+Abort the signal, optionally with a reason.
+
+### Properties
+
+#### signal
+
+```python
+@property
+def signal(self) -> AbortSignal
+```
+
+The signal controlled by this controller.
+
+## AbortSignal
+
+A signal that can be checked for abort status.
+
+```python
+from ai_query import AbortSignal
+
+# Create via controller
+controller = AbortController()
+signal = controller.signal
+
+# Or create a timeout signal
+signal = AbortSignal.timeout(30)  # Auto-aborts after 30 seconds
+```
+
+### Properties
+
+#### aborted
+
+```python
+@property
+def aborted(self) -> bool
+```
+
+True if `abort()` has been called.
+
+#### reason
+
+```python
+@property
+def reason(self) -> str | None
+```
+
+The abort reason, if provided.
+
+### Methods
+
+#### throw_if_aborted
+
+```python
+def throw_if_aborted(self) -> None
+```
+
+Raise `AbortError` if the signal is aborted.
+
+#### timeout (static)
+
+```python
+@staticmethod
+def timeout(seconds: float) -> AbortSignal
+```
+
+Create a signal that auto-aborts after the specified timeout.
+
+```python
+# Auto-cancel after 30 seconds
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Complex task",
+    signal=AbortSignal.timeout(30)
+)
+```
+
+#### wait
+
+```python
+async def wait(self) -> None
+```
+
+Wait until the signal is aborted. Useful for racing tasks.
+
+#### add_listener
+
+```python
+def add_listener(self, callback: Callable[[], None]) -> None
+```
+
+Add a callback to be called when aborted.
+
+## AbortError
+
+Exception raised when an operation is aborted.
+
+```python
+from ai_query import AbortError
+
+try:
+    result = await generate_text(..., signal=signal)
+except AbortError as e:
+    print(e.reason)  # The abort reason
+```
+
+## Usage Examples
+
+### Abort generate_text
+
+```python
+from ai_query import generate_text, openai, AbortController, AbortError
+import asyncio
+
+controller = AbortController()
+
+async def generate():
+    try:
+        result = await generate_text(
+            model=openai("gpt-4o"),
+            prompt="Write a long essay about AI",
+            signal=controller.signal
+        )
+        print(result.text)
+    except AbortError as e:
+        print(f"Aborted: {e.reason}")
+
+async def cancel_after_delay():
+    await asyncio.sleep(5)
+    controller.abort("Timeout")
+
+# Run both concurrently
+await asyncio.gather(generate(), cancel_after_delay())
+```
+
+### Abort stream_text
+
+```python
+from ai_query import stream_text, openai, AbortController, AbortError
+
+controller = AbortController()
+
+try:
+    async for chunk in stream_text(
+        model=openai("gpt-4o"),
+        prompt="Write a story",
+        signal=controller.signal
+    ):
+        print(chunk, end="")
+
+        # Abort based on content
+        if "bad word" in chunk:
+            controller.abort("Content policy violation")
+
+except AbortError:
+    print("\n[Aborted]")
+```
+
+### Abort Agent.chat
+
+```python
+from ai_query import Agent, openai, AbortController, AbortError
+
+agent = Agent("assistant", model=openai("gpt-4o"))
+controller = AbortController()
+
+async with agent:
+    try:
+        response = await agent.chat(
+            "Write a very long essay",
+            signal=controller.signal
+        )
+    except AbortError as e:
+        print(f"Cancelled: {e.reason}")
+```
+
+### Abort Agent.stream
+
+```python
+async with agent:
+    try:
+        async for chunk in agent.stream(
+            "Tell me a long story",
+            signal=controller.signal
+        ):
+            print(chunk, end="")
+    except AbortError:
+        print("\n[Stream aborted]")
+```
+
+### Abort embed_many
+
+```python
+from ai_query import embed_many, openai, AbortController, AbortError
+
+controller = AbortController()
+
+try:
+    result = await embed_many(
+        model=openai.embedding("text-embedding-3-small"),
+        values=large_document_list,
+        signal=controller.signal
+    )
+except AbortError:
+    print("Embedding batch cancelled")
+```
+
+### Timeout Helper
+
+```python
+from ai_query import generate_text, openai, AbortSignal
+
+# Auto-cancel after 60 seconds
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Complex task",
+    signal=AbortSignal.timeout(60)
+)
+```
+
+### Multiple Operations with Same Signal
+
+```python
+import asyncio
+from ai_query import generate_text, embed, openai, AbortController
+
+controller = AbortController()
+signal = controller.signal
+
+# All operations share the same signal - one abort cancels all
+results = await asyncio.gather(
+    generate_text(model=openai("gpt-4o"), prompt="Task 1", signal=signal),
+    generate_text(model=openai("gpt-4o"), prompt="Task 2", signal=signal),
+    embed(model=openai.embedding("text-embedding-3-small"), value="text", signal=signal),
+    return_exceptions=True
+)
+
+# One abort cancels all
+controller.abort("Cancelled all")
+```
+
+### User-Initiated Abort (WebSocket)
+
+```python
+from ai_query import Agent, AbortController
+
+class ChatAgent(Agent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._current_controller: AbortController | None = None
+
+    async def on_message(self, connection, message):
+        if message == "STOP":
+            if self._current_controller:
+                self._current_controller.abort("User stopped")
+            return
+
+        self._current_controller = AbortController()
+        try:
+            async for chunk in self.stream(
+                message,
+                signal=self._current_controller.signal
+            ):
+                await connection.send(chunk)
+        except AbortError:
+            await connection.send("[Stopped by user]")
+        finally:
+            self._current_controller = None
+```
+
+## Best Practices
+
+1. **Always handle AbortError** - Wrap operations in try/except when using signals.
+
+2. **Use timeout for safety** - Prevent runaway operations with `AbortSignal.timeout()`.
+
+3. **Share signals across related operations** - One abort cancels all.
+
+4. **Clean up resources** - Use try/finally to clean up when aborted.
+
+```python
+controller = AbortController()
+resource = None
+
+try:
+    resource = acquire_resource()
+    result = await generate_text(..., signal=controller.signal)
+except AbortError:
+    print("Aborted")
+finally:
+    if resource:
+        release_resource(resource)
+```

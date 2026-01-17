@@ -1,100 +1,111 @@
 ---
-title: "Agent Backends"
+title: "Storage Backends"
 description: "Built-in storage backends for agents"
 ---
 
-ai-query provides three built-in agent backends for different use cases. All agents implement the **Actor model** - messages are processed sequentially through a mailbox, eliminating race conditions.
+ai-query provides built-in storage backends for different use cases. Storage backends implement the `Storage` protocol and are injected into agents via the `storage` parameter.
 
-## InMemoryAgent
+## Import
+
+```python
+from ai_query import Storage, MemoryStorage, SQLiteStorage
+```
+
+## Storage Protocol
+
+All storage backends implement this protocol:
+
+```python
+from typing import Protocol, Any
+
+class Storage(Protocol):
+    async def get(self, key: str) -> Any | None: ...
+    async def set(self, key: str, value: Any) -> None: ...
+    async def delete(self, key: str) -> None: ...
+    async def keys(self, prefix: str = "") -> list[str]: ...
+```
+
+---
+
+## MemoryStorage
 
 In-memory storage for development and testing. Data is lost when the process exits.
 
 ```python
-from ai_query.agents import InMemoryAgent
+from ai_query import MemoryStorage
 ```
-
-### Usage
-
-```python
-class MyAgent(InMemoryAgent):
-    initial_state = {"count": 0}
-
-async with MyAgent("agent-1") as agent:
-    await agent.set_state({"count": 1})
-```
-
-### Class Attributes
-
-<ParamField path="_store" type="ClassVar[dict]">
-  Class-level storage shared across all instances. Protected by an async lock for thread-safety.
-</ParamField>
-
-### Methods
-
-#### clear_all
-
-```python
-@classmethod
-def clear_all(cls) -> None
-```
-
-Clear all stored data synchronously. Useful for testing.
-
-#### clear_all_async
-
-```python
-@classmethod
-async def clear_all_async(cls) -> None
-```
-
-Clear all stored data asynchronously with lock protection. Preferred in async contexts.
-
-#### clear
-
-```python
-def clear(self) -> None
-```
-
-Clear this agent's stored data synchronously.
-
-#### clear_async
-
-```python
-async def clear_async(self) -> None
-```
-
-Clear this agent's stored data asynchronously with lock protection.
-
-### Thread Safety
-
-`InMemoryAgent` uses a class-level `asyncio.Lock` to protect the shared storage. All storage operations (`_load_state`, `_save_state`, `_load_messages`, `_save_messages`) acquire this lock, making it safe for concurrent access across multiple agent instances.
-
----
-
-## SQLiteAgent
-
-Async SQLite persistence using `aiosqlite`. Non-blocking database operations that won't freeze your event loop.
-
-```python
-from ai_query.agents import SQLiteAgent
-```
-
-### Class Attributes
-
-<ParamField path="db_path" type="str" default="agents.db">
-  Path to the SQLite database file. Use `:memory:` for in-memory database.
-</ParamField>
 
 ### Constructor
 
 ```python
-def __init__(
-    self,
-    agent_id: str,
-    *,
-    env: Any = None,
-    db_path: str | None = None  # Override class db_path
+MemoryStorage()
+```
+
+No parameters required. Creates an empty in-memory store.
+
+### Usage
+
+```python
+from ai_query import Agent, MemoryStorage, openai
+
+agent = Agent(
+    "my-agent",
+    model=openai("gpt-4o"),
+    storage=MemoryStorage(),
+    initial_state={"count": 0}
 )
+
+async with agent:
+    await agent.update_state(count=1)
+    print(agent.state)  # {"count": 1}
+```
+
+### Notes
+
+- Data is shared across all agents using the same `MemoryStorage` instance
+- Thread-safe for concurrent access
+- Fast for development and testing
+- Not suitable for production persistence
+
+---
+
+## SQLiteStorage
+
+Async SQLite persistence using `aiosqlite`. Non-blocking database operations that won't freeze your event loop.
+
+```python
+from ai_query import SQLiteStorage
+```
+
+### Constructor
+
+```python
+SQLiteStorage(path: str)
+```
+
+<ParamField path="path" type="str" required>
+  Path to the SQLite database file. Use `:memory:` for in-memory database.
+</ParamField>
+
+### Usage
+
+```python
+from ai_query import Agent, SQLiteStorage, openai
+
+agent = Agent(
+    "user-123",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.db"),
+    initial_state={"preferences": {}}
+)
+
+async with agent:
+    await agent.update_state(theme="dark")
+    print(await agent.chat("Hello!"))
+
+# Later, in a new process...
+async with agent:
+    print(agent.state)  # {"preferences": {}, "theme": "dark"}
 ```
 
 ### Methods
@@ -105,7 +116,7 @@ def __init__(
 async def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
 ```
 
-Execute a SQL query against the agent's database asynchronously.
+Execute a SQL query against the storage database asynchronously.
 
 **Parameters:**
 - `query`: SQL query string with `?` placeholders
@@ -113,261 +124,160 @@ Execute a SQL query against the agent's database asynchronously.
 
 **Returns:** List of rows as dictionaries.
 
-<Warning>
-The `sql()` method is now **async** and must be awaited.
-</Warning>
-
-#### close
+**Example:**
 
 ```python
-async def close(self) -> None
+storage = SQLiteStorage("./data/agents.db")
+
+# Custom queries on the database
+results = await storage.sql(
+    "SELECT * FROM agent_state WHERE key LIKE ?",
+    "user-%"
+)
 ```
 
-Close the database connection. Called automatically when using the context manager.
+### Notes
 
-### Usage
-
-```python
-class DataAgent(SQLiteAgent):
-    db_path = "./data/agents.db"
-    initial_state = {}
-
-    async def on_start(self):
-        # Create custom tables
-        await self.sql("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, msg TEXT, ts REAL)")
-
-    async def log(self, message: str):
-        import time
-        await self.sql("INSERT INTO logs (msg, ts) VALUES (?, ?)", message, time.time())
-
-    async def get_logs(self, limit: int = 10) -> list[dict]:
-        return await self.sql(
-            "SELECT * FROM logs ORDER BY ts DESC LIMIT ?",
-            limit
-        )
-
-async with DataAgent("data-1") as agent:
-    await agent.log("Application started")
-    await agent.log("User logged in")
-
-    logs = await agent.get_logs()
-    for log in logs:
-        print(f"{log['ts']}: {log['msg']}")
-```
-
-### Connection Management
-
-`SQLiteAgent` uses lazy connection initialization via `_ensure_connection()`. The connection is created on first database access and closed when the agent exits.
+- Uses lazy connection initialization
+- Connection is automatically closed when the agent stops
+- Tables are created automatically on first use
+- State and messages are stored as JSON
 
 ---
 
-## DurableObjectAgent
+## Creating Custom Storage Backends
 
-Agent for Cloudflare Durable Objects. Uses DO's built-in storage and WebSocket APIs.
-
-```python
-from ai_query.agents import DurableObjectAgent
-```
-
-### Constructor
+Implement the `Storage` protocol to use any backend:
 
 ```python
-def __init__(self, ctx: Any, env: Any)
-```
-
-**Parameters:**
-- `ctx`: Durable Object context from Cloudflare
-- `env`: Environment bindings
-
-### Methods
-
-#### sql
-
-```python
-def sql(self, query: str, *params: Any) -> list[dict[str, Any]]
-```
-
-Execute SQL against the DO's embedded SQLite. Synchronous (DO's SQLite is synchronous).
-
-#### fetch
-
-```python
-async def fetch(self, request: Any) -> Any
-```
-
-Handle HTTP/WebSocket requests. Automatically handles WebSocket upgrades.
-
-#### on_request
-
-```python
-async def on_request(self, request: Any) -> Any
-```
-
-Handle regular HTTP requests. Override for custom endpoints.
-
-### Usage
-
-```python
-from ai_query.agents import ChatAgent, DurableObjectAgent
-
-class MyDurableBot(ChatAgent, DurableObjectAgent):
-    initial_state = {"sessions": 0}
-
-    async def on_connect(self, conn, ctx):
-        await super().on_connect(conn, ctx)
-        await self.set_state({
-            "sessions": self.state["sessions"] + 1
-        })
-        await conn.send("Welcome!")
-
-    async def on_message(self, conn, message):
-        response = await self.chat(message)
-        await conn.send(response)
-
-# Export in wrangler.toml:
-# [[durable_objects.bindings]]
-# name = "MY_BOT"
-# class_name = "MyDurableBot"
-```
-
----
-
-## Actor Model
-
-All agents implement the Actor model for safe concurrent operation:
-
-```
-┌─────────────────────────────────────────┐
-│              Agent                      │
-│  ┌─────────────────────────────────┐   │
-│  │  Mailbox (asyncio.Queue)        │   │
-│  │  ┌───┐ ┌───┐ ┌───┐ ┌───┐       │   │
-│  │  │msg│→│msg│→│msg│→│msg│→ ...  │   │
-│  │  └───┘ └───┘ └───┘ └───┘       │   │
-│  └─────────────────────────────────┘   │
-│              │                          │
-│              ▼                          │
-│  ┌─────────────────────────────────┐   │
-│  │  Processor (sequential loop)    │   │
-│  │  - Processes ONE message at a   │   │
-│  │    time                         │   │
-│  │  - No concurrent state access   │   │
-│  │  - No race conditions           │   │
-│  └─────────────────────────────────┘   │
-└─────────────────────────────────────────┘
-```
-
-### How It Works
-
-1. **Messages are enqueued** - WebSocket messages, HTTP requests, and agent invokes all go into the mailbox
-2. **Sequential processing** - The processor loop handles one message at a time
-3. **No races** - State is only accessed by one handler at a time
-4. **Timeout enforcement** - `invoke()` calls have enforced timeouts
-
-### Methods
-
-```python
-# Enqueue a message (fire-and-forget)
-agent.enqueue("message", data, connection=conn)
-
-# Enqueue an invoke and wait for result
-result = await agent.enqueue_invoke(payload, timeout=30.0)
-
-# Stop the processor
-await agent.stop()
-```
-
----
-
-## Creating Custom Backends
-
-Extend `Agent` and implement the abstract methods:
-
-```python
-from ai_query.agents import Agent
-from ai_query.types import Message
+from ai_query import Storage
 import redis.asyncio as redis
+import json
 
-class RedisAgent(Agent):
-    """Agent with Redis persistence."""
+class RedisStorage:
+    def __init__(self, url: str):
+        self.client = redis.from_url(url)
 
-    redis_url: str = "redis://localhost:6379"
+    async def get(self, key: str) -> Any | None:
+        value = await self.client.get(key)
+        return json.loads(value) if value else None
 
-    def __init__(self, agent_id: str, **kwargs):
-        super().__init__(agent_id, **kwargs)
-        self._redis = redis.from_url(self.redis_url)
+    async def set(self, key: str, value: Any) -> None:
+        await self.client.set(key, json.dumps(value))
 
-    async def _load_state(self):
-        data = await self._redis.get(f"agent:{self._id}:state")
-        return json.loads(data) if data else None
+    async def delete(self, key: str) -> None:
+        await self.client.delete(key)
 
-    async def _save_state(self, state):
-        await self._redis.set(
-            f"agent:{self._id}:state",
-            json.dumps(state)
-        )
+    async def keys(self, prefix: str = "") -> list[str]:
+        return await self.client.keys(f"{prefix}*")
 
-    async def _load_messages(self):
-        data = await self._redis.get(f"agent:{self._id}:messages")
-        if data:
-            return [Message(**m) for m in json.loads(data)]
-        return []
+# Use it
+from ai_query import Agent, openai
 
-    async def _save_messages(self, messages):
-        data = [{"role": m.role, "content": m.content} for m in messages]
-        await self._redis.set(
-            f"agent:{self._id}:messages",
-            json.dumps(data)
-        )
-
-    async def _save_event(self, event: AgentEvent) -> None:
-        """Persist an event to the log."""
-        # Simple list append for Redis
-        await self._redis.rpush(
-            f"agent:{self._id}:events",
-            json.dumps({
-                "id": event.id,
-                "type": event.type,
-                "data": event.data,
-                "created_at": event.created_at
-            })
-        )
-        # Optional: Trim log to respect retention
-        # await self._redis.ltrim(f"agent:{self._id}:events", -1000, -1)
-
-    async def _get_events(self, after_id: int | None = None) -> list[AgentEvent]:
-        """Retrieve events from the log."""
-        raw_events = await self._redis.lrange(f"agent:{self._id}:events", 0, -1)
-        events = []
-        for raw in raw_events:
-            data = json.loads(raw)
-            if after_id is None or data["id"] > after_id:
-                events.append(AgentEvent(**data))
-        return events
+agent = Agent(
+    "bot",
+    model=openai("gpt-4o"),
+    storage=RedisStorage("redis://localhost")
+)
 ```
 
-### Supporting Event Log
+### DynamoDB Example
 
-To support `enable_event_log = True` in your custom backend, you must implement:
+```python
+import boto3
+import json
+from typing import Any
 
-1.  `_save_event(self, event: AgentEvent) -> None`
-2.  `_get_events(self, after_id: int | None = None) -> list[AgentEvent]`
+class DynamoDBStorage:
+    def __init__(self, table_name: str):
+        self.table = boto3.resource("dynamodb").Table(table_name)
 
-The `AgentEvent` class is available in `ai_query.types`.
+    async def get(self, key: str) -> Any | None:
+        response = self.table.get_item(Key={"pk": key})
+        item = response.get("Item")
+        return json.loads(item["value"]) if item else None
+
+    async def set(self, key: str, value: Any) -> None:
+        self.table.put_item(Item={"pk": key, "value": json.dumps(value)})
+
+    async def delete(self, key: str) -> None:
+        self.table.delete_item(Key={"pk": key})
+
+    async def keys(self, prefix: str = "") -> list[str]:
+        response = self.table.scan(
+            FilterExpression="begins_with(pk, :prefix)",
+            ExpressionAttributeValues={":prefix": prefix}
+        )
+        return [item["pk"] for item in response.get("Items", [])]
+```
+
+### PostgreSQL Example
+
+```python
+import asyncpg
+import json
+from typing import Any
+
+class PostgreSQLStorage:
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        self._pool = None
+
+    async def _get_pool(self):
+        if self._pool is None:
+            self._pool = await asyncpg.create_pool(self.dsn)
+        return self._pool
+
+    async def get(self, key: str) -> Any | None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT value FROM agent_storage WHERE key = $1",
+                key
+            )
+            return json.loads(row["value"]) if row else None
+
+    async def set(self, key: str, value: Any) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agent_storage (key, value) VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = $2
+                """,
+                key, json.dumps(value)
+            )
+
+    async def delete(self, key: str) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM agent_storage WHERE key = $1", key)
+
+    async def keys(self, prefix: str = "") -> list[str]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT key FROM agent_storage WHERE key LIKE $1",
+                f"{prefix}%"
+            )
+            return [row["key"] for row in rows]
+```
 
 ---
 
 ## Comparison
 
-| Backend | Persistence | Async SQL | Best For |
-|---------|-------------|-----------|----------|
-| `InMemoryAgent` | ❌ | N/A | Development, testing, ephemeral state |
-| `SQLiteAgent` | ✅ | ✅ | Local apps, prototypes, single-instance servers |
-| `DurableObjectAgent` | ✅ | ❌ (sync) | Cloudflare Workers, edge computing |
+| Backend | Persistence | Async | Best For |
+|---------|-------------|-------|----------|
+| `MemoryStorage` | No | Yes | Development, testing, ephemeral state |
+| `SQLiteStorage` | Yes | Yes | Local apps, prototypes, single-instance servers |
+| Custom (Redis) | Yes | Yes | Production, distributed, multi-instance |
+| Custom (DynamoDB) | Yes | Yes | Serverless, AWS deployments |
+| Custom (PostgreSQL) | Yes | Yes | Production, complex queries |
 
 ### Choosing a Backend
 
-- **Development/Testing**: Use `InMemoryAgent` - fast, no setup
-- **Local Deployment**: Use `SQLiteAgent` - simple persistence, SQL queries
-- **Cloudflare Workers**: Use `DurableObjectAgent` - built-in persistence, global distribution
+- **Development/Testing**: Use `MemoryStorage` - fast, no setup
+- **Local Deployment**: Use `SQLiteStorage` - simple persistence, works out of box
 - **Multi-Instance/Scaling**: Create a custom backend with Redis, DynamoDB, or PostgreSQL
+- **Serverless**: Create a custom backend with DynamoDB or other serverless databases
