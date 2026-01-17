@@ -18,48 +18,6 @@ from ai_query.model import LanguageModel, EmbeddingModel
 _default_provider: OpenAIProvider | None = None
 
 
-def openai(
-    model_id: str,
-    *,
-    api_key: str | None = None,
-    base_url: str | None = None,
-    organization: str | None = None,
-) -> LanguageModel:
-    """Create an OpenAI language model.
-
-    Args:
-        model_id: The model identifier (e.g., "gpt-4", "gpt-4o", "gpt-4o-mini").
-        api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var.
-        base_url: Custom base URL for API requests.
-        organization: OpenAI organization ID.
-
-    Returns:
-        A LanguageModel instance for use with generate_text().
-
-    Example:
-        >>> from ai_query import generate_text, openai
-        >>> result = await generate_text(
-        ...     model=openai("gpt-4o"),
-        ...     prompt="Hello!"
-        ... )
-    """
-    global _default_provider
-
-    # Create provider with custom settings, or reuse default
-    if api_key or base_url or organization:
-        provider = OpenAIProvider(
-            api_key=api_key,
-            base_url=base_url,
-            organization=organization,
-        )
-    else:
-        if _default_provider is None:
-            _default_provider = OpenAIProvider()
-        provider = _default_provider
-
-    return LanguageModel(provider=provider, model_id=model_id)
-
-
 # Cached embedding provider instance
 _default_embedding_provider: OpenAIProvider | None = None
 
@@ -85,8 +43,39 @@ class _OpenAINamespace:
         base_url: str | None = None,
         organization: str | None = None,
     ) -> LanguageModel:
-        """Create an OpenAI language model."""
-        return openai(model_id, api_key=api_key, base_url=base_url, organization=organization)
+        """Create an OpenAI language model.
+
+        Args:
+            model_id: The model identifier (e.g., "gpt-4", "gpt-4o", "gpt-4o-mini").
+            api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var.
+            base_url: Custom base URL for API requests.
+            organization: OpenAI organization ID.
+
+        Returns:
+            A LanguageModel instance for use with generate_text().
+
+        Example:
+            >>> from ai_query import generate_text, openai
+            >>> result = await generate_text(
+            ...     model=openai("gpt-4o"),
+            ...     prompt="Hello!"
+            ... )
+        """
+        global _default_provider
+
+        # Create provider with custom settings, or reuse default
+        if api_key or base_url or organization:
+            provider = OpenAIProvider(
+                api_key=api_key,
+                base_url=base_url,
+                organization=organization,
+            )
+        else:
+            if _default_provider is None:
+                _default_provider = OpenAIProvider()
+            provider = _default_provider
+
+        return LanguageModel(provider=provider, model_id=model_id)
 
     def embedding(
         self,
@@ -658,3 +647,8 @@ class OpenAIProvider(BaseProvider):
             usage=usage,
             provider_metadata={"model": response.get("model")},
         )
+
+
+# Create the openai namespace instance
+# This replaces the openai() function and adds openai.embedding() support
+openai = _OpenAINamespace()

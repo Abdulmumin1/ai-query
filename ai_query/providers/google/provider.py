@@ -18,40 +18,6 @@ from ai_query.model import LanguageModel, EmbeddingModel
 _default_provider: GoogleProvider | None = None
 
 
-def google(
-    model_id: str,
-    *,
-    api_key: str | None = None,
-) -> LanguageModel:
-    """Create a Google (Gemini) language model.
-
-    Args:
-        model_id: The model identifier (e.g., "gemini-2.0-flash", "gemini-1.5-pro").
-        api_key: Google API key. Falls back to GOOGLE_API_KEY env var.
-
-    Returns:
-        A LanguageModel instance for use with generate_text().
-
-    Example:
-        >>> from ai_query import generate_text, google
-        >>> result = await generate_text(
-        ...     model=google("gemini-2.0-flash"),
-        ...     prompt="Hello!"
-        ... )
-    """
-    global _default_provider
-
-    # Create provider with custom settings, or reuse default
-    if api_key:
-        provider = GoogleProvider(api_key=api_key)
-    else:
-        if _default_provider is None:
-            _default_provider = GoogleProvider()
-        provider = _default_provider
-
-    return LanguageModel(provider=provider, model_id=model_id)
-
-
 # Cached embedding provider instance
 _default_embedding_provider: GoogleProvider | None = None
 
@@ -66,7 +32,7 @@ class _GoogleNamespace:
         >>> # Language model
         >>> model = google("gemini-2.0-flash")
         >>> # Embedding model
-        >>> embedding_model = google.embedding("text-embedding-004")
+        >>> embedding_model = google.embedding("gemini-embedding-001")
     """
 
     def __call__(
@@ -76,7 +42,17 @@ class _GoogleNamespace:
         api_key: str | None = None,
     ) -> LanguageModel:
         """Create a Google language model."""
-        return google(model_id, api_key=api_key)
+        global _default_provider
+
+        # Create provider with custom settings, or reuse default
+        if api_key:
+            provider = GoogleProvider(api_key=api_key)
+        else:
+            if _default_provider is None:
+                _default_provider = GoogleProvider()
+            provider = _default_provider
+
+        return LanguageModel(provider=provider, model_id=model_id)
 
     def embedding(
         self,
@@ -87,8 +63,7 @@ class _GoogleNamespace:
         """Create a Google embedding model.
 
         Args:
-            model_id: The embedding model identifier (e.g., "text-embedding-004",
-                "embedding-001").
+            model_id: The embedding model identifier (e.g., "gemini-embedding-001").
             api_key: Google API key. Falls back to GOOGLE_API_KEY env var.
 
         Returns:
@@ -97,7 +72,7 @@ class _GoogleNamespace:
         Example:
             >>> from ai_query import embed, google
             >>> result = await embed(
-            ...     model=google.embedding("text-embedding-004"),
+            ...     model=google.embedding("gemini-embedding-001"),
             ...     value="Hello world"
             ... )
         """
@@ -650,7 +625,7 @@ class GoogleProvider(BaseProvider):
         """Generate an embedding for a single value using Google API.
 
         Args:
-            model: Embedding model name (e.g., "text-embedding-004").
+            model: Embedding model name (e.g., "gemini-embedding-001").
             value: The text to embed.
             provider_options: Google-specific options under "google" key.
             **kwargs: Additional params (taskType, title, outputDimensionality, etc.).
@@ -705,7 +680,7 @@ class GoogleProvider(BaseProvider):
         Google supports batch embedding via batchEmbedContents endpoint.
 
         Args:
-            model: Embedding model name (e.g., "text-embedding-004").
+            model: Embedding model name (e.g., "gemini-embedding-001").
             values: List of texts to embed.
             provider_options: Google-specific options under "google" key.
             **kwargs: Additional params (taskType, title, outputDimensionality, etc.).
@@ -751,3 +726,8 @@ class GoogleProvider(BaseProvider):
             usage=EmbeddingUsage(tokens=estimated_tokens),
             provider_metadata={"model": model},
         )
+
+
+# Create the google namespace instance
+# This replaces the google() function and adds google.embedding() support
+google = _GoogleNamespace()

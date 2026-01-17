@@ -8,20 +8,24 @@ Deploy AI agents to serverless platforms where each request starts fresh. The `h
 ## Quick Start
 
 ```python
-from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query import Agent, SQLiteStorage, openai
 
-class SupportAgent(ChatAgent, SQLiteAgent):
-    system = "You are a helpful customer support agent."
-    initial_state = {"tickets_handled": 0}
+class SupportAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a helpful customer support agent.",
+            storage=SQLiteStorage("./agents.db"),
+            initial_state={"tickets_handled": 0}
+        )
 
     async def handle_invoke(self, payload: dict) -> dict:
         task = payload.get("task")
 
         if task == "chat":
             response = await self.chat(payload["message"])
-            await self.set_state({
-                "tickets_handled": self.state["tickets_handled"] + 1
-            })
+            await self.update_state(tickets_handled=self.state.get("tickets_handled", 0) + 1)
             return {"response": response}
 
         return {"error": f"Unknown task: {task}"}
@@ -35,14 +39,20 @@ class SupportAgent(ChatAgent, SQLiteAgent):
 # main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query import Agent, SQLiteStorage, openai
 
 app = FastAPI()
 
-class SupportAgent(ChatAgent, SQLiteAgent):
-    system = """You are a customer support agent for TechCorp.
-    Be helpful, professional, and concise."""
-    initial_state = {"conversation_count": 0}
+class SupportAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="""You are a customer support agent for TechCorp.
+            Be helpful, professional, and concise.""",
+            storage=SQLiteStorage("./agents.db"),
+            initial_state={"conversation_count": 0}
+        )
 
 class ChatRequest(BaseModel):
     message: str
@@ -53,7 +63,6 @@ class InvokeRequest(BaseModel):
 
 @app.post("/agent/{agent_id}/chat")
 async def chat(agent_id: str, request: ChatRequest):
-    """Send a chat message to an agent."""
     agent = SupportAgent(agent_id)
     result = await agent.handle_request({
         "action": "chat",
@@ -63,7 +72,6 @@ async def chat(agent_id: str, request: ChatRequest):
 
 @app.post("/agent/{agent_id}/invoke")
 async def invoke(agent_id: str, request: InvokeRequest):
-    """Invoke an agent task."""
     agent = SupportAgent(agent_id)
     result = await agent.handle_request({
         "action": "invoke",
@@ -73,7 +81,6 @@ async def invoke(agent_id: str, request: InvokeRequest):
 
 @app.get("/agent/{agent_id}/state")
 async def get_state(agent_id: str):
-    """Get agent state."""
     agent = SupportAgent(agent_id)
     result = await agent.handle_request({"action": "state"})
     return result
@@ -87,58 +94,55 @@ async def get_state(agent_id: str):
 # handler.py
 import json
 import asyncio
-from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query import Agent, SQLiteStorage, openai
 
-class OrderAgent(ChatAgent, SQLiteAgent):
-    system = """You are an order management assistant.
-    Help customers track orders, process returns, and answer questions."""
-    db_path = "/mnt/efs/agents.db"  # EFS mount for persistence
-    initial_state = {"orders_processed": 0}
+class OrderAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="""You are an order management assistant.
+            Help customers track orders, process returns, and answer questions.""",
+            storage=SQLiteStorage("/mnt/efs/agents.db"),  # EFS mount for persistence
+            initial_state={"orders_processed": 0}
+        )
 
     async def handle_invoke(self, payload: dict) -> dict:
         task = payload.get("task")
 
         if task == "track_order":
             order_id = payload.get("order_id")
-            # Query your order database
             status = await self.lookup_order(order_id)
             return {"order_id": order_id, "status": status}
 
         if task == "process_return":
             order_id = payload.get("order_id")
             reason = payload.get("reason", "")
-            # Process the return
             return_id = await self.create_return(order_id, reason)
             return {"return_id": return_id, "status": "initiated"}
 
         return {"error": f"Unknown task: {task}"}
 
     async def lookup_order(self, order_id: str) -> dict:
-        # Your order lookup logic
         return {"status": "shipped", "eta": "2024-01-15"}
 
     async def create_return(self, order_id: str, reason: str) -> str:
-        # Your return processing logic
         return f"RET-{order_id}"
 
 
 def handler(event, context):
-    """AWS Lambda entry point."""
-    # Parse request
     path_params = event.get("pathParameters", {})
     agent_id = path_params.get("agent_id", "default")
 
     body = json.loads(event.get("body", "{}"))
     action = body.get("action", "chat")
 
-    # Build request
     request = {"action": action}
     if action == "chat":
         request["message"] = body.get("message", "")
     elif action == "invoke":
         request["payload"] = body.get("payload", {})
 
-    # Process
     agent = OrderAgent(agent_id)
     result = asyncio.run(agent.handle_request(request))
 
@@ -183,22 +187,25 @@ Resources:
 import json
 from http.server import BaseHTTPRequestHandler
 import asyncio
-from ai_query.agents import ChatAgent, InMemoryAgent
+from ai_query import Agent, MemoryStorage, openai
 
-class AssistantAgent(ChatAgent, InMemoryAgent):
-    system = "You are a helpful assistant."
-    initial_state = {}
+class AssistantAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a helpful assistant.",
+            storage=MemoryStorage(),
+            initial_state={}
+        )
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        # Parse agent_id from path
         agent_id = self.path.split("/")[-1]
 
-        # Read body
         content_length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_length))
 
-        # Process request
         agent = AssistantAgent(agent_id)
         result = asyncio.run(agent.handle_request({
             "action": body.get("action", "chat"),
@@ -206,7 +213,6 @@ class handler(BaseHTTPRequestHandler):
             "payload": body.get("payload", {})
         }))
 
-        # Send response
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -234,15 +240,20 @@ For Vercel with persistence, use a custom storage backend with Vercel KV (Redis)
 import os
 from flask import Flask, request, jsonify
 import asyncio
-from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query import Agent, SQLiteStorage, openai
 
 app = Flask(__name__)
 
-class AnalystAgent(ChatAgent, SQLiteAgent):
-    system = """You are a data analyst assistant.
-    Help users understand their data and create insights."""
-    db_path = "/data/agents.db"  # Mounted Cloud Storage FUSE
-    initial_state = {"analyses_run": 0}
+class AnalystAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="""You are a data analyst assistant.
+            Help users understand their data and create insights.""",
+            storage=SQLiteStorage("/data/agents.db"),  # Mounted Cloud Storage FUSE
+            initial_state={"analyses_run": 0}
+        )
 
     async def handle_invoke(self, payload: dict) -> dict:
         task = payload.get("task")
@@ -251,9 +262,7 @@ class AnalystAgent(ChatAgent, SQLiteAgent):
             data = payload.get("data", [])
             prompt = f"Analyze this data and provide insights: {data}"
             analysis = await self.chat(prompt)
-            await self.set_state({
-                "analyses_run": self.state["analyses_run"] + 1
-            })
+            await self.update_state(analyses_run=self.state.get("analyses_run", 0) + 1)
             return {"analysis": analysis}
 
         if task == "summarize":
@@ -301,54 +310,44 @@ Serverless environments often need external storage. Here are production-ready e
 ```python
 import json
 import boto3
-from ai_query.agents import Agent, ChatAgent
-from ai_query.types import Message
+from ai_query import Storage
 
-class DynamoDBAgent(Agent):
-    """Agent with DynamoDB persistence for AWS Lambda."""
+class DynamoDBStorage:
+    def __init__(self, table_name: str = "agents"):
+        self._table = boto3.resource("dynamodb").Table(table_name)
 
-    table_name: str = "agents"
-
-    def __init__(self, agent_id: str, **kwargs):
-        super().__init__(agent_id, **kwargs)
-        self._table = boto3.resource("dynamodb").Table(self.table_name)
-
-    async def _load_state(self):
-        response = self._table.get_item(Key={"pk": f"agent#{self._id}", "sk": "state"})
+    async def get(self, key: str):
+        response = self._table.get_item(Key={"pk": key})
         item = response.get("Item")
-        return item.get("data") if item else None
+        return json.loads(item["value"]) if item else None
 
-    async def _save_state(self, state):
-        self._table.put_item(Item={
-            "pk": f"agent#{self._id}",
-            "sk": "state",
-            "data": state
-        })
+    async def set(self, key: str, value):
+        self._table.put_item(Item={"pk": key, "value": json.dumps(value)})
 
-    async def _load_messages(self) -> list[Message]:
-        response = self._table.get_item(Key={"pk": f"agent#{self._id}", "sk": "messages"})
-        item = response.get("Item")
-        if item and "data" in item:
-            return [Message(**m) for m in item["data"]]
-        return []
+    async def delete(self, key: str):
+        self._table.delete_item(Key={"pk": key})
 
-    async def _save_messages(self, messages: list[Message]):
-        self._table.put_item(Item={
-            "pk": f"agent#{self._id}",
-            "sk": "messages",
-            "data": [{"role": m.role, "content": m.content} for m in messages]
-        })
+    async def keys(self, prefix: str = "") -> list[str]:
+        response = self._table.scan(
+            FilterExpression="begins_with(pk, :prefix)",
+            ExpressionAttributeValues={":prefix": prefix}
+        )
+        return [item["pk"] for item in response.get("Items", [])]
 
 
-class MyAgent(ChatAgent, DynamoDBAgent):
-    system = "You are helpful."
-    table_name = "my-agents-table"
+# Usage
+from ai_query import Agent, openai
+
+agent = Agent(
+    "my-agent",
+    model=openai("gpt-4o"),
+    storage=DynamoDBStorage("my-agents-table")
+)
 ```
 
 **DynamoDB Table Schema:**
 ```
 Partition Key: pk (String)
-Sort Key: sk (String)
 ```
   </Tab>
 
@@ -356,47 +355,35 @@ Sort Key: sk (String)
 ```python
 import json
 import redis.asyncio as redis
-from ai_query.agents import Agent, ChatAgent
-from ai_query.types import Message
+from ai_query import Storage
 
-class RedisAgent(Agent):
-    """Agent with Redis persistence for Vercel, Railway, etc."""
+class RedisStorage:
+    def __init__(self, url: str = "redis://localhost:6379", ttl: int = 86400 * 7):
+        self._client = redis.from_url(url)
+        self._ttl = ttl
 
-    redis_url: str = "redis://localhost:6379"
-    ttl: int = 86400 * 7  # 7 days
-
-    def __init__(self, agent_id: str, **kwargs):
-        super().__init__(agent_id, **kwargs)
-        self._redis = redis.from_url(self.redis_url)
-
-    async def _load_state(self):
-        data = await self._redis.get(f"agent:{self._id}:state")
+    async def get(self, key: str):
+        data = await self._client.get(key)
         return json.loads(data) if data else None
 
-    async def _save_state(self, state):
-        await self._redis.setex(
-            f"agent:{self._id}:state",
-            self.ttl,
-            json.dumps(state)
-        )
+    async def set(self, key: str, value):
+        await self._client.setex(key, self._ttl, json.dumps(value))
 
-    async def _load_messages(self) -> list[Message]:
-        data = await self._redis.get(f"agent:{self._id}:messages")
-        if data:
-            return [Message(**m) for m in json.loads(data)]
-        return []
+    async def delete(self, key: str):
+        await self._client.delete(key)
 
-    async def _save_messages(self, messages: list[Message]):
-        await self._redis.setex(
-            f"agent:{self._id}:messages",
-            self.ttl,
-            json.dumps([{"role": m.role, "content": m.content} for m in messages])
-        )
+    async def keys(self, prefix: str = "") -> list[str]:
+        return [k.decode() for k in await self._client.keys(f"{prefix}*")]
 
 
-class MyAgent(ChatAgent, RedisAgent):
-    system = "You are helpful."
-    redis_url = "redis://my-redis-host:6379"
+# Usage
+from ai_query import Agent, openai
+
+agent = Agent(
+    "my-agent",
+    model=openai("gpt-4o"),
+    storage=RedisStorage("redis://my-redis-host:6379")
+)
 ```
   </Tab>
 
@@ -404,81 +391,64 @@ class MyAgent(ChatAgent, RedisAgent):
 ```python
 import json
 import asyncpg
-from ai_query.agents import Agent, ChatAgent
-from ai_query.types import Message
 
-class PostgresAgent(Agent):
-    """Agent with PostgreSQL persistence."""
-
-    database_url: str = "postgresql://user:pass@host/db"
-
-    def __init__(self, agent_id: str, **kwargs):
-        super().__init__(agent_id, **kwargs)
+class PostgreSQLStorage:
+    def __init__(self, dsn: str):
+        self._dsn = dsn
         self._pool = None
 
     async def _get_pool(self):
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
-            await self._init_schema()
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=5)
+            async with self._pool.acquire() as conn:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS agent_storage (
+                        key TEXT PRIMARY KEY,
+                        value JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
         return self._pool
 
-    async def _init_schema(self):
-        async with self._pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS agent_data (
-                    agent_id TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    data JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ DEFAULT NOW(),
-                    PRIMARY KEY (agent_id, key)
-                )
-            """)
-
-    async def _load_state(self):
+    async def get(self, key: str):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT data FROM agent_data WHERE agent_id = $1 AND key = 'state'",
-                self._id
+                "SELECT value FROM agent_storage WHERE key = $1", key
             )
-            return row["data"] if row else None
+            return json.loads(row["value"]) if row else None
 
-    async def _save_state(self, state):
+    async def set(self, key: str, value):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO agent_data (agent_id, key, data, updated_at)
-                VALUES ($1, 'state', $2, NOW())
-                ON CONFLICT (agent_id, key)
-                DO UPDATE SET data = $2, updated_at = NOW()
-            """, self._id, json.dumps(state))
+                INSERT INTO agent_storage (key, value, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+            """, key, json.dumps(value))
 
-    async def _load_messages(self) -> list[Message]:
+    async def delete(self, key: str):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT data FROM agent_data WHERE agent_id = $1 AND key = 'messages'",
-                self._id
+            await conn.execute("DELETE FROM agent_storage WHERE key = $1", key)
+
+    async def keys(self, prefix: str = "") -> list[str]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT key FROM agent_storage WHERE key LIKE $1", f"{prefix}%"
             )
-            if row:
-                return [Message(**m) for m in row["data"]]
-            return []
-
-    async def _save_messages(self, messages: list[Message]):
-        pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            data = [{"role": m.role, "content": m.content} for m in messages]
-            await conn.execute("""
-                INSERT INTO agent_data (agent_id, key, data, updated_at)
-                VALUES ($1, 'messages', $2, NOW())
-                ON CONFLICT (agent_id, key)
-                DO UPDATE SET data = $2, updated_at = NOW()
-            """, self._id, json.dumps(data))
+            return [row["key"] for row in rows]
 
 
-class MyAgent(ChatAgent, PostgresAgent):
-    system = "You are helpful."
-    database_url = "postgresql://..."
+# Usage
+from ai_query import Agent, openai
+
+agent = Agent(
+    "my-agent",
+    model=openai("gpt-4o"),
+    storage=PostgreSQLStorage("postgresql://user:pass@host/db")
+)
 ```
   </Tab>
 </Tabs>
@@ -490,11 +460,17 @@ Build complex workflows by having agents call each other via HTTP:
 ```python
 # orchestrator.py
 import httpx
-from ai_query.agents import ChatAgent, SQLiteAgent
+from ai_query import Agent, SQLiteStorage, openai
 
-class OrchestratorAgent(ChatAgent, SQLiteAgent):
-    system = "You coordinate tasks between specialized agents."
-    initial_state = {"tasks_completed": 0}
+class OrchestratorAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You coordinate tasks between specialized agents.",
+            storage=SQLiteStorage("./orchestrator.db"),
+            initial_state={"tasks_completed": 0}
+        )
 
     async def handle_invoke(self, payload: dict) -> dict:
         task = payload.get("task")
@@ -502,8 +478,8 @@ class OrchestratorAgent(ChatAgent, SQLiteAgent):
         if task == "research_and_summarize":
             topic = payload.get("topic")
 
-            # Call researcher agent
             async with httpx.AsyncClient() as client:
+                # Call researcher agent
                 research_result = await client.post(
                     "https://api.example.com/agent/researcher",
                     json={
@@ -526,9 +502,9 @@ class OrchestratorAgent(ChatAgent, SQLiteAgent):
                 )
                 summary_data = summary_result.json()
 
-            await self.set_state({
-                "tasks_completed": self.state["tasks_completed"] + 1
-            })
+            await self.update_state(
+                tasks_completed=self.state.get("tasks_completed", 0) + 1
+            )
 
             return {
                 "topic": topic,
@@ -551,11 +527,9 @@ import boto3
 dynamodb = boto3.resource("dynamodb")
 agents_table = dynamodb.Table("agents")
 
-class OptimizedAgent(ChatAgent, DynamoDBAgent):
-    def __init__(self, agent_id: str, **kwargs):
-        super().__init__(agent_id, **kwargs)
-        # Reuse the module-level table reference
-        self._table = agents_table
+class OptimizedStorage:
+    def __init__(self):
+        self._table = agents_table  # Reuse module-level reference
 ```
 
 ### Connection Pooling
@@ -575,7 +549,7 @@ async def get_pool():
 
 ```python
 from fastapi import FastAPI, HTTPException
-from ai_query.agents import ChatAgent, SQLiteAgent
+import asyncio
 
 app = FastAPI()
 
@@ -613,23 +587,6 @@ async def handler(request):
         return {"error": "Request timed out"}
 ```
 
-## Cloudflare Workers
-
-For Cloudflare, use `DurableObjectAgent` instead of `handle_request()`. Durable Objects provide built-in persistence and WebSocket support:
-
-```python
-from ai_query.agents import ChatAgent, DurableObjectAgent
-
-class MyAgent(ChatAgent, DurableObjectAgent):
-    system = "You are helpful."
-    initial_state = {}
-
-    # fetch() is the entry point (handled automatically)
-    # State is automatically persisted in the Durable Object
-```
-
-See [Durable Objects documentation](/api-reference/agent-backends#durableobjectagent) for details.
-
 ## Next Steps
 
 <CardGroup cols={2}>
@@ -639,7 +596,7 @@ See [Durable Objects documentation](/api-reference/agent-backends#durableobjecta
   <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
     Run multiple agents on one server
   </Card>
-  <Card title="Custom Backends" icon="database" href="/api-reference/agent-backends#creating-custom-backends">
+  <Card title="Custom Backends" icon="database" href="/api-reference/agent-backends#creating-custom-storage-backends">
     Build your own storage backend
   </Card>
   <Card title="Agent API Reference" icon="book" href="/api-reference/agent">

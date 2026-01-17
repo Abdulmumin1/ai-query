@@ -7,7 +7,7 @@ import time
 from typing import Any, Generic, TypeVar
 
 from ai_query.agents.base import Agent
-from ai_query.agents.transport import AgentTransport
+from ai_query.agents.transport import AgentTransport, AgentServer
 from ai_query.agents.websocket import Connection, ConnectionContext
 from ai_query.types import Message, AgentEvent
 

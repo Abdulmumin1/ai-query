@@ -1,60 +1,68 @@
 ---
 title: "Agent"
-description: "Abstract base class for stateful AI agents"
+description: "API reference for the Agent class"
 ---
 
-The `Agent` class is the foundation for building stateful AI agents with persistent storage, WebSocket support, and lifecycle hooks.
+The `Agent` class is the foundation for building stateful AI applications with persistent memory and identity.
 
 ## Import
 
 ```python
-from ai_query.agents import Agent
+from ai_query import Agent
 ```
 
-## Class Definition
+## Constructor
 
 ```python
-class Agent(ABC, Generic[State]):
-    initial_state: State = {}
-    
-    def __init__(self, agent_id: str, *, env: Any = None)
+Agent(
+    id: str,
+    *,
+    model: LanguageModel | None = None,
+    system: str = "You are a helpful assistant.",
+    tools: ToolSet | None = None,
+    storage: Storage | None = None,
+    initial_state: dict[str, Any] | None = None,
+    stop_when: StopCondition | list[StopCondition] | None = None,
+    provider_options: ProviderOptions | None = None,
+)
 ```
 
 ### Parameters
 
-<ParamField path="agent_id" type="str" required>
-  Unique identifier for this agent instance. Used as the key for state persistence.
+<ParamField path="id" type="str" required>
+  Unique identifier for this agent instance. Used as a key prefix for storage.
 </ParamField>
 
-<ParamField path="env" type="Any">
-  Optional environment bindings. Used for Cloudflare Durable Objects integration.
+<ParamField path="model" type="LanguageModel">
+  The language model to use. Created with provider functions like `openai("gpt-4o")`.
+  If not provided, defaults to `google("gemini-2.0-flash")`.
 </ParamField>
 
-### Class Attributes
+<ParamField path="system" type="str" default="You are a helpful assistant.">
+  System prompt that guides the agent's behavior.
+</ParamField>
 
-<ParamField path="enable_event_log" type="bool" default="False">
-  Set to `True` to enable persistent event logging and connection recovery.
+<ParamField path="tools" type="ToolSet">
+  Dictionary of tools available to the agent. Keys are tool names, values are `Tool` objects.
+</ParamField>
+
+<ParamField path="storage" type="Storage">
+  Storage backend for persistence. Defaults to `MemoryStorage()`.
+</ParamField>
+
+<ParamField path="initial_state" type="dict[str, Any]">
+  Initial state dictionary. Used when no persisted state exists.
+</ParamField>
+
+<ParamField path="stop_when" type="StopCondition | list[StopCondition]">
+  Condition(s) to stop tool execution loops.
+</ParamField>
+
+<ParamField path="provider_options" type="ProviderOptions">
+  Provider-specific options passed to the model.
 </ParamField>
 
 ## Properties
-
-### state
-
-```python
-@property
-def state(self) -> State
-```
-
-Current agent state. Raises `RuntimeError` if accessed before `start()` is called.
-
-### messages
-
-```python
-@property
-def messages(self) -> list[Message]
-```
-
-Conversation history for this agent.
 
 ### id
 
@@ -63,214 +71,208 @@ Conversation history for this agent.
 def id(self) -> str
 ```
 
-The agent's unique identifier.
+The unique identifier for this agent.
+
+### storage
+
+```python
+@property
+def storage(self) -> Storage
+```
+
+The storage backend used by this agent.
+
+### state
+
+```python
+@property
+def state(self) -> dict[str, Any]
+```
+
+The current state dictionary. Raises `RuntimeError` if agent not started.
+
+### messages
+
+```python
+@property
+def messages(self) -> list[Message]
+```
+
+The conversation history.
 
 ## Methods
+
+### chat
+
+```python
+async def chat(
+    self,
+    message: str | list[ContentPart],
+    *,
+    signal: AbortSignal | None = None,
+) -> str
+```
+
+Send a message and get a response. The message and response are automatically added to the conversation history and persisted.
+
+<ParamField path="message" type="str | list[ContentPart]" required>
+  The user message. Can be a string or a list of content parts for multimodal input.
+</ParamField>
+
+<ParamField path="signal" type="AbortSignal">
+  Optional abort signal for cancellation.
+</ParamField>
+
+**Returns:** The assistant's response text.
+
+**Example:**
+
+```python
+async with agent:
+    response = await agent.chat("Hello!")
+    print(response)
+
+    # With abort signal
+    controller = AbortController()
+    response = await agent.chat("Long task", signal=controller.signal)
+```
+
+### stream
+
+```python
+async def stream(
+    self,
+    message: str | list[ContentPart],
+    *,
+    signal: AbortSignal | None = None,
+) -> AsyncIterator[str]
+```
+
+Stream a response chunk by chunk.
+
+<ParamField path="message" type="str | list[ContentPart]" required>
+  The user message.
+</ParamField>
+
+<ParamField path="signal" type="AbortSignal">
+  Optional abort signal for cancellation.
+</ParamField>
+
+**Yields:** Response text chunks.
+
+**Example:**
+
+```python
+async with agent:
+    async for chunk in agent.stream("Tell me a story"):
+        print(chunk, end="", flush=True)
+```
 
 ### set_state
 
 ```python
-async def set_state(self, state: State) -> None
+async def set_state(self, state: dict[str, Any]) -> None
 ```
 
-Update the agent's state. This will:
-1. Update in-memory state
-2. Persist to storage
-3. Call `on_state_update` hook
-4. Broadcast new state to all WebSocket clients
-
-### save_messages
-
-```python
-async def save_messages(self, messages: list[Message]) -> None
-```
-
-Persist messages to storage.
-
-### clear_messages
-
-```python
-async def clear_messages(self) -> None
-```
-
-Clear the conversation history.
-
-### broadcast
-
-```python
-async def broadcast(self, message: str | bytes) -> None
-```
-
-Send a message to all connected WebSocket clients.
-
-### stream_to_sse
-
-```python
-async def stream_to_sse(self, event: str, data: str) -> None
-```
-
-Send an SSE event to all connected SSE clients.
-
-**Parameters:**
-- `event` - Event type (e.g., `"ai_start"`, `"ai_chunk"`, `"ai_end"`)
-- `data` - Event data to send
-
-## Actor Communication
-
-Methods for agent-to-agent communication and event-driven architecture.
-
-### invoke
-
-```python
-async def invoke(
-    self, 
-    agent_id: str, 
-    payload: dict[str, Any],
-    timeout: float = 30.0
-) -> dict[str, Any]
-```
-
-Call another agent and wait for response. Requires a transport to be configured (automatic when using `AgentServer`).
-
-**Parameters:**
-- `agent_id` - Target agent's identifier
-- `payload` - Request data to send
-- `timeout` - Max wait time in seconds (default: 30)
-
-**Returns:** Response dict from the target agent.
+Replace the entire state dictionary. Automatically persisted.
 
 **Example:**
+
 ```python
-result = await self.invoke("summarizer", {
-    "task": "summarize",
-    "text": long_document
-})
-print(result["summary"])
+await agent.set_state({"user_name": "Alice", "counter": 0})
 ```
+
+### update_state
+
+```python
+async def update_state(self, **kwargs: Any) -> None
+```
+
+Update specific keys in the state. Automatically persisted.
+
+**Example:**
+
+```python
+await agent.update_state(counter=5, last_seen="2024-01-15")
+```
+
+### clear
+
+```python
+async def clear(self) -> None
+```
+
+Clear the conversation history. The state is preserved.
 
 ### emit
 
 ```python
-async def emit(self, event: str, data: dict[str, Any]) -> None
+async def emit(self, event: str, data: dict[str, Any]) -> int
 ```
 
-Fire an event to all subscribers. Events are namespaced: `"{agent_id}:{event}"`.
+Emit an event to connected clients. Returns the assigned event ID.
+
+<ParamField path="event" type="str" required>
+  Event type (e.g., "status", "chunk", "done").
+</ParamField>
+
+<ParamField path="data" type="dict[str, Any]" required>
+  Event payload data.
+</ParamField>
+
+**Returns:** The unique event ID (incrementing integer).
 
 **Example:**
+
 ```python
-await self.emit("task.complete", {"result": analysis_result})
+async def on_message(self, connection, message):
+    await self.emit("status", {"text": "Processing..."})
+
+    async for chunk in self.stream(message):
+        await self.emit("chunk", {"content": chunk})
+
+    await self.emit("done", {})
 ```
 
 ### replay_events
 
 ```python
-async def replay_events(self, connection: Connection, after_id: int) -> None
+async def replay_events(self, after_id: int = 0) -> AsyncIterator[Event]
 ```
 
-Replay events from the persistent log to a specific connection.
+Yield events for replay on client reconnection.
 
-**Parameters:**
-- `connection`: The connection to send events to.
-- `after_id`: The last event ID the client has seen.
-
-<Note>
-This method is called automatically by `AgentServer` when a client connects with `?last_event_id=...`. You typically don't need to call it manually.
-</Note>
-
-### handle_invoke
-
-```python
-async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]
-```
-
-Override to handle incoming `invoke()` calls from other agents.
-
-**Parameters:**
-
-<ParamField path="payload" type="dict" required>
-  The data sent by the calling agent. **You define the structure.** A common pattern is to use a `task` field to route to different handlers.
+<ParamField path="after_id" type="int" default="0">
+  Only yield events with ID greater than this value.
 </ParamField>
 
-**Returns:** A dict that gets sent back to the calling agent.
+**Yields:** `Event` objects with `id`, `type`, and `data` attributes.
 
-**Example:**
-```python
-async def handle_invoke(self, payload: dict) -> dict:
-    # payload structure is whatever the caller sends
-    # Common pattern: use "task" to route
-    task = payload.get("task")
-    
-    if task == "summarize":
-        text = payload.get("text", "")
-        summary = await self.chat(f"Summarize: {text}")
-        return {"status": "ok", "summary": summary}
-    
-    if task == "translate":
-        text = payload.get("text", "")
-        lang = payload.get("language", "Spanish")
-        result = await self.chat(f"Translate to {lang}: {text}")
-        return {"status": "ok", "translation": result}
-    
-    return {"status": "error", "message": f"Unknown task: {task}"}
-```
+**Note:** This is typically used by the transport layer (`serve()`, `AgentServer`) to handle client reconnection with `last_event_id`.
 
-### handle_request
+### clear_event_log
 
 ```python
-async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]
+async def clear_event_log(self) -> None
 ```
 
-Serverless lifecycle handler. Use for stateless environments (Lambda, Cloud Run).
+Clear the event log and reset the event counter. Use after a conversation ends or task completes.
 
-**Request Format:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `action` | `str` | What to do: `"chat"`, `"invoke"`, or `"state"` |
-| `message` | `str` | Required for `action="chat"` |
-| `payload` | `dict` | Required for `action="invoke"` (passed to `handle_invoke`) |
-
-**Response Format:**
-
-| Action | Response |
-|--------|----------|
-| `chat` | `{"agent_id": "...", "response": "AI response..."}` |
-| `invoke` | `{"agent_id": "...", "result": {...}}` |
-| `state` | `{"agent_id": "...", "state": {...}}` |
-
-**Example (AWS Lambda):**
-```python
-def handler(event, context):
-    agent_id = event["pathParameters"]["agent_id"]
-    body = json.loads(event.get("body", "{}"))
-    
-    agent = MyAgent(agent_id)
-    result = asyncio.run(agent.handle_request({
-        "action": body.get("action", "chat"),
-        "message": body.get("message", ""),
-        "payload": body.get("payload", {}),
-    }))
-    
-    return {"statusCode": 200, "body": json.dumps(result)}
-```
-
-### on_receive
+### start
 
 ```python
-async def on_receive(self, message: IncomingMessage) -> Any
+async def start(self) -> None
 ```
 
-Unified handler for all incoming messages (WebSocket, HTTP, or agent invoke). Override for a single entry point.
+Start the agent, loading state and messages from storage. Called automatically when using `async with`.
 
-**Example:**
+### stop
+
 ```python
-async def on_receive(self, message: IncomingMessage) -> Any:
-    if message.source == "client":
-        response = await self.chat(message.content)
-        await message.reply(response)
-    elif message.source == "agent":
-        return await self.process_request(message.content)
+async def stop(self) -> None
 ```
+
+Stop the agent. Called automatically when exiting `async with`.
 
 ### serve
 
@@ -279,129 +281,46 @@ def serve(
     self,
     host: str = "localhost",
     port: int = 8080,
-    path: str = "/ws",
 ) -> None
 ```
 
-Start a WebSocket + SSE server for this agent. This is a blocking call.
+Start a server with WebSocket, SSE, and REST endpoints for this agent.
 
-**Endpoints:**
-- `ws://{host}:{port}{path}` - WebSocket for messages
-- `http://{host}:{port}/events` - SSE for AI streaming
+**Endpoints created:**
+
+| Endpoint | Type | Description |
+|----------|------|-------------|
+| `/ws` | WebSocket | Bidirectional connection |
+| `/events` | GET (SSE) | Server-sent events stream |
+| `/chat` | POST | Chat endpoint (JSON body with `message`) |
+| `/state` | GET | Get agent state |
 
 **Example:**
-```python
-MyAgent("agent-1").serve(port=8080)
-```
-
-### serve_async
 
 ```python
-async def serve_async(
-    self,
-    host: str = "localhost",
-    port: int = 8080,
-    path: str = "/ws",
-) -> None
+agent = Agent("assistant", model=openai("gpt-4o"))
+agent.serve(port=8080)  # Blocks, runs the server
 ```
 
-Async version of `serve()`.
+## Class Attributes
 
-### serve_many (class method)
+### enable_event_log
 
 ```python
-@classmethod
-def serve_many(
-    cls,
-    host: str = "localhost",
-    port: int = 8080,
-    config: AgentServerConfig | None = None,
-) -> None
+class MyAgent(Agent):
+    enable_event_log = True  # Default: False
 ```
 
-Start a multi-agent server for this agent class. Each client connects to a unique agent instance via URL path:
+Set to `True` to persist emitted events to storage for replay on client reconnection. When enabled:
 
-- `ws://{host}:{port}/agent/{agent_id}/ws` (WebSocket)
-- `http://{host}:{port}/agent/{agent_id}/events` (SSE)
-- `http://{host}:{port}/agent/{agent_id}/state` (REST API)
-
-See [Multi-Agent Server](/core/agent-server) for details.
-
-### start
-
-```python
-async def start(self) -> None
-```
-
-Initialize the agent. Loads state/messages from storage, starts the message processor, and calls `on_start` hook.
-
-### stop
-
-```python
-async def stop(self) -> None
-```
-
-Stop the agent's message processing loop. Drains remaining messages and cancels the processor task. Called automatically when using the context manager.
-
-## Actor Model Methods
-
-Agents implement the Actor model - all messages are processed sequentially through a mailbox, eliminating race conditions.
-
-### enqueue
-
-```python
-def enqueue(
-    self,
-    kind: str,
-    payload: Any,
-    connection: Connection | None = None,
-    ctx: ConnectionContext | None = None,
-) -> None
-```
-
-Enqueue a message for sequential processing (fire-and-forget).
-
-**Parameters:**
-- `kind` - Message type: `"message"`, `"connect"`, `"close"`, `"error"`
-- `payload` - The message payload
-- `connection` - Associated WebSocket connection
-- `ctx` - Connection context (for `"connect"` kind)
-
-**Example:**
-```python
-# Typically called by the server, not directly
-agent.enqueue("message", "Hello", connection=conn)
-```
-
-### enqueue_invoke
-
-```python
-async def enqueue_invoke(
-    self,
-    payload: dict[str, Any],
-    timeout: float = 30.0,
-) -> dict[str, Any]
-```
-
-Enqueue an invoke and wait for the result with timeout enforcement.
-
-**Parameters:**
-- `payload` - The invoke payload
-- `timeout` - Maximum time to wait in seconds (default: 30)
-
-**Returns:** The response from `handle_invoke`.
-
-**Raises:** `asyncio.TimeoutError` if the invoke times out.
-
-**Example:**
-```python
-# Used internally by transports - typically use invoke() instead
-result = await agent.enqueue_invoke({"task": "analyze"}, timeout=60.0)
-```
+- Events are saved to storage after each `emit()` call
+- Event log is loaded on `start()`
+- Event counter resumes from the max ID in the log
+- Clients can reconnect with `last_event_id` to receive missed events
 
 ## Lifecycle Hooks
 
-Override these methods in your subclass:
+Override these methods to customize agent behavior:
 
 ### on_start
 
@@ -409,17 +328,15 @@ Override these methods in your subclass:
 async def on_start(self) -> None
 ```
 
-Called when the agent starts (after state is loaded).
+Called after the agent starts and state is loaded.
 
-### on_state_update
+### on_stop
 
 ```python
-def on_state_update(self, state: State, source: str | Connection) -> None
+async def on_stop(self) -> None
 ```
 
-Called when state changes. `source` is `"server"` for server-initiated changes.
-
-## WebSocket Hooks
+Called before the agent stops.
 
 ### on_connect
 
@@ -435,7 +352,7 @@ Called when a WebSocket client connects.
 async def on_message(self, connection: Connection, message: str | bytes) -> None
 ```
 
-Called when a message is received from a client.
+Called when a WebSocket message is received.
 
 ### on_close
 
@@ -445,40 +362,122 @@ async def on_close(self, connection: Connection, code: int, reason: str) -> None
 
 Called when a WebSocket client disconnects.
 
-### on_error
-
-```python
-async def on_error(self, connection: Connection, error: Exception) -> None
-```
-
-Called on WebSocket errors.
-
-## Abstract Methods
-
-These must be implemented by storage backends:
-
-```python
-@abstractmethod
-async def _load_state(self) -> State | None
-
-@abstractmethod
-async def _save_state(self, state: State) -> None
-
-@abstractmethod
-async def _load_messages(self) -> list[Message]
-
-@abstractmethod
-async def _save_messages(self, messages: list[Message]) -> None
-```
-
 ## Context Manager
 
-Agents can be used as async context managers:
+Agents support the async context manager protocol:
 
 ```python
-async with MyAgent("agent-1") as agent:
-    await agent.set_state({"key": "value"})
+async with Agent("bot", model=openai("gpt-4o")) as agent:
+    response = await agent.chat("Hello!")
 ```
+
+This is equivalent to:
+
+```python
+agent = Agent("bot", model=openai("gpt-4o"))
+await agent.start()
+try:
+    response = await agent.chat("Hello!")
+finally:
+    await agent.stop()
+```
+
+## Examples
+
+### Basic Chat Agent
+
+```python
+from ai_query import Agent, openai
+
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    system="You are a helpful coding assistant."
+)
+
+async with agent:
+    print(await agent.chat("How do I reverse a string in Python?"))
+```
+
+### Persistent Agent
+
+```python
+from ai_query import Agent, SQLiteStorage, openai
+
+agent = Agent(
+    "user-123",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.db"),
+    initial_state={"preferences": {}}
+)
+
+async with agent:
+    await agent.update_state(theme="dark")
+    print(await agent.chat("Hello!"))
+```
+
+### Agent with Tools
+
+```python
+from ai_query import Agent, openai, tool, Field
+
+@tool(description="Get current time")
+def get_time() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat()
+
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    tools={"get_time": get_time}
+)
+
+async with agent:
+    print(await agent.chat("What time is it?"))
+```
+
+### Custom Agent Class
+
+```python
+from ai_query import Agent, openai
+
+class CustomerSupportAgent(Agent):
+    def __init__(self, customer_id: str):
+        super().__init__(
+            f"support-{customer_id}",
+            model=openai("gpt-4o"),
+            system="You are a customer support agent. Be helpful and professional.",
+            initial_state={"customer_id": customer_id, "ticket_count": 0}
+        )
+
+    async def on_start(self):
+        print(f"Support agent for customer {self.state['customer_id']} ready")
+
+    async def on_message(self, connection, message):
+        await self.update_state(ticket_count=self.state["ticket_count"] + 1)
+        response = await self.chat(message)
+        await connection.send(response)
+```
+
+---
+
+## Storage Protocol
+
+```python
+from ai_query import Storage
+```
+
+Protocol that storage backends must implement:
+
+```python
+class Storage(Protocol):
+    async def get(self, key: str) -> Any | None: ...
+    async def set(self, key: str, value: Any) -> None: ...
+    async def delete(self, key: str) -> None: ...
+    async def keys(self, prefix: str = "") -> list[str]: ...
+```
+
+See [Storage Backends](/api-reference/agent-backends) for built-in implementations.
 
 ---
 
@@ -488,21 +487,13 @@ async with MyAgent("agent-1") as agent:
 from ai_query.agents import Connection
 ```
 
-Protocol that any WebSocket must implement to work with agents.
+Protocol that WebSocket connections must implement:
 
 ```python
-@runtime_checkable
 class Connection(Protocol):
-    async def send(self, message: str | bytes) -> None:
-        """Send a message to the client."""
-        ...
-    
-    async def close(self, code: int = 1000, reason: str = "") -> None:
-        """Close the connection."""
-        ...
+    async def send(self, message: str | bytes) -> None: ...
+    async def close(self, code: int = 1000, reason: str = "") -> None: ...
 ```
-
-**Implement this to use agents with any WebSocket library.**
 
 ---
 
@@ -512,56 +503,30 @@ class Connection(Protocol):
 from ai_query.agents import ConnectionContext
 ```
 
-Context passed to `on_connect` with connection metadata.
+Context passed to `on_connect` with connection metadata:
 
 ```python
 @dataclass
 class ConnectionContext:
-    request: Any = None      # Original HTTP request
-    metadata: dict[str, Any] = {}  # Query params, headers, etc.
+    request: Any = None
+    metadata: dict[str, Any] = {}
 ```
 
 ---
 
-## AioHttpConnection
+## Event
 
 ```python
-from ai_query.agents import AioHttpConnection
+from ai_query.agents.v2 import Event
 ```
 
-Built-in `Connection` implementation for aiohttp WebSockets. Used internally by `serve()`.
+Event object yielded by `replay_events()`:
 
 ```python
-class AioHttpConnection(Connection):
-    def __init__(self, ws: WebSocketResponse, request: Request)
-    
-    async def send(self, message: str | bytes) -> None
-    async def close(self, code: int = 1000, reason: str = "") -> None
-    
-    username: str | None  # Convenience attribute
+@dataclass
+class Event:
+    id: int              # Unique event ID
+    type: str            # Event type (e.g., "status", "chunk")
+    data: dict[str, Any] # Event payload
 ```
 
----
-
-## Example
-
-```python
-from ai_query.agents import InMemoryAgent
-
-class CounterAgent(InMemoryAgent):
-    initial_state = {"count": 0}
-    
-    async def on_start(self):
-        print(f"Started with count: {self.state['count']}")
-    
-    async def increment(self):
-        await self.set_state({"count": self.state["count"] + 1})
-
-# As context manager
-async with CounterAgent("counter-1") as agent:
-    await agent.increment()
-    print(agent.state["count"])  # 1
-
-# Or as server
-CounterAgent("counter-1").serve(port=8080)
-```

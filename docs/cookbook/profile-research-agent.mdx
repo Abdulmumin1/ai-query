@@ -8,16 +8,15 @@ A professional-grade profile investigation agent with:
 - **Durability by Default** - research continues if you disconnect
 - **Event Replay** - never miss an update by reconnecting with `last_event_id`
 
-This example demonstrates how `enable_event_log=True` simplifies complex connection recovery logic.
+This example demonstrates how `enable_event_log=True` enables automatic event replay on reconnection.
 
-## The Agent Logic
+## The Agent
 
 ```python
 import os
 import asyncio
 from datetime import datetime
-from ai_query import tool, Field, step_count_is
-from ai_query.agents import ChatAgent, SQLiteAgent, AgentServer, AgentServerConfig
+from ai_query import Agent, AgentServer, AgentServerConfig, SQLiteStorage, tool, Field, step_count_is, google
 
 # You'll need TAVILY_API_KEY env var for this example
 # https://tavily.com
@@ -25,7 +24,7 @@ from tavily import TavilyClient
 
 tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY", ""))
 
-class ProfileResearchAgent(ChatAgent, SQLiteAgent):
+class ProfileResearchAgent(Agent):
     """
     OSINT investigator that researches individuals.
 
@@ -35,37 +34,16 @@ class ProfileResearchAgent(ChatAgent, SQLiteAgent):
     - Web search capabilities
     """
 
-    # Enable native event logging and replay
+    # Enable event persistence for replay on reconnect
     enable_event_log = True
-    event_retention = 86400 * 7  # Keep events for 7 days
 
-    db_path = "./data/profiles.db"
-
-    system = """You are a Profile Research Agent - an expert OSINT investigator.
-
-    METHODOLOGY:
-    1. Search for the person's name + context (company, location)
-    2. Find social media profiles (LinkedIn, Twitter, GitHub)
-    3. Analyze recent activity and interests
-    4. Compile a comprehensive dossier
-
-    Always cite sources with [Source Name](url).
-    """
-
-    initial_state = {
-        "status": "idle",
-        "profiles_found": [],
-        "last_updated": None
-    }
-
-    @property
-    def tools(self):
+    def __init__(self):
         @tool(description="Search the web for information about a person")
         async def search_web(
             query: str = Field(description="Search query"),
         ) -> str:
-            # Send status update to the client
-            await self.output.send_status(f"🔎 Searching: {query}")
+            # Emit status event - delivered to all connected clients
+            await self.emit("status", {"text": f"Searching: {query}"})
 
             try:
                 response = tavily.search(query, max_results=5)
@@ -75,6 +53,7 @@ class ProfileResearchAgent(ChatAgent, SQLiteAgent):
                 ]
                 return "\n".join(results)
             except Exception as e:
+                await self.emit("error", {"message": f"Search failed: {e}"})
                 return f"Search failed: {e}"
 
         @tool(description="Save a discovered profile URL")
@@ -82,52 +61,65 @@ class ProfileResearchAgent(ChatAgent, SQLiteAgent):
             platform: str = Field(description="Platform name (LinkedIn, Twitter, etc.)"),
             url: str = Field(description="Profile URL")
         ) -> str:
-            profiles = self.state["profiles_found"] + [{"platform": platform, "url": url}]
+            profiles = self.state.get("profiles_found", []) + [{"platform": platform, "url": url}]
 
-            # Update state (persisted automatically)
-            await self.set_state({
-                **self.state,
-                "profiles_found": profiles,
-                "last_updated": datetime.now().isoformat()
-            })
+            await self.update_state(
+                profiles_found=profiles,
+                last_updated=datetime.now().isoformat()
+            )
 
-            # Notify client
-            await self.output.send_status(f"💾 Saved {platform} profile", details={"url": url})
+            await self.emit("profile_saved", {"platform": platform, "url": url})
             return f"Saved {platform} profile: {url}"
 
-        return {"search_web": search_web, "save_profile": save_profile}
+        super().__init__(
+            "profile-researcher",
+            model=google("gemini-2.0-flash"),
+            system="""You are a Profile Research Agent - an expert OSINT investigator.
 
-    async def on_step_start(self, event):
-        # Notify user when thinking starts - use a custom event type!
-        await self.output.send_event("step_start", {
-            "step_number": event.step_number,
-            "status": "started"
+            METHODOLOGY:
+            1. Search for the person's name + context (company, location)
+            2. Find social media profiles (LinkedIn, Twitter, GitHub)
+            3. Analyze recent activity and interests
+            4. Compile a comprehensive dossier
+
+            Always cite sources with [Source Name](url).
+            """,
+            storage=SQLiteStorage("./data/profiles.db"),
+            initial_state={
+                "status": "idle",
+                "profiles_found": [],
+                "last_updated": None
+            },
+            tools={"search_web": search_web, "save_profile": save_profile},
+            stop_when=step_count_is(10)
+        )
+
+    async def on_message(self, connection, message):
+        """Handle incoming research requests."""
+        # Emit start event
+        await self.emit("research_start", {"query": message})
+
+        # Stream the response, emitting chunks
+        async for chunk in self.stream(message):
+            await self.emit("chunk", {"content": chunk})
+
+        # Emit completion
+        await self.emit("research_complete", {
+            "profiles_found": len(self.state.get("profiles_found", []))
         })
 
-    async def on_step_finish(self, event):
-        # Send detailed step info
-        tool_calls = []
-        if event.step.tool_calls:
-            tool_calls = [{"name": tc.name, "args": tc.arguments} for tc in event.step.tool_calls]
-
-        await self.output.send_event("step_finish", {
-            "step_number": event.step_number,
-            "tool_calls": tool_calls,
-            "text": event.step.text or ""
-        })
 
 # Start the server
 if __name__ == "__main__":
-    # Create data directory
     os.makedirs("./data", exist_ok=True)
 
     config = AgentServerConfig(
-        idle_timeout=1800,  # Keep alive for 30 mins
-        allowed_origins=["*"]  # Allow CORS
+        idle_timeout=1800,
+        allowed_origins=["*"]
     )
 
-    print("🕵️  Profile Research Agent running on port 8080")
-    AgentServer(ProfileResearchAgent, config=config).serve(port=8080)
+    print("Profile Research Agent running on port 8080")
+    AgentServer(ProfileResearchAgent(), config=config).serve(port=8080)
 ```
 
 ## Client Implementation (Reconnection)
@@ -142,7 +134,7 @@ let lastEventId = null;
 function connect() {
   let url = `http://localhost:8080/agent/${AGENT_ID}/events`;
 
-  // Append Last-Event-ID if we have one (Automatic Replay!)
+  // Append last_event_id if we have one (Automatic Replay!)
   if (lastEventId) {
     url += `?last_event_id=${lastEventId}`;
   }
@@ -150,11 +142,10 @@ function connect() {
   console.log(`Connecting to ${url}...`);
   evtSource = new EventSource(url);
 
-  evtSource.addEventListener("message", (e) => {
+  evtSource.addEventListener("chunk", (e) => {
     // Update last ID for resume
     if (e.lastEventId) lastEventId = e.lastEventId;
 
-    // Handle AI text chunk
     const data = JSON.parse(e.data);
     appendLog(data.content);
   });
@@ -163,24 +154,27 @@ function connect() {
     if (e.lastEventId) lastEventId = e.lastEventId;
 
     const data = JSON.parse(e.data);
-    updateStatus(data.status);
-
-    if (data.details?.url) {
-      addProfileLink(data.details.url);
-    }
+    updateStatus(data.text);
   });
 
-  // Listen for custom step events!
-  evtSource.addEventListener("step_start", (e) => {
+  evtSource.addEventListener("profile_saved", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
+
     const data = JSON.parse(e.data);
-    console.log(`Step ${data.step_number} started`);
+    addProfileLink(data.platform, data.url);
+  });
+
+  evtSource.addEventListener("research_start", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
     showSpinner(true);
   });
 
-  evtSource.addEventListener("step_finish", (e) => {
+  evtSource.addEventListener("research_complete", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
+
     const data = JSON.parse(e.data);
-    console.log(`Step ${data.step_number} finished`, data.tool_calls);
     showSpinner(false);
+    console.log(`Found ${data.profiles_found} profiles`);
   });
 
   evtSource.onerror = (err) => {
@@ -201,8 +195,46 @@ async function startResearch(name) {
 }
 ```
 
-## Why This Rocks
+## How Event Replay Works
 
-1.  **Zero Boilerplate**: No need to manually manage an event loop, event store, or subscribers. `enable_event_log = True` does it all.
-2.  **True Durability**: If the server crashes or restarts, the `SQLiteAgent` has the event history on disk. When the client reconnects, it gets the full history seamlessly.
-3.  **Standard Standards**: Uses standard `Last-Event-ID` SSE mechanism (mapped to query param `last_event_id` by the router).
+```
+Client connects, receives events 1, 2, 3
+Client disconnects (network issue)
+
+─── Agent continues working, emits events 4, 5, 6 ───
+
+Client reconnects with last_event_id=3
+Server replays events 4, 5, 6
+Client is caught up!
+```
+
+The `enable_event_log = True` setting persists all emitted events to storage. When a client reconnects with `last_event_id`, the server replays missed events before streaming new ones.
+
+## Why This Works Well
+
+1. **Simple API**: Just `await self.emit("event_type", data)` - no complex output adapters
+2. **Transport-Agnostic**: Agent emits events, transport layer delivers them (WebSocket, SSE, etc.)
+3. **True Durability**: SQLiteStorage persists state, messages, and event log to disk
+4. **Standard SSE**: Uses standard `Last-Event-ID` mechanism for reconnection
+
+## Running the Example
+
+```bash
+# Install dependencies
+pip install ai-query tavily-python
+
+# Set your API keys
+export TAVILY_API_KEY="your-key"
+export GOOGLE_API_KEY="your-key"
+
+# Run the server
+python profile_agent.py
+
+# In another terminal, test it
+curl -X POST http://localhost:8080/agent/test/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Research Elon Musk"}'
+
+# Watch events
+curl http://localhost:8080/agent/test/events
+```

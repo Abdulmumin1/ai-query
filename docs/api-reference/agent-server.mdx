@@ -8,7 +8,7 @@ The `AgentServer` class manages multiple agent instances on a single server, rou
 ## Import
 
 ```python
-from ai_query.agents import AgentServer, AgentServerConfig
+from ai_query import AgentServer, AgentServerConfig
 ```
 
 ## AgentServerConfig
@@ -21,11 +21,11 @@ class AgentServerConfig:
     # Lifecycle
     idle_timeout: float | None = 300.0
     max_agents: int | None = None
-    
+
     # Security
     auth: Callable[[Request], Awaitable[bool]] | None = None
     allowed_origins: list[str] | None = None
-    
+
     # Routes
     base_path: str = "/agent"
     enable_rest_api: bool = True
@@ -67,18 +67,18 @@ class AgentServerConfig:
 ## AgentServer
 
 ```python
-class AgentServer(Generic[State]):
+class AgentServer:
     def __init__(
         self,
-        agent_cls: type[Agent[State]],
+        agent: Agent,
         config: AgentServerConfig | None = None,
     )
 ```
 
 ### Parameters
 
-<ParamField path="agent_cls" type="type[Agent]" required>
-  The Agent class to instantiate for each ID.
+<ParamField path="agent" type="Agent" required>
+  The Agent instance to use as a template for each client. Each connected client gets their own isolated agent instance with the same configuration.
 </ParamField>
 
 <ParamField path="config" type="AgentServerConfig | None">
@@ -92,7 +92,7 @@ class AgentServer(Generic[State]):
 ### get_or_create
 
 ```python
-def get_or_create(self, agent_id: str) -> Agent[State]
+def get_or_create(self, agent_id: str) -> Agent
 ```
 
 Get or lazily create an agent by ID.
@@ -157,9 +157,10 @@ Use this method when you need full control over the app, such as:
 **Example:**
 ```python
 from aiohttp import web
-from ai_query.agents import AgentServer
+from ai_query import Agent, AgentServer, openai, MemoryStorage
 
-server = AgentServer(MyBot)
+agent = Agent("my-bot", model=openai("gpt-4o"), storage=MemoryStorage())
+server = AgentServer(agent)
 app = server.create_app()
 
 # Add custom routes
@@ -229,7 +230,7 @@ These are enabled when `enable_rest_api=True` (the default):
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `{base_path}/{id}` | Generic request handler (like `handle_request()`) |
+| POST | `{base_path}/{id}` | Generic request handler |
 | POST | `{base_path}/{id}/chat` | Chat with the agent (supports `?stream=true`) |
 | POST | `{base_path}/{id}/invoke` | Invoke agent task |
 | GET | `{base_path}/{id}/state` | Get agent state |
@@ -241,7 +242,7 @@ These are enabled when `enable_rest_api=True` (the default):
 
 **POST `{base_path}/{id}` (Generic)**
 
-Accepts the same format as `agent.handle_request()`:
+Accepts a standard action format:
 
 ```json
 // Chat
@@ -310,12 +311,11 @@ Response:
 
 ## Agent.serve_many
 
-Convenience class method on `Agent` to start a multi-agent server:
+Convenience method on `Agent` to start a multi-agent server:
 
 ```python
-@classmethod
 def serve_many(
-    cls,
+    self,
     host: str = "localhost",
     port: int = 8080,
     config: AgentServerConfig | None = None,
@@ -324,7 +324,7 @@ def serve_many(
 
 Equivalent to:
 ```python
-AgentServer(cls, config=config).serve(host=host, port=port)
+AgentServer(agent, config=config).serve(host=host, port=port)
 ```
 
 ---
@@ -334,21 +334,25 @@ AgentServer(cls, config=config).serve(host=host, port=port)
 ### Basic Usage
 
 ```python
-from ai_query.agents import ChatAgent, InMemoryAgent, AgentServer
+from ai_query import Agent, AgentServer, openai, MemoryStorage
 
-class MyAgent(ChatAgent, InMemoryAgent):
-    system = "You are helpful."
+agent = Agent(
+    "my-agent",
+    model=openai("gpt-4o"),
+    system="You are helpful.",
+    storage=MemoryStorage()
+)
 
 # These are equivalent:
-MyAgent.serve_many(port=8080)
+agent.serve_many(port=8080)
 # or
-AgentServer(MyAgent).serve(port=8080)
+AgentServer(agent).serve(port=8080)
 ```
 
 ### With Configuration
 
 ```python
-from ai_query.agents import AgentServer, AgentServerConfig
+from ai_query import Agent, AgentServer, AgentServerConfig, openai, MemoryStorage
 
 async def auth(request):
     return request.headers.get("X-API-Key") == "secret"
@@ -360,7 +364,8 @@ config = AgentServerConfig(
     allowed_origins=["https://myapp.com"],
 )
 
-AgentServer(MyAgent, config=config).serve(port=8080)
+agent = Agent("my-agent", model=openai("gpt-4o"), storage=MemoryStorage())
+AgentServer(agent, config=config).serve(port=8080)
 ```
 
 ### Custom Server with Hooks
@@ -369,9 +374,10 @@ AgentServer(MyAgent, config=config).serve(port=8080)
 class MyServer(AgentServer):
     async def on_agent_create(self, agent):
         print(f"Agent {agent.id} created")
-    
+
     async def on_agent_evict(self, agent):
         print(f"Agent {agent.id} evicted")
 
-MyServer(MyAgent, config=config).serve(port=8080)
+agent = Agent("my-agent", model=openai("gpt-4o"), storage=MemoryStorage())
+MyServer(agent, config=config).serve(port=8080)
 ```

@@ -43,13 +43,19 @@ async def main(user: str, host: str = "localhost", port: int = 8080):
                     async with session.get(sse_url) as resp:
                         async for line in resp.content:
                             text = line.decode().strip()
-                            if text.startswith("event: ai_start"):
+                            if text.startswith("event: chat_start"):
                                 print("\r[AI] ", end="", flush=True)
-                            elif text.startswith("data: ") and not text.startswith("data: event:"):
-                                chunk = text[6:]  # Remove "data: " prefix
-                                if chunk:
-                                    print(chunk, end="", flush=True)
-                            elif text.startswith("event: ai_end"):
+                            elif text.startswith("event: chunk"):
+                                pass  # Next line will be the data
+                            elif text.startswith("data: "):
+                                import json
+                                try:
+                                    data = json.loads(text[6:])
+                                    if "content" in data:
+                                        print(data["content"], end="", flush=True)
+                                except json.JSONDecodeError:
+                                    pass
+                            elif text.startswith("event: chat_complete"):
                                 print()  # Newline after AI response
                                 print("> ", end="", flush=True)
                 except Exception as e:

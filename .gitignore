@@ -8,3 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+AGENT_REDESIGN.md
+index.html
+lmfetch-plan.md
+data/

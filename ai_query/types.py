@@ -756,3 +756,118 @@ class EmbedManyResult:
     embeddings: list[list[float]]
     usage: EmbeddingUsage
     provider_metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# =============================================================================
+# Abort / Cancellation (inspired by JS AbortController)
+# =============================================================================
+
+
+class AbortError(Exception):
+    """Raised when an operation is aborted."""
+
+    def __init__(self, reason: str | None = None):
+        self.reason = reason
+        super().__init__(reason or "Operation aborted")
+
+
+class AbortSignal:
+    """A signal that can be checked for abort status.
+
+    Example:
+        >>> controller = AbortController()
+        >>> signal = controller.signal
+        >>> # Pass signal to an operation
+        >>> result = await generate_text(..., signal=signal)
+        >>> # Abort from another task
+        >>> controller.abort("Timeout")
+    """
+
+    def __init__(self) -> None:
+        self._aborted = False
+        self._reason: str | None = None
+        self._listeners: list[Callable[[], None]] = []
+        self._event = asyncio.Event()
+
+    @property
+    def aborted(self) -> bool:
+        """True if abort() has been called."""
+        return self._aborted
+
+    @property
+    def reason(self) -> str | None:
+        """The abort reason, if provided."""
+        return self._reason
+
+    def throw_if_aborted(self) -> None:
+        """Raise AbortError if aborted."""
+        if self._aborted:
+            raise AbortError(self._reason)
+
+    def add_listener(self, callback: Callable[[], None]) -> None:
+        """Add a callback to be called on abort."""
+        self._listeners.append(callback)
+        if self._aborted:
+            callback()
+
+    def _abort(self, reason: str | None = None) -> None:
+        """Internal: trigger the abort."""
+        if self._aborted:
+            return
+        self._aborted = True
+        self._reason = reason
+        self._event.set()
+        for listener in self._listeners:
+            try:
+                listener()
+            except Exception:
+                pass
+
+    async def wait(self) -> None:
+        """Wait until aborted."""
+        await self._event.wait()
+
+    @staticmethod
+    def timeout(seconds: float) -> "AbortSignal":
+        """Create a signal that auto-aborts after timeout.
+
+        Example:
+            >>> result = await generate_text(
+            ...     ...,
+            ...     signal=AbortSignal.timeout(30)  # Auto-abort after 30s
+            ... )
+        """
+        controller = AbortController()
+
+        async def _timeout() -> None:
+            await asyncio.sleep(seconds)
+            controller.abort(f"Timeout after {seconds}s")
+
+        asyncio.create_task(_timeout())
+        return controller.signal
+
+
+class AbortController:
+    """Controls an AbortSignal.
+
+    Example:
+        >>> controller = AbortController()
+        >>> # Pass signal to operations
+        >>> task = asyncio.create_task(
+        ...     generate_text(..., signal=controller.signal)
+        ... )
+        >>> # Abort when needed
+        >>> controller.abort("User cancelled")
+    """
+
+    def __init__(self) -> None:
+        self._signal = AbortSignal()
+
+    @property
+    def signal(self) -> AbortSignal:
+        """The signal controlled by this controller."""
+        return self._signal
+
+    def abort(self, reason: str | None = None) -> None:
+        """Abort the signal, optionally with a reason."""
+        self._signal._abort(reason)

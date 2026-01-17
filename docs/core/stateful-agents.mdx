@@ -1,147 +1,277 @@
 ---
 title: "Stateful Agents"
-description: "Build persistent, stateful AI agents with built-in WebSocket, HTTP, and storage support"
+description: "Build persistent, stateful AI agents with built-in storage and WebSocket support"
 ---
 
 ai-query provides a powerful `Agent` class for building stateful AI applications. Unlike standard LLM calls, **Agents** maintain memory, state, and identity over time.
 
-They can be deployed in two main ways:
-1. **Long-running Servers** (WebSocket/SSE) - ideal for real-time chat, collaboration
-2. **Serverless Functions** (HTTP) - ideal for REST APIs, webhooks, and scale-to-zero
-
 ## Quick Start
 
-Here's a simple chat agent that remembers conversation history in memory:
+```python
+from ai_query import Agent, openai
+
+agent = Agent("assistant", model=openai("gpt-4o"))
+
+async with agent:
+    response = await agent.chat("Hello!")
+    print(response)
+
+    response = await agent.chat("What did I just say?")
+    print(response)  # Agent remembers the conversation
+```
+
+## 30 Seconds to Your First Agent
 
 ```python
-from ai_query.agents import ChatAgent, InMemoryAgent
+from ai_query import Agent, openai
 
-class MyBot(ChatAgent, InMemoryAgent):
-    initial_state = {"message_count": 0}
-    system = "You are a helpful assistant."
+agent = Agent("my-agent", model=openai("gpt-4o"))
 
-    async def on_message(self, conn, message):
-        # Handle WebSocket message
-        response = await self.chat(message)
-        await conn.send(response)
+async with agent:
+    print(await agent.chat("Hello!"))
+```
 
-# Run as a local server
-MyBot.serve_many(port=8080)
+## 60 Seconds to Persistence
+
+```python
+from ai_query import Agent, SQLiteStorage, openai
+
+agent = Agent(
+    "my-agent",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.db")
+)
+
+async with agent:
+    print(await agent.chat("Remember: my favorite color is blue"))
+
+# Later, in a new process...
+agent = Agent("my-agent", storage=SQLiteStorage("agents.db"))
+async with agent:
+    print(await agent.chat("What's my favorite color?"))  # "blue"
 ```
 
 ## Core Concepts
 
-### 1. State & Persistence
+### State & Messages
 
-Every agent has a `state` dictionary and a `messages` list that are automatically persisted to your chosen backend.
+Every agent has a `state` dictionary and a `messages` list that are automatically persisted.
 
 ```python
-async with MyBot("agent-1") as bot:
-    # State is automatically saved when set
-    await bot.set_state({"status": "active"})
+async with agent:
+    # Set state (automatically persisted)
+    await agent.set_state({"user_name": "Alice", "preferences": {}})
 
-    # Access current state
-    print(bot.state["status"])
+    # Update state
+    await agent.update_state(mood="happy")
+
+    # Access state
+    print(agent.state)  # {"user_name": "Alice", "preferences": {}, "mood": "happy"}
+
+    # Access conversation history
+    print(agent.messages)
+
+    # Clear conversation
+    await agent.clear()
 ```
 
-### 2. Storage Backends
+### Storage Backends
 
-Choose where your data lives. Switch backends by changing the base class:
+Choose where your data lives by passing a storage backend:
 
 | Backend | Description | Best For |
 |---------|-------------|----------|
-| `InMemoryAgent` | RAM-only storage | Testing, local dev |
-| `SQLiteAgent` | Local file or `:memory:` | Single-server apps, prototypes |
-| `DurableObjectAgent` | Cloudflare Storage | Edge deployment |
-| **Custom** | Redis, Postgres, DynamoDB | Production, Serverless |
-
-### 3. Durability & Recovery
-
-Agents support **Event Sourcing** for connection recovery. By enabling the event log, all outgoing messages and status updates are persisted.
+| `MemoryStorage()` | RAM-only (default) | Testing, development |
+| `SQLiteStorage(path)` | Local file | Single-server apps, prototypes |
+| Custom | Redis, DynamoDB, etc. | Production, distributed |
 
 ```python
-class MyBot(ChatAgent, SQLiteAgent):
-    enable_event_log = True  # Enable persistent event log
+from ai_query import Agent, MemoryStorage, SQLiteStorage
+
+# In-memory (default)
+agent = Agent("bot", storage=MemoryStorage())
+
+# SQLite persistence
+agent = Agent("bot", storage=SQLiteStorage("agents.db"))
 ```
 
-**How it works:**
-1.  **Persistence**: Every message sent via `self.output` is saved to an append-only log.
-2.  **Recovery**: If a client disconnects, they can reconnect with `?last_event_id=123`.
-3.  **Replay**: The agent automatically replays all missed events to the new connection.
+### Custom Storage
 
-### 4. The Actor Model
-
-Agents run as **Actors**. This means:
-- **Sequential Processing**: Messages are processed one at a time (no race conditions).
-- **Mailbox**: Requests (HTTP, WebSocket, internal calls) go into a queue.
-- **Identity**: Each agent has a unique ID (e.g., `user-123`, `room-abc`).
-
-## Deployment Patterns
-
-### Real-time Server (WebSocket/SSE)
-
-Ideal for chatbots and collaborative apps. The agent stays alive in memory while clients are connected.
+Implement the `Storage` protocol to use any backend:
 
 ```python
-# Start a server for this agent class
-MyBot.serve_many(port=8080)
+from ai_query import Storage
+
+class RedisStorage:
+    def __init__(self, url: str):
+        self.client = redis.from_url(url)
+
+    async def get(self, key: str) -> Any | None:
+        value = await self.client.get(key)
+        return json.loads(value) if value else None
+
+    async def set(self, key: str, value: Any) -> None:
+        await self.client.set(key, json.dumps(value))
+
+    async def delete(self, key: str) -> None:
+        await self.client.delete(key)
+
+    async def keys(self, prefix: str = "") -> list[str]:
+        return await self.client.keys(f"{prefix}*")
+
+# Use it
+agent = Agent("bot", storage=RedisStorage("redis://localhost"))
 ```
 
-Clients connect to:
-- `ws://localhost:8080/agent/{id}/ws` (Bidirectional)
-- `http://localhost:8080/agent/{id}/events` (Server-Sent Events)
+### Tools
 
-### Serverless (HTTP / REST)
-
-Ideal for AWS Lambda, Vercel, or Google Cloud Run. The agent loads state, processes one request, saves state, and shuts down.
-
-Use the `handle_request()` lifecycle method:
+Give your agent capabilities:
 
 ```python
-# AWS Lambda Handler
-def handler(event, context):
-    agent_id = event["pathParameters"]["id"]
-    agent = MyBot(agent_id)
+from ai_query import Agent, openai, tool, Field
 
-    return asyncio.run(agent.handle_request({
-        "action": "chat",
-        "message": event["body"]
-    }))
+@tool(description="Search the web")
+async def search(query: str = Field(description="Search query")) -> str:
+    return f"Results for: {query}"
+
+@tool(description="Send an email")
+async def send_email(
+    to: str = Field(description="Recipient"),
+    body: str = Field(description="Email body")
+) -> str:
+    return f"Email sent to {to}"
+
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    system="You are a helpful assistant with access to search and email.",
+    tools={"search": search, "send_email": send_email}
+)
+
+async with agent:
+    response = await agent.chat("Search for the latest AI news and email a summary to bob@example.com")
 ```
 
-<Card title="Serverless Cookbook" icon="cloud" href="/cookbook/serverless-agents">
-  See full examples for AWS Lambda, Vercel, and FastAPI
-</Card>
+### Streaming
 
-## Agent Communication
-
-Agents can call other agents using `invoke()`. This works regardless of whether they are in the same process or distributed.
+Stream responses for real-time output:
 
 ```python
-class ManagerAgent(ChatAgent, InMemoryAgent):
-    async def on_message(self, conn, msg):
-        # Delegate work to a researcher agent
-        result = await self.invoke("researcher-1", {
-            "task": "search",
-            "query": msg
-        })
-        await conn.send(f"Research found: {result['summary']}")
+async with agent:
+    async for chunk in agent.stream("Tell me a story"):
+        print(chunk, end="", flush=True)
 ```
 
-<Card title="Agent Communication Patterns" icon="messages" href="/cookbook/agent-communication">
-  Learn about pipelines, fan-out, and event-driven architectures
-</Card>
+### Abort / Cancellation
+
+Cancel long-running operations:
+
+```python
+from ai_query import Agent, AbortController, AbortError
+
+controller = AbortController()
+
+try:
+    async with agent:
+        # Pass signal to chat
+        response = await agent.chat(
+            "Write a very long essay",
+            signal=controller.signal
+        )
+except AbortError as e:
+    print(f"Cancelled: {e.reason}")
+
+# Abort from another task
+controller.abort("User cancelled")
+```
+
+Use timeout for automatic cancellation:
+
+```python
+from ai_query import AbortSignal
+
+async with agent:
+    response = await agent.chat(
+        "Complex question",
+        signal=AbortSignal.timeout(30)  # Auto-cancel after 30s
+    )
+```
+
+## Lifecycle Hooks
+
+Override lifecycle methods to customize behavior:
+
+```python
+class MyAgent(Agent):
+    async def on_start(self):
+        print(f"Agent {self.id} started")
+
+    async def on_stop(self):
+        print(f"Agent {self.id} stopped")
+
+    async def on_connect(self, connection, ctx):
+        print(f"Client connected")
+        await super().on_connect(connection, ctx)
+
+    async def on_message(self, connection, message):
+        response = await self.chat(message)
+        await connection.send(response)
+
+    async def on_close(self, connection, code, reason):
+        print(f"Client disconnected: {reason}")
+        await super().on_close(connection, code, reason)
+```
+
+## WebSocket Server
+
+Serve an agent over WebSocket, SSE, and REST:
+
+```python
+agent = Agent("assistant", model=openai("gpt-4o"))
+agent.serve(port=8080)
+```
+
+Endpoints:
+- `POST /chat` - Send message, get response (streams to SSE)
+- `GET /events` - SSE stream of events
+- `WS /ws` - WebSocket connection
+- `GET /state` - Get agent state
+
+<Warning>
+**Security Note**: `agent.serve()` has no authentication built-in. It's designed for local development and prototyping.
+
+For production, use `AgentServer` which supports:
+- Custom authentication middleware
+- CORS configuration
+- Rate limiting hooks
+
+```python
+from ai_query import AgentServer, AgentServerConfig
+
+async def auth_check(request):
+    return request.headers.get("X-API-Key") == "secret"
+
+config = AgentServerConfig(
+    auth=auth_check,
+    allowed_origins=["https://myapp.com"]
+)
+
+AgentServer(MyAgent, config=config).serve(port=8080)
+```
+
+See [Agent Server](/core/agent-server) for production deployment.
+</Warning>
 
 ## API Reference
 
 <CardGroup cols={2}>
   <Card title="Agent API" icon="book" href="/api-reference/agent">
-    Full methods and hooks documentation
+    Full methods and properties
   </Card>
   <Card title="Storage Backends" icon="database" href="/api-reference/agent-backends">
-    InMemory, SQLite, and Durable Objects
+    MemoryStorage, SQLiteStorage, and custom
   </Card>
-  <Card title="Multi-Agent Server" icon="server" href="/api-reference/agent-server">
-    Routing and server configuration
+  <Card title="Abort/Cancellation" icon="circle-stop" href="/core/abort">
+    AbortController and AbortSignal
   </Card>
 </CardGroup>

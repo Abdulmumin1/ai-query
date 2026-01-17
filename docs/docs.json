@@ -1,11 +1,14 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "theme": "maple",
   "name": "ai-query",
   "colors": {
     "primary": "#ed6aff",
     "light": "#ed6aff",
     "dark": "#ed6aff"
+  },
+  "fonts": {
+    "family": "Giest Mono"
   },
   "favicon": "/favicon.svg",
   "navigation": {
@@ -29,6 +32,7 @@
               "core/conversations",
               "core/tools",
               "core/agents",
+              "core/abort",
               "core/mcp"
             ]
           },
@@ -114,35 +118,36 @@
         "tab": "Cookbook",
         "groups": [
           {
-            "group": "Basics",
+            "group": "Core Patterns",
             "pages": [
               "cookbook/index",
               "cookbook/chatbot",
               "cookbook/multimodal-chatbot",
-              "cookbook/structured-output"
+              "cookbook/structured-output",
+              "cookbook/without-agent-class"
             ]
           },
           {
-            "group": "Agents",
+            "group": "Agents & Servers",
             "pages": [
-              "cookbook/task-planner",
-              "cookbook/code-executor",
-              "cookbook/rag-agent",
-              "cookbook/multi-agent-workflow"
-            ]
-          },
-          {
-            "group": "Stateful Agents",
-            "pages": [
+              "cookbook/profile-research-agent",
+              "cookbook/fastapi-integration",
               "cookbook/simple-stateful-agent",
               "cookbook/persistent-chatbot",
               "cookbook/realtime-agent",
               "cookbook/per-user-assistant",
-              "cookbook/custom-agent-streaming",
+              "cookbook/serverless-agents"
+            ]
+          },
+          {
+            "group": "Tools & Tasks",
+            "pages": [
+              "cookbook/task-planner",
+              "cookbook/code-executor",
+              "cookbook/rag-agent",
+              "cookbook/multi-agent-workflow",
               "cookbook/mcp-agent",
-              "cookbook/agent-communication",
-              "cookbook/serverless-agents",
-              "cookbook/profile-research-agent"
+              "cookbook/agent-communication"
             ]
           }
         ]
@@ -168,16 +173,10 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "GitHub",
-        "href": "https://github.com/Abdulmumin1/ai-query"
-      }
-    ],
     "primary": {
       "type": "button",
-      "label": "Get Started",
-      "href": "/quickstart"
+      "label": "Star on Github ★",
+      "href": "https://github.com/Abdulmumin1/ai-query"
     }
   },
   "contextual": {

@@ -76,9 +76,21 @@ result = await embed(
 ```python
 from ai_query import embed, google
 
+# gemini-embedding-001 (latest model, flexible dimensions)
 result = await embed(
-    model=google.embedding("text-embedding-004"),
+    model=google.embedding("gemini-embedding-001"),
     value="Hello world"
+)
+
+# With custom dimensions (supports 128-3072, default is 3072)
+result = await embed(
+    model=google.embedding("gemini-embedding-001"),
+    value="Hello world",
+    provider_options={
+        "google": {
+            "outputDimensionality": 768  # Smaller for storage efficiency
+        }
+    }
 )
 ```
 
@@ -227,12 +239,13 @@ result = await embed(
 
 ```python
 result = await embed(
-    model=google.embedding("text-embedding-004"),
+    model=google.embedding("gemini-embedding-001"),
     value="Hello world",
     provider_options={
         "google": {
             "taskType": "RETRIEVAL_DOCUMENT",  # Optimize for retrieval
-            "title": "Document Title"  # Optional document title
+            "title": "Document Title",  # Optional document title
+            "outputDimensionality": 768  # Custom dimensions (128-3072)
         }
     }
 )
@@ -242,18 +255,17 @@ result = await embed(
 
 ### OpenAI
 
-| Model | Dimensions | Description |
-|-------|------------|-------------|
-| `text-embedding-3-small` | 1536 | Smaller, faster, cheaper |
-| `text-embedding-3-large` | 3072 | Higher quality, more dimensions |
-| `text-embedding-ada-002` | 1536 | Legacy model |
+| Model | Dimensions | Max Tokens | Description |
+|-------|------------|------------|-------------|
+| `text-embedding-3-large` | 3072 | 8192 | Highest quality, best for accuracy-critical tasks |
+| `text-embedding-3-small` | 1536 | 8192 | Good balance of quality and cost |
+| `text-embedding-ada-002` | 1536 | 8192 | Legacy model |
 
 ### Google
 
-| Model | Dimensions | Description |
-|-------|------------|-------------|
-| `text-embedding-004` | 768 | Latest text embedding model |
-| `embedding-001` | 768 | Previous generation |
+| Model | Dimensions | Max Tokens | Description |
+|-------|------------|------------|-------------|
+| `gemini-embedding-001` | 128-3072 | 2048 | Latest model with flexible dimensions via Matryoshka learning |
 
 ## Next Steps
 

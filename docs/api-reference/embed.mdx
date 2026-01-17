@@ -88,7 +88,7 @@ print(len(result.embedding))  # 256
 from ai_query import embed, google
 
 result = await embed(
-    model=google.embedding("text-embedding-004"),
+    model=google.embedding("gemini-embedding-001"),
     value="Hello world"
 )
 ```
@@ -192,7 +192,7 @@ from ai_query import openai, google
 
 # Create with provider embedding functions
 model = openai.embedding("text-embedding-3-small")
-model = google.embedding("text-embedding-004")
+model = google.embedding("gemini-embedding-001")
 ```
 
 ### EmbedResult
@@ -270,12 +270,13 @@ Task types:
 
 ```python
 result = await embed(
-    model=google.embedding("text-embedding-004"),
+    model=google.embedding("gemini-embedding-001"),
     value="Hello",
     provider_options={
         "google": {
             "taskType": "RETRIEVAL_DOCUMENT",
-            "title": "My Document"
+            "title": "My Document",
+            "outputDimensionality": 768
         }
     }
 )
@@ -289,13 +290,12 @@ result = await embed(
 
 | Model | Dimensions | Max Tokens | Description |
 |-------|------------|------------|-------------|
-| `text-embedding-3-small` | 1536 | 8191 | Fast and affordable |
-| `text-embedding-3-large` | 3072 | 8191 | Highest quality |
-| `text-embedding-ada-002` | 1536 | 8191 | Legacy model |
+| `text-embedding-3-large` | 3072 | 8192 | Highest quality |
+| `text-embedding-3-small` | 1536 | 8192 | Fast and affordable |
+| `text-embedding-ada-002` | 1536 | 8192 | Legacy model |
 
 ### Google
 
-| Model | Dimensions | Description |
-|-------|------------|-------------|
-| `text-embedding-004` | 768 | Latest model |
-| `embedding-001` | 768 | Previous generation |
+| Model | Dimensions | Max Tokens | Description |
+|-------|------------|------------|-------------|
+| `gemini-embedding-001` | 128-3072 | 2048 | Latest model with flexible dimensions |

@@ -26,8 +26,6 @@ poetry add ai-query
 
 ## Generate Your First Response
 
-Create a simple script to generate text:
-
 ```python
 import asyncio
 from ai_query import generate_text, openai
@@ -38,7 +36,6 @@ async def main():
         prompt="Explain quantum computing in one sentence."
     )
     print(result.text)
-    print(f"Tokens used: {result.usage.total_tokens}")
 
 asyncio.run(main())
 ```
@@ -78,55 +75,88 @@ result = await generate_text(
 
 </CodeGroup>
 
+## Stream Responses
+
+For real-time output:
+
+```python
+from ai_query import stream_text, openai
+
+async for chunk in stream_text(
+    model=openai("gpt-4o"),
+    prompt="Write a haiku about programming."
+):
+    print(chunk, end="", flush=True)
+```
+
 ## Add Tools
 
 Give your AI the ability to call functions:
 
 ```python
-import asyncio
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text, openai, tool, Field
 
 @tool(description="Get the current weather for a location")
 async def get_weather(
     location: str = Field(description="The city name")
 ) -> str:
-    # In a real app, call a weather API
     return f"The weather in {location} is 72°F and sunny."
 
-async def main():
-    result = await generate_text(
-        model=google("gemini-2.0-flash"),
-        prompt="What's the weather like in Tokyo?",
-        tools={"get_weather": get_weather}
-    )
-    print(result.text)
-
-asyncio.run(main())
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="What's the weather like in Tokyo?",
+    tools={"get_weather": get_weather}
+)
+print(result.text)
 ```
 
-The AI will automatically call `get_weather("Tokyo")` and use the result to generate a response.
+## Build a Stateful Agent
 
-## Stream Responses
-
-For real-time output, use streaming:
+Create an agent that remembers conversations:
 
 ```python
-import asyncio
-from ai_query import stream_text, google
+from ai_query import Agent, openai
 
-async def main():
-    result = stream_text(
-        model=google("gemini-2.0-flash"),
-        prompt="Write a haiku about programming."
-    )
+agent = Agent("assistant", model=openai("gpt-4o"))
 
-    async for chunk in result.text_stream:
-        print(chunk, end="", flush=True)
+async with agent:
+    print(await agent.chat("My name is Alice."))
+    print(await agent.chat("What's my name?"))  # Remembers: "Alice"
+```
 
-    usage = await result.usage
-    print(f"\n\nTokens: {usage.total_tokens}")
+## Add Persistence
 
-asyncio.run(main())
+Make your agent remember across restarts:
+
+```python
+from ai_query import Agent, SQLiteStorage, openai
+
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.db")
+)
+
+async with agent:
+    print(await agent.chat("Remember: my favorite color is blue."))
+
+# Later, in a new process...
+async with agent:
+    print(await agent.chat("What's my favorite color?"))  # "blue"
+```
+
+## Cancel Operations
+
+Use abort signals for timeouts and cancellation:
+
+```python
+from ai_query import generate_text, openai, AbortSignal
+
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Write a long essay",
+    signal=AbortSignal.timeout(30)  # Auto-cancel after 30s
+)
 ```
 
 ## Next Steps
@@ -141,7 +171,13 @@ asyncio.run(main())
   <Card title="Streaming" icon="bolt" href="/core/streaming">
     Learn advanced streaming patterns
   </Card>
-  <Card title="Agents" icon="robot" href="/core/agents">
-    Create autonomous AI agents
+  <Card title="Stateful Agents" icon="robot" href="/core/stateful-agents">
+    Build persistent AI agents
+  </Card>
+  <Card title="Abort/Cancellation" icon="circle-stop" href="/core/abort">
+    Control long-running operations
+  </Card>
+  <Card title="Embeddings" icon="cube" href="/core/embeddings">
+    Generate vector embeddings
   </Card>
 </CardGroup>

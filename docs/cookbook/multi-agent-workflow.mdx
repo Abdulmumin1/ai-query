@@ -55,13 +55,11 @@ import asyncio
 from ai_query import generate_text, google, tool, Field, step_count_is
 
 class ContentPipeline:
-    """Multi-agent content creation pipeline."""
-    
     def __init__(self):
         self.research_data = None
         self.draft = None
         self.final = None
-    
+
     async def create_content(self, topic: str) -> str:
         @tool(description="Research agent: gathers comprehensive information on a topic")
         async def research(
@@ -78,7 +76,7 @@ class ContentPipeline:
             )
             self.research_data = result.text
             return f"Research complete. Key findings:\n{result.text}"
-        
+
         @tool(description="Writer agent: creates a well-structured draft")
         async def write_draft(
             topic: str = Field(description="Topic to write about"),
@@ -86,13 +84,13 @@ class ContentPipeline:
         ) -> str:
             result = await generate_text(
                 model=google("gemini-2.0-flash"),
-                system="""You are a skilled writer. Create engaging, 
+                system="""You are a skilled writer. Create engaging,
                 well-structured content with clear sections.""",
                 prompt=f"Write about: {topic}\n\nUsing research:\n{research}",
             )
             self.draft = result.text
             return f"Draft created:\n{result.text}"
-        
+
         @tool(description="Editor agent: refines and polishes the draft")
         async def edit(
             draft: str = Field(description="Draft to edit"),
@@ -108,22 +106,22 @@ class ContentPipeline:
             )
             self.final = result.text
             return f"Editing complete:\n{result.text}"
-        
+
         @tool(description="Mark the content as complete and ready for publication")
         def complete(final_content: str = Field(description="Final content")) -> str:
             self.final = final_content
             return "Content pipeline complete!"
-        
+
         await generate_text(
             model=google("gemini-2.0-flash"),
             system="""You are a content pipeline coordinator.
-            
+
             Follow this workflow:
             1. Research the topic thoroughly
             2. Write a draft using the research
             3. Edit and polish the draft
             4. Call complete with the final content
-            
+
             Each agent specializes in their task. Use them in order.""",
             prompt=f"Create high-quality content about: {topic}",
             tools={
@@ -134,7 +132,7 @@ class ContentPipeline:
             },
             stop_when=step_count_is(6),
         )
-        
+
         return self.final
 
 
@@ -148,6 +146,59 @@ async def main():
 asyncio.run(main())
 ```
 
+## Using Stateful Agents
+
+For more complex workflows where agents need to maintain state:
+
+```python
+from ai_query import Agent, MemoryStorage, openai
+
+class ResearcherAgent(Agent):
+    def __init__(self):
+        super().__init__(
+            "researcher",
+            model=openai("gpt-4o"),
+            system="You are a thorough researcher. Gather comprehensive information.",
+            storage=MemoryStorage(),
+            initial_state={"findings": []}
+        )
+
+    async def research(self, topic: str) -> str:
+        response = await self.chat(f"Research: {topic}")
+        await self.update_state(
+            findings=self.state["findings"] + [{"topic": topic, "result": response}]
+        )
+        return response
+
+
+class WriterAgent(Agent):
+    def __init__(self):
+        super().__init__(
+            "writer",
+            model=openai("gpt-4o"),
+            system="You are a skilled content writer.",
+            storage=MemoryStorage()
+        )
+
+    async def write(self, topic: str, research: str) -> str:
+        return await self.chat(f"Write about {topic} using:\n{research}")
+
+
+# Orchestrate the workflow
+async def create_content(topic: str) -> str:
+    researcher = ResearcherAgent()
+    writer = WriterAgent()
+
+    async with researcher, writer:
+        # Step 1: Research
+        research = await researcher.research(topic)
+
+        # Step 2: Write
+        content = await writer.write(topic, research)
+
+        return content
+```
+
 ## Parallel Agent Execution
 
 Run multiple agents in parallel for faster results:
@@ -157,8 +208,6 @@ import asyncio
 from ai_query import generate_text, google, tool, Field
 
 async def analyze_with_specialists(data: str) -> dict:
-    """Run multiple specialist analyses in parallel."""
-    
     async def technical_analysis(data: str) -> str:
         result = await generate_text(
             model=google("gemini-2.0-flash"),
@@ -166,7 +215,7 @@ async def analyze_with_specialists(data: str) -> dict:
             prompt=data,
         )
         return result.text
-    
+
     async def market_analysis(data: str) -> str:
         result = await generate_text(
             model=google("gemini-2.0-flash"),
@@ -174,7 +223,7 @@ async def analyze_with_specialists(data: str) -> dict:
             prompt=data,
         )
         return result.text
-    
+
     async def risk_analysis(data: str) -> str:
         result = await generate_text(
             model=google("gemini-2.0-flash"),
@@ -182,14 +231,14 @@ async def analyze_with_specialists(data: str) -> dict:
             prompt=data,
         )
         return result.text
-    
+
     # Run all analyses in parallel
     technical, market, risk = await asyncio.gather(
         technical_analysis(data),
         market_analysis(data),
         risk_analysis(data),
     )
-    
+
     return {
         "technical": technical,
         "market": market,
@@ -202,9 +251,9 @@ async def get_analyses(topic: str = Field(description="Topic")) -> str:
     analyses = await analyze_with_specialists(topic)
     return f"""
     Technical Analysis: {analyses['technical']}
-    
+
     Market Analysis: {analyses['market']}
-    
+
     Risk Analysis: {analyses['risk']}
     """
 
@@ -230,7 +279,7 @@ async def argue_for(proposition: str = Field(description="The proposition")) -> 
     )
     return result.text
 
-@tool(description="Get the argument AGAINST the proposition")  
+@tool(description="Get the argument AGAINST the proposition")
 async def argue_against(proposition: str = Field(description="The proposition")) -> str:
     result = await generate_text(
         model=google("gemini-2.0-flash"),
@@ -242,7 +291,7 @@ async def argue_against(proposition: str = Field(description="The proposition"))
 # Moderator synthesizes both sides
 result = await generate_text(
     model=google("gemini-2.0-flash"),
-    system="""You are an impartial moderator. 
+    system="""You are an impartial moderator.
     Get arguments from both sides, then provide a balanced summary.""",
     prompt="Should companies adopt a 4-day work week?",
     tools={"argue_for": argue_for, "argue_against": argue_against},
@@ -255,15 +304,15 @@ result = await generate_text(
   <Accordion title="Keep agents focused">
     Each agent should have a clear, specific role. Don't overload them.
   </Accordion>
-  
+
   <Accordion title="Use different prompting styles">
     Customize system prompts for each agent's specialty and personality.
   </Accordion>
-  
+
   <Accordion title="Consider using different models">
     Use faster/cheaper models for simple tasks, more capable ones for complex reasoning.
   </Accordion>
-  
+
   <Accordion title="Add error handling">
     Wrap agent calls in try/catch and have fallback strategies.
   </Accordion>

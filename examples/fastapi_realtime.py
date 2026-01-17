@@ -1,142 +1,134 @@
-"""FastAPI integration example with WebSocket + SSE for AI streaming.
+"""FastAPI integration example with Agent events.
 
-This shows how to integrate ai-query agents with FastAPI.
+This shows how to integrate ai-query agents with FastAPI using the emit() pattern.
 
 Usage:
     pip install fastapi uvicorn
     uv run examples/fastapi_realtime.py
 
 Connect:
-    - WebSocket: ws://localhost:8000/ws?username=Alice
     - SSE: http://localhost:8000/events
+    - Chat: POST http://localhost:8000/chat
 """
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from ai_query.agents import ChatAgent, InMemoryAgent, Connection, ConnectionContext
-
-
-# ─── Custom FastAPI Connection ──────────────────────────────────────────
-
-class FastAPIConnection(Connection):
-    """Wraps FastAPI WebSocket in our Connection interface."""
-    
-    def __init__(self, ws: WebSocket):
-        self._ws = ws
-        self.username: str | None = None
-    
-    async def send(self, message: str | bytes) -> None:
-        await self._ws.send_text(message)
-    
-    async def close(self, code: int = 1000, reason: str = "") -> None:
-        await self._ws.close(code)
+from ai_query import Agent, MemoryStorage, tool, Field, google
 
 
 # ─── Agent Definition ───────────────────────────────────────────────────
 
-class ChatRoom(ChatAgent, InMemoryAgent):
-    """Chat room with AI assistant."""
-    
-    initial_state = {"participants": [], "message_count": 0}
-    system = "You are a helpful AI assistant. Be concise."
-    
-    async def on_connect(self, connection, ctx):
-        await super().on_connect(connection, ctx)
-        connection.username = ctx.metadata.get("username", "Anonymous")
-        await self.set_state({
-            **self.state,
-            "participants": self.state["participants"] + [connection.username]
-        })
-        await self.broadcast(f"[System] {connection.username} joined")
-        print(f"+ {connection.username} connected")
-    
-    async def on_message(self, connection, message):
-        username = connection.username
-        await self.broadcast(f"{username}: {message}")
-        
-        if "@ai" in message.lower():
-            print(f"  AI responding to: {message[:40]}...")
-            await self.stream_chat_sse(f"{username} says: {message}")
-    
-    async def on_close(self, connection, code, reason):
-        username = getattr(connection, "username", "Anonymous")
-        await super().on_close(connection, code, reason)
-        await self.set_state({
-            **self.state,
-            "participants": [p for p in self.state["participants"] if p != username]
-        })
-        await self.broadcast(f"[System] {username} left")
-        print(f"- {username} disconnected")
+class ChatRoom(Agent):
+    """Chat room with AI assistant using emit() for events."""
+
+    def __init__(self):
+        @tool(description="Save a note")
+        async def save_note(note: str = Field(description="Note to save")) -> str:
+            notes = self.state.get("notes", [])
+            notes.append(note)
+            await self.update_state(notes=notes)
+            await self.emit("note_saved", {"note": note, "count": len(notes)})
+            return f"Saved note #{len(notes)}"
+
+        super().__init__(
+            "chat-room",
+            model=google("gemini-2.0-flash"),
+            system="You are a helpful AI assistant. Be concise.",
+            storage=MemoryStorage(),
+            initial_state={"notes": [], "message_count": 0},
+            tools={"save_note": save_note},
+        )
+
+    async def on_start(self):
+        print(f"Chat room started. Notes: {len(self.state.get('notes', []))}")
 
 
 # ─── FastAPI App ────────────────────────────────────────────────────────
 
-room = ChatRoom("main-room")
+room = ChatRoom()
+
+# Queue for SSE connections
+sse_queues: list[asyncio.Queue] = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start agent on app startup."""
     await room.start()
-    print("Chat room started")
+
+    # Inject emit handler to broadcast to SSE queues
+    async def emit_to_sse(event: str, data: dict, event_id: int):
+        sse_msg = f"id: {event_id}\nevent: {event}\ndata: {json.dumps(data)}\n\n"
+        for queue in sse_queues:
+            await queue.put(sse_msg)
+
+    room._emit_handler = emit_to_sse
+
+    print("Chat room ready")
     yield
+    await room.stop()
 
 
 app = FastAPI(lifespan=lifespan)
 
+# Add CORS for browser clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous"):
-    """WebSocket endpoint for chat messages."""
-    await websocket.accept()
-    
-    # Create Connection and Context
-    connection = FastAPIConnection(websocket)
-    ctx = ConnectionContext(request=websocket, metadata={"username": username})
-    
-    await room.on_connect(connection, ctx)
-    
-    try:
-        while True:
-            message = await websocket.receive_text()
-            await room.on_message(connection, message)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await room.on_close(connection, 1000, "Disconnected")
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    """Send a message and get a response. Events stream via SSE."""
+    # Emit start event
+    await room.emit("chat_start", {"message": request.message})
+
+    # Update message count
+    await room.update_state(message_count=room.state.get("message_count", 0) + 1)
+
+    # Stream response, emitting chunks
+    full_response = ""
+    async for chunk in room.stream(request.message):
+        full_response += chunk
+        await room.emit("chunk", {"content": chunk})
+
+    # Emit completion
+    await room.emit("chat_complete", {"response": full_response})
+
+    return {"response": full_response}
 
 
 @app.get("/events")
 async def sse_endpoint():
-    """SSE endpoint for AI streaming."""
-    
+    """SSE endpoint for real-time events."""
+
     async def event_generator():
-        # Create a queue for this connection
-        queue: asyncio.Queue[str] = asyncio.Queue()
-        
-        # Wrapper to intercept SSE messages
-        original_stream_to_sse = room.stream_to_sse
-        
-        async def capture_sse(event: str, data: str):
-            await original_stream_to_sse(event, data)
-            await queue.put(f"event: {event}\ndata: {data}\n\n")
-        
-        room.stream_to_sse = capture_sse
-        
+        queue: asyncio.Queue = asyncio.Queue()
+        sse_queues.append(queue)
+
         try:
             while True:
                 try:
-                    # Wait for events with timeout for keepalive
                     message = await asyncio.wait_for(queue.get(), timeout=30)
                     yield message
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         finally:
-            room.stream_to_sse = original_stream_to_sse
-    
+            sse_queues.remove(queue)
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -147,9 +139,16 @@ async def sse_endpoint():
     )
 
 
+@app.get("/state")
+async def state_endpoint():
+    """Get current agent state."""
+    return {"state": room.state}
+
+
 if __name__ == "__main__":
     import uvicorn
     print("Starting FastAPI server...")
-    print("WebSocket: ws://localhost:8000/ws?username=YourName")
-    print("SSE: http://localhost:8000/events")
+    print("SSE:   http://localhost:8000/events")
+    print("Chat:  POST http://localhost:8000/chat")
+    print("State: GET http://localhost:8000/state")
     uvicorn.run(app, host="localhost", port=8000)
