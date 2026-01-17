@@ -10,8 +10,8 @@ import base64
 import aiohttp
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart
-from ai_query.model import LanguageModel
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart, EmbedResult, EmbedManyResult, EmbeddingUsage
+from ai_query.model import LanguageModel, EmbeddingModel
 
 
 # Cached provider instance
@@ -58,6 +58,77 @@ def openai(
         provider = _default_provider
 
     return LanguageModel(provider=provider, model_id=model_id)
+
+
+# Cached embedding provider instance
+_default_embedding_provider: OpenAIProvider | None = None
+
+
+class _OpenAINamespace:
+    """Namespace for OpenAI provider functions.
+
+    Provides both language model and embedding model factory functions.
+
+    Example:
+        >>> from ai_query import openai
+        >>> # Language model
+        >>> model = openai("gpt-4o")
+        >>> # Embedding model
+        >>> embedding_model = openai.embedding("text-embedding-3-small")
+    """
+
+    def __call__(
+        self,
+        model_id: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        organization: str | None = None,
+    ) -> LanguageModel:
+        """Create an OpenAI language model."""
+        return openai(model_id, api_key=api_key, base_url=base_url, organization=organization)
+
+    def embedding(
+        self,
+        model_id: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        organization: str | None = None,
+    ) -> EmbeddingModel:
+        """Create an OpenAI embedding model.
+
+        Args:
+            model_id: The embedding model identifier (e.g., "text-embedding-3-small",
+                "text-embedding-3-large", "text-embedding-ada-002").
+            api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var.
+            base_url: Custom base URL for API requests.
+            organization: OpenAI organization ID.
+
+        Returns:
+            An EmbeddingModel instance for use with embed().
+
+        Example:
+            >>> from ai_query import embed, openai
+            >>> result = await embed(
+            ...     model=openai.embedding("text-embedding-3-small"),
+            ...     value="Hello world"
+            ... )
+        """
+        global _default_embedding_provider
+
+        if api_key or base_url or organization:
+            provider = OpenAIProvider(
+                api_key=api_key,
+                base_url=base_url,
+                organization=organization,
+            )
+        else:
+            if _default_embedding_provider is None:
+                _default_embedding_provider = OpenAIProvider()
+            provider = _default_embedding_provider
+
+        return EmbeddingModel(provider=provider, model_id=model_id)
 
 
 class OpenAIProvider(BaseProvider):
@@ -467,4 +538,123 @@ class OpenAIProvider(BaseProvider):
             usage=usage,
             finish_reason=finish_reason,
             tool_calls=final_tool_calls if final_tool_calls else None
+        )
+
+    async def embed(
+        self,
+        *,
+        model: str,
+        value: str,
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> EmbedResult:
+        """Generate an embedding for a single value using OpenAI API.
+
+        Args:
+            model: Embedding model name (e.g., "text-embedding-3-small").
+            value: The text to embed.
+            provider_options: OpenAI-specific options under "openai" key.
+            **kwargs: Additional params (dimensions, encoding_format, etc.).
+
+        Returns:
+            EmbedResult with embedding vector and metadata.
+        """
+        openai_options = self.get_provider_options(provider_options)
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.organization:
+            headers["OpenAI-Organization"] = self.organization
+
+        url = f"{self.base_url}/embeddings"
+
+        async with aiohttp.ClientSession() as session:
+            request_body: dict[str, Any] = {
+                "model": model,
+                "input": value,
+                **kwargs,
+                **openai_options,
+            }
+
+            async with session.post(url, headers=headers, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"OpenAI API error ({resp.status}): {error_text}")
+                response = await resp.json()
+
+        # Extract result
+        embedding = response["data"][0]["embedding"]
+        usage = EmbeddingUsage(
+            tokens=response.get("usage", {}).get("prompt_tokens", 0)
+        )
+
+        return EmbedResult(
+            value=value,
+            embedding=embedding,
+            usage=usage,
+            provider_metadata={"model": response.get("model")},
+        )
+
+    async def embed_many(
+        self,
+        *,
+        model: str,
+        values: list[str],
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> EmbedManyResult:
+        """Generate embeddings for multiple values using OpenAI API.
+
+        OpenAI supports batch embedding natively, so this is more efficient
+        than calling embed() for each value.
+
+        Args:
+            model: Embedding model name (e.g., "text-embedding-3-small").
+            values: List of texts to embed.
+            provider_options: OpenAI-specific options under "openai" key.
+            **kwargs: Additional params (dimensions, encoding_format, etc.).
+
+        Returns:
+            EmbedManyResult with embedding vectors and metadata.
+        """
+        openai_options = self.get_provider_options(provider_options)
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.organization:
+            headers["OpenAI-Organization"] = self.organization
+
+        url = f"{self.base_url}/embeddings"
+
+        async with aiohttp.ClientSession() as session:
+            request_body: dict[str, Any] = {
+                "model": model,
+                "input": values,
+                **kwargs,
+                **openai_options,
+            }
+
+            async with session.post(url, headers=headers, json=request_body) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"OpenAI API error ({resp.status}): {error_text}")
+                response = await resp.json()
+
+        # Extract embeddings in order (OpenAI returns them sorted by index)
+        data = sorted(response["data"], key=lambda x: x["index"])
+        embeddings = [item["embedding"] for item in data]
+
+        usage = EmbeddingUsage(
+            tokens=response.get("usage", {}).get("prompt_tokens", 0)
+        )
+
+        return EmbedManyResult(
+            values=values,
+            embeddings=embeddings,
+            usage=usage,
+            provider_metadata={"model": response.get("model")},
         )

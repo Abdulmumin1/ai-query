@@ -1,0 +1,301 @@
+---
+title: "embed"
+description: "Generate embeddings for text using embedding models"
+---
+
+Functions for generating vector embeddings from text.
+
+## embed
+
+Generate an embedding for a single value.
+
+### Signature
+
+```python
+async def embed(
+    model: EmbeddingModel,
+    value: str,
+    provider_options: dict | None = None,
+    **kwargs
+) -> EmbedResult
+```
+
+### Parameters
+
+<ParamField path="model" type="EmbeddingModel" required>
+  The embedding model to use. Create with `openai.embedding()` or `google.embedding()`.
+</ParamField>
+
+<ParamField path="value" type="str" required>
+  The text to embed.
+</ParamField>
+
+<ParamField path="provider_options" type="dict">
+  Provider-specific options.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional parameters passed to the provider (e.g., `dimensions` for OpenAI).
+</ParamField>
+
+### Returns
+
+<ResponseField name="EmbedResult" type="object">
+  <Expandable title="properties">
+    <ResponseField name="value" type="str">
+      The original input text.
+    </ResponseField>
+    <ResponseField name="embedding" type="list[float]">
+      The embedding vector.
+    </ResponseField>
+    <ResponseField name="usage" type="EmbeddingUsage">
+      Token usage statistics.
+    </ResponseField>
+    <ResponseField name="provider_metadata" type="dict">
+      Provider-specific metadata.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Examples
+
+#### Basic Usage
+
+```python
+from ai_query import embed, openai
+
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world"
+)
+print(len(result.embedding))  # 1536
+```
+
+#### With Custom Dimensions
+
+```python
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world",
+    dimensions=256
+)
+print(len(result.embedding))  # 256
+```
+
+#### Using Google
+
+```python
+from ai_query import embed, google
+
+result = await embed(
+    model=google.embedding("text-embedding-004"),
+    value="Hello world"
+)
+```
+
+---
+
+## embed_many
+
+Generate embeddings for multiple values in a single call.
+
+### Signature
+
+```python
+async def embed_many(
+    model: EmbeddingModel,
+    values: list[str],
+    provider_options: dict | None = None,
+    **kwargs
+) -> EmbedManyResult
+```
+
+### Parameters
+
+<ParamField path="model" type="EmbeddingModel" required>
+  The embedding model to use. Create with `openai.embedding()` or `google.embedding()`.
+</ParamField>
+
+<ParamField path="values" type="list[str]" required>
+  List of texts to embed.
+</ParamField>
+
+<ParamField path="provider_options" type="dict">
+  Provider-specific options.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional parameters passed to the provider.
+</ParamField>
+
+### Returns
+
+<ResponseField name="EmbedManyResult" type="object">
+  <Expandable title="properties">
+    <ResponseField name="values" type="list[str]">
+      The original input texts.
+    </ResponseField>
+    <ResponseField name="embeddings" type="list[list[float]]">
+      List of embedding vectors (same order as input).
+    </ResponseField>
+    <ResponseField name="usage" type="EmbeddingUsage">
+      Token usage statistics.
+    </ResponseField>
+    <ResponseField name="provider_metadata" type="dict">
+      Provider-specific metadata.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Examples
+
+#### Basic Usage
+
+```python
+from ai_query import embed_many, openai
+
+result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=["Hello", "World", "How are you?"]
+)
+print(len(result.embeddings))  # 3
+print(len(result.embeddings[0]))  # 1536
+```
+
+#### For Semantic Search
+
+```python
+documents = [
+    "Python is a programming language",
+    "JavaScript runs in browsers",
+    "Rust is known for memory safety"
+]
+
+result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=documents
+)
+
+# Use embeddings for similarity search
+```
+
+---
+
+## Types
+
+### EmbeddingModel
+
+A wrapper combining an embedding provider and model identifier.
+
+```python
+from ai_query import openai, google
+
+# Create with provider embedding functions
+model = openai.embedding("text-embedding-3-small")
+model = google.embedding("text-embedding-004")
+```
+
+### EmbedResult
+
+Result from `embed()` call.
+
+```python
+@dataclass
+class EmbedResult:
+    value: str              # Original input text
+    embedding: list[float]  # Embedding vector
+    usage: EmbeddingUsage   # Token usage
+    provider_metadata: dict # Provider-specific metadata
+```
+
+### EmbedManyResult
+
+Result from `embed_many()` call.
+
+```python
+@dataclass
+class EmbedManyResult:
+    values: list[str]              # Original input texts
+    embeddings: list[list[float]]  # Embedding vectors
+    usage: EmbeddingUsage          # Token usage
+    provider_metadata: dict        # Provider-specific metadata
+```
+
+### EmbeddingUsage
+
+Token usage statistics for embedding operations.
+
+```python
+@dataclass
+class EmbeddingUsage:
+    tokens: int  # Number of input tokens
+```
+
+---
+
+## Provider Options
+
+### OpenAI
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `dimensions` | `int` | Output dimensions (v3 models only) |
+| `encoding_format` | `str` | `"float"` or `"base64"` |
+
+```python
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello",
+    dimensions=512,
+    provider_options={
+        "openai": {"encoding_format": "float"}
+    }
+)
+```
+
+### Google
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `taskType` | `str` | Task type for optimization |
+| `title` | `str` | Optional document title |
+| `outputDimensionality` | `int` | Output dimensions |
+
+Task types:
+- `RETRIEVAL_QUERY` - Optimize for search queries
+- `RETRIEVAL_DOCUMENT` - Optimize for documents
+- `SEMANTIC_SIMILARITY` - Optimize for similarity comparison
+- `CLASSIFICATION` - Optimize for classification
+- `CLUSTERING` - Optimize for clustering
+
+```python
+result = await embed(
+    model=google.embedding("text-embedding-004"),
+    value="Hello",
+    provider_options={
+        "google": {
+            "taskType": "RETRIEVAL_DOCUMENT",
+            "title": "My Document"
+        }
+    }
+)
+```
+
+---
+
+## Available Models
+
+### OpenAI
+
+| Model | Dimensions | Max Tokens | Description |
+|-------|------------|------------|-------------|
+| `text-embedding-3-small` | 1536 | 8191 | Fast and affordable |
+| `text-embedding-3-large` | 3072 | 8191 | Highest quality |
+| `text-embedding-ada-002` | 1536 | 8191 | Legacy model |
+
+### Google
+
+| Model | Dimensions | Description |
+|-------|------------|-------------|
+| `text-embedding-004` | 768 | Latest model |
+| `embedding-001` | 768 | Previous generation |

@@ -1,0 +1,267 @@
+---
+title: "Embeddings"
+description: "Generate vector embeddings for semantic search and similarity"
+---
+
+The `embed` and `embed_many` functions create vector representations of text that can be used for semantic search, similarity comparisons, clustering, and other machine learning tasks.
+
+## Basic Usage
+
+```python
+import asyncio
+from ai_query import embed, openai
+
+async def main():
+    result = await embed(
+        model=openai.embedding("text-embedding-3-small"),
+        value="Hello world"
+    )
+    print(len(result.embedding))  # 1536
+    print(result.usage.tokens)  # Token count
+
+asyncio.run(main())
+```
+
+## Embedding Multiple Values
+
+For efficiency, use `embed_many` to embed multiple texts in a single API call:
+
+```python
+from ai_query import embed_many, openai
+
+documents = [
+    "Python is a programming language",
+    "JavaScript runs in browsers",
+    "Rust is known for memory safety"
+]
+
+result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=documents
+)
+
+print(len(result.embeddings))  # 3
+print(len(result.embeddings[0]))  # 1536 (vector dimension)
+```
+
+## Supported Providers
+
+### OpenAI
+
+```python
+from ai_query import embed, openai
+
+# text-embedding-3-small (1536 dimensions, cheaper)
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world"
+)
+
+# text-embedding-3-large (3072 dimensions, higher quality)
+result = await embed(
+    model=openai.embedding("text-embedding-3-large"),
+    value="Hello world"
+)
+
+# With custom dimensions (OpenAI v3 models only)
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world",
+    dimensions=256  # Reduce dimensions for storage efficiency
+)
+```
+
+### Google
+
+```python
+from ai_query import embed, google
+
+result = await embed(
+    model=google.embedding("text-embedding-004"),
+    value="Hello world"
+)
+```
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | `EmbeddingModel` | The embedding model (from `openai.embedding()` or `google.embedding()`) |
+| `value` | `str` | The text to embed (for `embed`) |
+| `values` | `list[str]` | List of texts to embed (for `embed_many`) |
+| `provider_options` | `dict` | Provider-specific options |
+
+## Response Object
+
+The `embed` function returns an [`EmbedResult`](/api-reference/embed#embedresult):
+
+```python
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world"
+)
+
+# The original input
+print(result.value)  # "Hello world"
+
+# The embedding vector
+print(result.embedding)  # [0.123, -0.456, ...]
+print(len(result.embedding))  # 1536
+
+# Token usage
+print(result.usage.tokens)  # Number of tokens used
+```
+
+The `embed_many` function returns an [`EmbedManyResult`](/api-reference/embed#embedmanyresult):
+
+```python
+result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=["Hello", "World"]
+)
+
+# All embeddings (in same order as input)
+print(len(result.embeddings))  # 2
+
+# Each embedding vector
+print(len(result.embeddings[0]))  # 1536
+```
+
+## Common Use Cases
+
+### Semantic Search
+
+```python
+import numpy as np
+from ai_query import embed, embed_many, openai
+
+# Create embeddings for documents
+documents = [
+    "How to train a neural network",
+    "Best practices for Python coding",
+    "Introduction to machine learning"
+]
+
+doc_result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=documents
+)
+
+# Create embedding for query
+query_result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="machine learning tutorial"
+)
+
+# Calculate cosine similarity
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+# Find most similar document
+similarities = [
+    cosine_similarity(query_result.embedding, doc_emb)
+    for doc_emb in doc_result.embeddings
+]
+
+most_similar_idx = np.argmax(similarities)
+print(f"Most similar: {documents[most_similar_idx]}")
+```
+
+### Text Clustering
+
+```python
+from sklearn.cluster import KMeans
+from ai_query import embed_many, openai
+
+texts = ["...", "...", "..."]  # Your texts
+
+result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=texts
+)
+
+# Cluster embeddings
+kmeans = KMeans(n_clusters=3)
+clusters = kmeans.fit_predict(result.embeddings)
+```
+
+### Duplicate Detection
+
+```python
+from ai_query import embed_many, openai
+
+texts = ["Hello world", "Hello World!", "Goodbye world"]
+
+result = await embed_many(
+    model=openai.embedding("text-embedding-3-small"),
+    values=texts
+)
+
+# Find near-duplicates using cosine similarity threshold
+threshold = 0.95
+for i in range(len(texts)):
+    for j in range(i + 1, len(texts)):
+        sim = cosine_similarity(result.embeddings[i], result.embeddings[j])
+        if sim > threshold:
+            print(f"Near-duplicate: '{texts[i]}' and '{texts[j]}'")
+```
+
+## Provider Options
+
+### OpenAI Options
+
+```python
+result = await embed(
+    model=openai.embedding("text-embedding-3-small"),
+    value="Hello world",
+    dimensions=512,  # Reduce dimensions (v3 models only)
+    provider_options={
+        "openai": {
+            "encoding_format": "float"  # or "base64"
+        }
+    }
+)
+```
+
+### Google Options
+
+```python
+result = await embed(
+    model=google.embedding("text-embedding-004"),
+    value="Hello world",
+    provider_options={
+        "google": {
+            "taskType": "RETRIEVAL_DOCUMENT",  # Optimize for retrieval
+            "title": "Document Title"  # Optional document title
+        }
+    }
+)
+```
+
+## Available Models
+
+### OpenAI
+
+| Model | Dimensions | Description |
+|-------|------------|-------------|
+| `text-embedding-3-small` | 1536 | Smaller, faster, cheaper |
+| `text-embedding-3-large` | 3072 | Higher quality, more dimensions |
+| `text-embedding-ada-002` | 1536 | Legacy model |
+
+### Google
+
+| Model | Dimensions | Description |
+|-------|------------|-------------|
+| `text-embedding-004` | 768 | Latest text embedding model |
+| `embedding-001` | 768 | Previous generation |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="embed() Reference" icon="code" href="/api-reference/embed">
+    Full API reference for embed functions
+  </Card>
+  <Card title="RAG Agent" icon="magnifying-glass" href="/cookbook/rag-agent">
+    Build a retrieval-augmented generation agent
+  </Card>
+</CardGroup>

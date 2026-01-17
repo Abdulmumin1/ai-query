@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, TYPE_CHECKING
 
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, StreamChunk, ToolSet, Usage
+from ai_query.types import GenerateTextResult, Message, ProviderOptions, StreamChunk, ToolSet, Usage, EmbedResult, EmbedManyResult, EmbeddingUsage
 
 
 class BaseProvider(ABC):
@@ -158,3 +159,72 @@ class BaseProvider(ABC):
         total.output_tokens += delta.output_tokens
         total.cached_tokens += delta.cached_tokens
         total.total_tokens += delta.total_tokens
+
+    async def embed(
+        self,
+        *,
+        model: str,
+        value: str,
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> EmbedResult:
+        """Generate an embedding for a single value.
+
+        Args:
+            model: The embedding model identifier.
+            value: The text to embed.
+            provider_options: Provider-specific options.
+            **kwargs: Additional parameters (dimensions, etc.).
+
+        Returns:
+            EmbedResult containing the embedding vector and metadata.
+
+        Raises:
+            NotImplementedError: If the provider doesn't support embeddings.
+        """
+        raise NotImplementedError(f"{self.name} provider does not support embeddings")
+
+    async def embed_many(
+        self,
+        *,
+        model: str,
+        values: list[str],
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> EmbedManyResult:
+        """Generate embeddings for multiple values.
+
+        Default implementation calls embed() for each value in parallel.
+        Providers should override this for more efficient batch processing
+        if their API supports it natively.
+
+        Args:
+            model: The embedding model identifier.
+            values: List of texts to embed.
+            provider_options: Provider-specific options.
+            **kwargs: Additional parameters (dimensions, etc.).
+
+        Returns:
+            EmbedManyResult containing embedding vectors and metadata.
+        """
+        # Run all embed calls in parallel
+        tasks = [
+            self.embed(
+                model=model,
+                value=value,
+                provider_options=provider_options,
+                **kwargs,
+            )
+            for value in values
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Aggregate results
+        embeddings = [r.embedding for r in results]
+        total_tokens = sum(r.usage.tokens for r in results)
+
+        return EmbedManyResult(
+            values=values,
+            embeddings=embeddings,
+            usage=EmbeddingUsage(tokens=total_tokens),
+        )

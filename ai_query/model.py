@@ -21,3 +21,25 @@ class LanguageModel:
 
     def __repr__(self) -> str:
         return f"LanguageModel({self.provider.name}/{self.model_id})"
+
+
+@dataclass
+class EmbeddingModel:
+    """An embedding model instance combining provider and model identifier.
+
+    This is created by provider embedding functions like openai.embedding(), google.embedding().
+
+    Example:
+        >>> from ai_query import embed, openai
+        >>> result = await embed(
+        ...     model=openai.embedding("text-embedding-3-small"),
+        ...     value="Hello world"
+        ... )
+        >>> print(len(result.embedding))  # e.g., 1536
+    """
+
+    provider: BaseProvider
+    model_id: str
+
+    def __repr__(self) -> str:
+        return f"EmbeddingModel({self.provider.name}/{self.model_id})"
