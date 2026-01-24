@@ -18,7 +18,8 @@ description: "Build stateful AI agents in Python"
 A stateful agent with persistent memory and real-time streaming:
 
 ```python
-from ai_query import Agent, SQLiteStorage, tool, Field, openai
+from ai_query.agents import Agent, SQLiteStorage, tool, Field
+from ai_query.providers import openai
 
 class ResearchAgent(Agent):
     enable_event_log = True  # Enable event replay on reconnect
@@ -70,7 +71,7 @@ curl http://localhost:8080/events
   <Card
     title="Agent Events"
     icon="bolt"
-    href="/core/agent-output"
+    href="/api-reference/agent#emit"
   >
     Real-time events with automatic replay on reconnection.
   </Card>

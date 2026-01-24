@@ -10,7 +10,8 @@ Build an AI agent that retrieves relevant information before answering, reducing
 Give the AI a search tool backed by vector embeddings to retrieve semantically similar information, then let it synthesize a response from the results.
 
 ```python
-from ai_query import generate_text, embed, embed_many, openai, tool, Field
+from ai_query import generate_text, embed, embed_many
+from ai_query.providers import openai, tool, Field
 import numpy as np
 
 # Pre-compute document embeddings
@@ -76,7 +77,8 @@ A full RAG agent with vector search that answers questions about your documentat
 ```python
 import asyncio
 import numpy as np
-from ai_query import generate_text, embed, embed_many, openai, tool, Field, step_count_is
+from ai_query import generate_text, embed, embed_many
+from ai_query.providers import openai, tool, Field, step_count_is
 
 # Document store with embeddings
 class VectorStore:
@@ -181,7 +183,8 @@ asyncio.run(main())
 You can use any supported embedding provider:
 
 ```python
-from ai_query import embed, embed_many, openai, google
+from ai_query import embed, embed_many
+from ai_query.providers import openai, google
 
 # OpenAI embeddings (1536 dimensions)
 openai_result = await embed(
@@ -208,7 +211,8 @@ google_result = await embed(
 Search multiple sources and combine results:
 
 ```python
-from ai_query import generate_text, embed, openai, tool, Field, step_count_is
+from ai_query import generate_text, embed
+from ai_query.providers import openai, tool, Field, step_count_is
 import numpy as np
 
 # Multiple vector stores for different sources
@@ -250,7 +254,8 @@ result = await generate_text(
 Track which documents were used and include citations:
 
 ```python
-from ai_query import generate_text, embed, openai, tool, Field, has_tool_call
+from ai_query import generate_text, embed
+from ai_query.providers import openai, tool, Field, has_tool_call
 import numpy as np
 
 class CitableVectorStore:
@@ -318,7 +323,8 @@ print(f"Citations: {citations}")
 Combine keyword and vector search for better results:
 
 ```python
-from ai_query import embed, openai
+from ai_query import embed
+from ai_query.providers import openai
 import numpy as np
 
 class HybridStore:

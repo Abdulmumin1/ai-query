@@ -8,7 +8,8 @@ Demonstrates:
 
 import asyncio
 import aiohttp
-from ai_query import stream_text, google, tool, Field, step_count_is
+from ai_query import stream_text, tool, Field, step_count_is
+from ai_query.providers import google
 
 
 # --- Hacker News API Tools ---

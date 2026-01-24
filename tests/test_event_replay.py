@@ -3,8 +3,7 @@
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from ai_query.agents import Agent, MemoryStorage, Connection
-from ai_query.agents.v2 import Event
+from ai_query.agents import Agent, MemoryStorage, Connection, Event
 
 
 class TestEventLogBuiltin:

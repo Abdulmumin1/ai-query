@@ -9,7 +9,8 @@ The `stream_text` function enables real-time streaming of AI responses. This pro
 
 ```python
 import asyncio
-from ai_query import stream_text, google
+from ai_query import stream_text
+from ai_query.providers import google
 
 async def main():
     result = stream_text(
@@ -52,7 +53,8 @@ print(f"\nTokens: {usage.total_tokens}")
 Combine streaming with tool calling for powerful agentic workflows:
 
 ```python
-from ai_query import stream_text, google, tool, Field
+from ai_query import stream_text
+from ai_query.providers import google, tool, Field
 
 @tool(description="Search Wikipedia for information")
 async def search_wikipedia(query: str = Field(description="Search query")) -> str:

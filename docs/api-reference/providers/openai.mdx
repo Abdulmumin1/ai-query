@@ -44,7 +44,8 @@ export OPENAI_API_KEY="sk-..."
 ## Example
 
 ```python
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 result = await generate_text(
     model=openai("gpt-4o"),

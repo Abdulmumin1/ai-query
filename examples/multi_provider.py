@@ -8,7 +8,8 @@ Demonstrates:
 
 import asyncio
 import time
-from ai_query import generate_text, stream_text, openai, anthropic, google
+from ai_query import generate_text, stream_text
+from ai_query.providers import openai, anthropic, google
 
 
 async def compare_providers():

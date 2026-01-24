@@ -10,7 +10,8 @@ Create an agent that handles WebSocket connections for real-time, bidirectional 
 With the built-in `serve()` method, you can run a WebSocket server in one line:
 
 ```python
-from ai_query import Agent, openai, MemoryStorage
+from ai_query.agents import Agent
+from ai_query.providers import openai, MemoryStorage
 
 class TaskAssistant(Agent):
     def __init__(self):
@@ -47,7 +48,8 @@ A research assistant that tracks findings and provides streaming responses:
 
 ```python
 import json
-from ai_query import Agent, openai, MemoryStorage, tool, Field
+from ai_query.agents import Agent
+from ai_query.providers import openai, MemoryStorage, tool, Field
 
 class ResearchAssistant(Agent):
     def __init__(self):
@@ -113,7 +115,8 @@ To use with your own framework, implement the [`Connection`](/api-reference/agen
 
 ```python
 from fastapi import FastAPI, WebSocket
-from ai_query import Agent, openai, MemoryStorage
+from ai_query.agents import Agent
+from ai_query.providers import openai, MemoryStorage
 from ai_query.agents import Connection, ConnectionContext
 
 class FastAPIConnection(Connection):
@@ -184,7 +187,8 @@ ws.send("Research the latest developments in quantum computing");
 For production, use `SQLiteStorage` to persist state and messages:
 
 ```python
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 class PersistentAssistant(Agent):
     def __init__(self):

@@ -18,7 +18,8 @@ Get your API key from [DeepSeek Platform](https://platform.deepseek.com/).
 ## Usage
 
 ```python
-from ai_query import generate_text, deepseek
+from ai_query import generate_text
+from ai_query.providers import deepseek
 
 result = await generate_text(
     model=deepseek("deepseek-chat"),
@@ -54,7 +55,8 @@ result = await generate_text(
 DeepSeek Reasoner (R1) excels at complex reasoning tasks:
 
 ```python
-from ai_query import generate_text, deepseek
+from ai_query import generate_text
+from ai_query.providers import deepseek
 
 result = await generate_text(
     model=deepseek("deepseek-reasoner"),
@@ -67,7 +69,8 @@ result = await generate_text(
 Tool calling works the same as with other providers:
 
 ```python
-from ai_query import generate_text, deepseek, tool, Field
+from ai_query import generate_text
+from ai_query.providers import deepseek, tool, Field
 
 @tool(description="Calculate a math expression")
 async def calculate(expression: str = Field(description="Math expression")) -> str:
@@ -83,7 +86,8 @@ result = await generate_text(
 ## Streaming
 
 ```python
-from ai_query import stream_text, deepseek
+from ai_query import stream_text
+from ai_query.providers import deepseek
 
 result = stream_text(
     model=deepseek("deepseek-chat"),

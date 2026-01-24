@@ -8,7 +8,8 @@ The `messages` parameter enables multi-turn conversations by providing the full 
 ## Basic Multi-turn Conversation
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 result = await generate_text(
     model=google("gemini-2.5-flash"),
@@ -52,7 +53,8 @@ Messages use a simple dict structure with `role` and `content`. See [`Message`](
 Use the `system` parameter to set the AI's behavior:
 
 ```python
-from ai_query import generate_text, anthropic
+from ai_query import generate_text
+from ai_query.providers import anthropic
 
 result = await generate_text(
     model=anthropic("claude-4-5-sonnet-20250929"),
@@ -78,7 +80,8 @@ result = await generate_text(
 Use `stream_text` for real-time responses:
 
 ```python
-from ai_query import stream_text, google
+from ai_query import stream_text
+from ai_query.providers import google
 
 result = stream_text(
     model=google("gemini-2.5-flash"),
@@ -97,7 +100,8 @@ async for chunk in result.text_stream:
 Send images and files in conversations. The `image` field accepts **base64-encoded data** or a **URL**.
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 import base64
 
 with open("photo.jpg", "rb") as f:

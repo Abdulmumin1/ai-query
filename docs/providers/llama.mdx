@@ -18,7 +18,8 @@ Get your API key from [Meta Llama](https://www.llama.com/).
 ## Usage
 
 ```python
-from ai_query import generate_text, llama
+from ai_query import generate_text
+from ai_query.providers import llama
 
 result = await generate_text(
     model=llama("llama-3.1-70b-instruct"),
@@ -60,7 +61,8 @@ result = await generate_text(
 Tool calling works standardly:
 
 ```python
-from ai_query import generate_text, llama, tool, Field
+from ai_query import generate_text
+from ai_query.providers import llama, tool, Field
 
 @tool(description="Get stock price")
 async def get_stock(symbol: str = Field(description="Stock symbol")) -> str:
@@ -76,7 +78,8 @@ result = await generate_text(
 ## Streaming
 
 ```python
-from ai_query import stream_text, llama
+from ai_query import stream_text
+from ai_query.providers import llama
 
 result = stream_text(
     model=llama("llama-3.1-70b-instruct"),

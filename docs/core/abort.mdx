@@ -8,7 +8,8 @@ ai-query provides a cancellation system inspired by JavaScript's `AbortControlle
 ## Quick Start
 
 ```python
-from ai_query import generate_text, openai, AbortController, AbortError
+from ai_query import generate_text
+from ai_query.providers import openai, AbortController, AbortError
 
 controller = AbortController()
 
@@ -155,7 +156,8 @@ except AbortError as e:
 ### Abort generate_text
 
 ```python
-from ai_query import generate_text, openai, AbortController, AbortError
+from ai_query import generate_text
+from ai_query.providers import openai, AbortController, AbortError
 import asyncio
 
 controller = AbortController()
@@ -182,7 +184,8 @@ await asyncio.gather(generate(), cancel_after_delay())
 ### Abort stream_text
 
 ```python
-from ai_query import stream_text, openai, AbortController, AbortError
+from ai_query import stream_text
+from ai_query.providers import openai, AbortController, AbortError
 
 controller = AbortController()
 
@@ -205,7 +208,8 @@ except AbortError:
 ### Abort Agent.chat
 
 ```python
-from ai_query import Agent, openai, AbortController, AbortError
+from ai_query.agents import Agent
+from ai_query.providers import openai, AbortController, AbortError
 
 agent = Agent("assistant", model=openai("gpt-4o"))
 controller = AbortController()
@@ -237,7 +241,8 @@ async with agent:
 ### Abort embed_many
 
 ```python
-from ai_query import embed_many, openai, AbortController, AbortError
+from ai_query import embed_many
+from ai_query.providers import openai, AbortController, AbortError
 
 controller = AbortController()
 
@@ -254,7 +259,8 @@ except AbortError:
 ### Timeout Helper
 
 ```python
-from ai_query import generate_text, openai, AbortSignal
+from ai_query import generate_text
+from ai_query.providers import openai, AbortSignal
 
 # Auto-cancel after 60 seconds
 result = await generate_text(
@@ -268,7 +274,8 @@ result = await generate_text(
 
 ```python
 import asyncio
-from ai_query import generate_text, embed, openai, AbortController
+from ai_query import generate_text, embed
+from ai_query.providers import openai, AbortController
 
 controller = AbortController()
 signal = controller.signal
@@ -288,7 +295,7 @@ controller.abort("Cancelled all")
 ### User-Initiated Abort (WebSocket)
 
 ```python
-from ai_query import Agent, AbortController
+from ai_query.agents import Agent, AbortController
 
 class ChatAgent(Agent):
     def __init__(self, *args, **kwargs):

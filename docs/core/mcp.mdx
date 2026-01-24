@@ -32,7 +32,8 @@ MCP supports multiple transports for connecting to servers:
 Use `mcp()` to connect to local MCP servers that communicate over stdio:
 
 ```python
-from ai_query import generate_text, google, mcp
+from ai_query import generate_text
+from ai_query.providers import google, mcp
 
 async def main():
     # Connect to a local Python MCP server
@@ -66,7 +67,8 @@ async with mcp("node", "my_server.js") as server:
 Many MCP servers are published as npm packages. Use `npx` to run them:
 
 ```python
-from ai_query import generate_text, openai, mcp
+from ai_query import generate_text
+from ai_query.providers import openai, mcp
 
 # Use the official MCP fetch server
 async with mcp("npx", "-y", "@modelcontextprotocol/server-fetch") as server:
@@ -94,7 +96,8 @@ async with mcp(
 Use `mcp_sse()` for remote servers using the legacy SSE transport:
 
 ```python
-from ai_query import generate_text, openai, mcp_sse
+from ai_query import generate_text
+from ai_query.providers import openai, mcp_sse
 
 async with mcp_sse("http://localhost:8000/sse") as server:
     result = await generate_text(
@@ -123,7 +126,8 @@ async with mcp_sse(
 Use `mcp_http()` for remote servers using the recommended Streamable HTTP transport (MCP spec 2025-11-25):
 
 ```python
-from ai_query import generate_text, openai, mcp_http
+from ai_query import generate_text
+from ai_query.providers import openai, mcp_http
 
 async with mcp_http("http://localhost:8000/mcp") as server:
     result = await generate_text(
@@ -148,7 +152,8 @@ async with mcp_http(
 Use `merge_tools()` to combine tools from multiple MCP servers or mix with local tools:
 
 ```python
-from ai_query import generate_text, openai, mcp, merge_tools, tool, Field
+from ai_query import generate_text
+from ai_query.providers import openai, mcp, merge_tools, tool, Field
 
 # Define a local tool
 @tool(description="Calculate math expressions")

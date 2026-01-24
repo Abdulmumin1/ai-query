@@ -8,7 +8,9 @@ Run multiple independent agent instances on a single server. Each client connect
 ## Quick Start
 
 ```python
-from ai_query import Agent, AgentServer, openai, MemoryStorage
+from ai_query.agents import Agent
+from ai_query.agents import AgentServer
+from ai_query.providers import openai, MemoryStorage
 
 agent = Agent(
     "task-agent",
@@ -78,7 +80,8 @@ agent.serve_many(port=8080)
 For more control over configuration:
 
 ```python
-from ai_query import AgentServer, AgentServerConfig
+from ai_query.agents import AgentServer
+from ai_query.agents import AgentServerConfig
 
 config = AgentServerConfig(
     idle_timeout=300,     # Evict after 5 min idle
@@ -206,7 +209,7 @@ asyncio.run(chat())
 ## Configuration Options
 
 ```python
-from ai_query import AgentServerConfig
+from ai_query.agents import AgentServerConfig
 
 config = AgentServerConfig(
     # Lifecycle
@@ -293,7 +296,9 @@ The simplest way to add custom routes:
 
 ```python
 from aiohttp import web
-from ai_query import Agent, AgentServer, openai, MemoryStorage
+from ai_query.agents import Agent
+from ai_query.agents import AgentServer
+from ai_query.providers import openai, MemoryStorage
 
 agent = Agent(
     "my-bot",
@@ -329,7 +334,7 @@ For full control over the aiohttp application:
 
 ```python
 from aiohttp import web
-from ai_query import AgentServer
+from ai_query.agents import AgentServer
 
 server = AgentServer(agent)
 app = server.create_app()
@@ -393,7 +398,8 @@ class MyServer(AgentServer):
 Each user gets their own AI research assistant with persistent findings:
 
 ```python
-from ai_query import Agent, AgentServer, AgentServerConfig, SQLiteStorage, tool, Field
+from ai_query.agents import Agent, AgentServer
+from ai_query.agents import AgentServerConfig, SQLiteStorage, tool, Field
 from ai_query.providers.google import google
 
 class ResearchAssistant(Agent):
@@ -447,7 +453,9 @@ if __name__ == "__main__":
 Spawn independent agents to execute tasks in parallel:
 
 ```python
-from ai_query import Agent, AgentServer, SQLiteStorage, tool, Field, openai
+from ai_query.agents import Agent
+from ai_query.agents import AgentServer, SQLiteStorage, tool, Field
+from ai_query.providers import openai
 
 class TaskWorker(Agent):
     def __init__(self):

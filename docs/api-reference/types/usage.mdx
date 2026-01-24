@@ -34,7 +34,8 @@ class Usage:
 ### From generate_text
 
 ```python
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 result = await generate_text(
     model=openai("gpt-4o"),
@@ -49,7 +50,8 @@ print(f"Total tokens: {result.usage.total_tokens}")
 ### From stream_text
 
 ```python
-from ai_query import stream_text, google
+from ai_query import stream_text
+from ai_query.providers import google
 
 result = stream_text(
     model=google("gemini-2.0-flash"),

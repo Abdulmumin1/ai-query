@@ -1,7 +1,9 @@
 """Example: Stateful Research Agent with real-time events."""
 
 import os
-from ai_query import Agent, SQLiteStorage, tool, Field, step_count_is, google
+from ai_query import tool, Field, step_count_is
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import google
 
 
 class ResearchAgent(Agent):

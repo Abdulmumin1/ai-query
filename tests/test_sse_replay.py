@@ -4,8 +4,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from aiohttp import web
-from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig
-from ai_query.agents.v2 import Event
+from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig, Event
 
 
 class TestSSEReplay:

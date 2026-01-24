@@ -40,8 +40,7 @@
             "group": "Stateful Agents",
             "pages": [
               "core/stateful-agents",
-              "core/agent-server",
-              "core/agent-output"
+              "core/agent-server"
             ]
           }
         ]
@@ -97,7 +96,6 @@
             "group": "Agent Classes",
             "pages": [
               "api-reference/agent",
-              "api-reference/chat-agent",
               "api-reference/agent-backends",
               "api-reference/agent-server"
             ]

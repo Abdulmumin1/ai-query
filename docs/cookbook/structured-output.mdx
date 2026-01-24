@@ -10,7 +10,8 @@ Use tools to get structured, typed responses that you can parse reliably.
 Instead of parsing free-form text, define a tool that captures the exact structure you need. The AI will call it with structured data.
 
 ```python
-from ai_query import generate_text, google, tool, Field, has_tool_call
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field, has_tool_call
 
 @tool(description="Submit the extracted data")
 def submit_result(
@@ -45,7 +46,8 @@ Extract structured data from unstructured text:
 ```python
 import asyncio
 from dataclasses import dataclass
-from ai_query import generate_text, google, tool, Field, has_tool_call
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field, has_tool_call
 
 @dataclass
 class Product:
@@ -110,7 +112,8 @@ asyncio.run(main())
 Use structured output for classification tasks:
 
 ```python
-from ai_query import generate_text, google, tool, Field, has_tool_call
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field, has_tool_call
 from enum import Enum
 
 class Sentiment(Enum):

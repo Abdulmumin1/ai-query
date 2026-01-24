@@ -75,7 +75,8 @@ export GROQ_API_KEY="gsk-..."
 All providers follow the same pattern - import the factory function and use it with `generate_text()` or `stream_text()`:
 
 ```python
-from ai_query import generate_text, openai, anthropic, google, openrouter, deepseek, groq
+from ai_query import generate_text
+from ai_query.providers import openai, anthropic, google, openrouter, deepseek, groq
 
 # OpenAI
 result = await generate_text(model=openai("gpt-4o"), prompt="Hello!")
@@ -101,7 +102,8 @@ result = await generate_text(model=groq("llama-3.3-70b-versatile"), prompt="Hell
 One of the key benefits of ai-query is how easy it is to switch between providers:
 
 ```python
-from ai_query import generate_text, openai, anthropic
+from ai_query import generate_text
+from ai_query.providers import openai, anthropic
 
 # Just change the model - everything else stays the same!
 async def generate_response(prompt: str, use_openai: bool = True):

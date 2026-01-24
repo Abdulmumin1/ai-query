@@ -21,7 +21,8 @@ This example executes arbitrary code. In production, use a proper sandbox enviro
 import asyncio
 import sys
 from io import StringIO
-from ai_query import generate_text, anthropic, tool, Field, step_count_is
+from ai_query import generate_text
+from ai_query.providers import anthropic, tool, Field, step_count_is
 
 @tool(description="Execute Python code and return the output")
 def run_python(

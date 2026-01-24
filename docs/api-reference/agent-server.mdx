@@ -8,7 +8,8 @@ The `AgentServer` class manages multiple agent instances on a single server, rou
 ## Import
 
 ```python
-from ai_query import AgentServer, AgentServerConfig
+from ai_query.agents import AgentServer
+from ai_query.agents import AgentServerConfig
 ```
 
 ## AgentServerConfig
@@ -157,7 +158,9 @@ Use this method when you need full control over the app, such as:
 **Example:**
 ```python
 from aiohttp import web
-from ai_query import Agent, AgentServer, openai, MemoryStorage
+from ai_query.agents import Agent
+from ai_query.agents import AgentServer
+from ai_query.providers import openai, MemoryStorage
 
 agent = Agent("my-bot", model=openai("gpt-4o"), storage=MemoryStorage())
 server = AgentServer(agent)
@@ -334,7 +337,9 @@ AgentServer(agent, config=config).serve(host=host, port=port)
 ### Basic Usage
 
 ```python
-from ai_query import Agent, AgentServer, openai, MemoryStorage
+from ai_query.agents import Agent
+from ai_query.agents import AgentServer
+from ai_query.providers import openai, MemoryStorage
 
 agent = Agent(
     "my-agent",
@@ -352,7 +357,9 @@ AgentServer(agent).serve(port=8080)
 ### With Configuration
 
 ```python
-from ai_query import Agent, AgentServer, AgentServerConfig, openai, MemoryStorage
+from ai_query.agents import Agent, AgentServer
+from ai_query.agents import AgentServerConfig
+from ai_query.providers import openai, MemoryStorage
 
 async def auth(request):
     return request.headers.get("X-API-Key") == "secret"

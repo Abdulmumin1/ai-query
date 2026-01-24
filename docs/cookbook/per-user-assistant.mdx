@@ -7,21 +7,24 @@ Build a system where each user gets their own AI assistant with isolated state, 
 
 ## Quick Start
 
-Use `AgentServer` to create per-user agents:
+Use `AgentServer` to host multiple per-user agents:
 
 ```python
-from ai_query import Agent, AgentServer, openai, MemoryStorage
+from ai_query.agents import Agent, AgentServer, MemoryStorage
+from ai_query.providers import openai
 
-agent = Agent(
-    "user-assistant",
-    model=openai("gpt-4o"),
-    system="You are a personal assistant. Remember user preferences.",
-    storage=MemoryStorage(),
-    initial_state={"preferences": {}, "tasks": []}
-)
+class UserAssistant(Agent):
+    def __init__(self, id):
+        super().__init__(
+            id,
+            model=openai("gpt-4o"),
+            system="You are a personal assistant.",
+            storage=MemoryStorage(),
+            initial_state={"preferences": {}, "tasks": []}
+        )
 
-# Each user gets their own assistant
-AgentServer(agent).serve(port=8080)
+# Start server - handles routing to /agent/{user_id}/ws automatically
+AgentServer(UserAssistant).serve(port=8080)
 
 # Connect:
 # ws://localhost:8080/agent/user-alice/ws
@@ -30,191 +33,52 @@ AgentServer(agent).serve(port=8080)
 
 ## Complete Example: Personal Task Manager
 
-A full per-user task management assistant:
-
 ```python
-from ai_query import Agent, AgentServer, AgentServerConfig, SQLiteStorage, tool, Field
-from ai_query.providers.google import google
+from ai_query import tool, Field
+from ai_query.agents import Agent, AgentServer, SQLiteStorage
+from ai_query.providers import google
 from datetime import datetime
 
 class PersonalAssistant(Agent):
-    def __init__(self):
-        @tool(description="Add a new task to the user's list")
-        async def add_task(title: str = Field(description="Task title")) -> str:
-            tasks = self.state.get("tasks", [])
-            task = {"id": len(tasks) + 1, "title": title, "done": False, "created_at": datetime.now().isoformat()}
-            await self.update_state(tasks=tasks + [task])
-            return f"Added task: {title}"
-
-        @tool(description="List all pending tasks")
-        async def list_tasks() -> str:
-            tasks = [t for t in self.state.get("tasks", []) if not t["done"]]
-            if not tasks:
-                return "No pending tasks!"
-            return "\n".join([f"{t['id']}. {t['title']}" for t in tasks])
-
-        @tool(description="Mark a task as complete")
-        async def complete_task(task_id: int = Field(description="Task ID")) -> str:
-            tasks = self.state.get("tasks", [])
-            for task in tasks:
-                if task["id"] == task_id:
-                    task["done"] = True
-            await self.update_state(tasks=tasks)
-            return f"Completed task #{task_id}"
-
-        @tool(description="Save a note")
-        async def save_note(content: str = Field(description="Note content")) -> str:
-            notes = self.state.get("notes", [])
-            notes.append({"content": content, "created_at": datetime.now().isoformat()})
-            await self.update_state(notes=notes)
-            return "Note saved!"
-
-        @tool(description="Search notes")
-        async def search_notes(query: str = Field(description="Search query")) -> str:
-            notes = self.state.get("notes", [])
-            matches = [n for n in notes if query.lower() in n["content"].lower()]
-            if not matches:
-                return "No matching notes found."
-            return "\n---\n".join([n["content"] for n in matches])
-
-        @tool(description="Set a user preference")
-        async def set_preference(
-            key: str = Field(description="Preference name"),
-            value: str = Field(description="Preference value"),
-        ) -> str:
-            prefs = self.state.get("preferences", {})
-            prefs[key] = value
-            await self.update_state(preferences=prefs)
-            return f"Set {key} = {value}"
-
+    def __init__(self, id):
         super().__init__(
-            "personal-assistant",
+            id,
             model=google("gemini-2.0-flash"),
-            system="""You are a personal productivity assistant.
-            Help users manage tasks, take notes, and stay organized.
-            Use tools to store and retrieve information.""",
+            system="Help users manage tasks and stay organized.",
             storage=SQLiteStorage("./user_data.db"),
-            initial_state={
-                "name": None,
-                "preferences": {},
-                "tasks": [],
-                "notes": [],
-                "last_active": None,
-            },
-            tools={
-                "add_task": add_task,
-                "list_tasks": list_tasks,
-                "complete_task": complete_task,
-                "save_note": save_note,
-                "search_notes": search_notes,
-                "set_preference": set_preference,
-            }
+            initial_state={"tasks": []}
         )
 
+    @tool(description="Add a new task")
+    async def add_task(self, title: str = Field(description="Task title")) -> str:
+        tasks = self.state.get("tasks", [])
+        tasks.append({"title": title, "done": False})
+        await self.update_state(tasks=tasks)
+        return f"Added: {title}"
+
     async def on_connect(self, connection, ctx):
-        await super().on_connect(connection, ctx)
-        user_id = self.id.replace("user-", "")
-
-        # Personalized greeting
-        name = self.state.get("name") or user_id
-        pending = len([t for t in self.state.get("tasks", []) if not t["done"]])
-
-        greeting = f"Welcome back, {name}!"
-        if pending > 0:
-            greeting += f" You have {pending} pending tasks."
-
-        await connection.send(greeting)
+        await connection.send(f"Welcome back! You have {len(self.state['tasks'])} tasks.")
 
     async def on_message(self, connection, message):
-        # Update last active time
-        await self.update_state(last_active=datetime.now().isoformat())
-
-        # Stream AI response
+        # Stream response
         async for chunk in self.stream(message):
             await connection.send(chunk)
 
-
 if __name__ == "__main__":
-    config = AgentServerConfig(
-        idle_timeout=1800,  # 30 min idle timeout
-        max_agents=100,
-        enable_rest_api=True,
-    )
-    AgentServer(PersonalAssistant(), config=config).serve(port=8080)
+    AgentServer(PersonalAssistant).serve(port=8080)
 ```
 
-## With Authentication
+## Authentication
 
-Secure per-user access:
+Secure per-user access with middleware:
 
 ```python
-from ai_query import AgentServer, AgentServerConfig
+from ai_query.agents import AgentServer, AgentServerConfig
 
-async def auth_middleware(request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user = await verify_jwt(token)
+async def auth(request):
+    token = request.headers.get("Authorization")
+    return token == "secret-token"
 
-    if not user:
-        return False
-
-    # Ensure user can only access their own agent
-    agent_id = request.match_info["agent_id"]
-    return agent_id == f"user-{user.id}"
-
-config = AgentServerConfig(
-    auth=auth_middleware,
-    idle_timeout=3600,
-)
-
-AgentServer(PersonalAssistant(), config=config).serve(port=8080)
+config = AgentServerConfig(auth=auth)
+AgentServer(PersonalAssistant, config=config).serve(port=8080)
 ```
-
-## Client Example
-
-```javascript
-// JavaScript client for per-user assistant
-const userId = 'alice';
-const ws = new WebSocket(`ws://localhost:8080/agent/user-${userId}/ws`);
-const sse = new EventSource(`http://localhost:8080/agent/user-${userId}/events`);
-
-ws.onmessage = (e) => console.log('Assistant:', e.data);
-
-// AI streaming via SSE
-sse.addEventListener('ai_chunk', (e) => process.stdout.write(e.data));
-sse.addEventListener('ai_end', () => console.log());
-
-// Send messages
-ws.send("Add a task: Review quarterly report");
-ws.send("What tasks do I have?");
-ws.send("Set my preference for theme to dark");
-```
-
-## Persistence Options
-
-Choose the right storage backend:
-
-| Backend | Use Case |
-|---------|----------|
-| `MemoryStorage()` | Development, testing |
-| `SQLiteStorage(path)` | Single-server, local persistence |
-| Custom Redis/Postgres | Shared state, horizontal scaling |
-
-## Tips
-
-<AccordionGroup>
-  <Accordion title="Use meaningful agent IDs">
-    Use `user-{user_id}` or `session-{session_id}` patterns for clear identification.
-  </Accordion>
-
-  <Accordion title="Set appropriate idle timeouts">
-    Balance memory usage vs user experience. Longer for active users.
-  </Accordion>
-
-  <Accordion title="Personalize the experience">
-    Use stored preferences and history to make each assistant feel personal.
-  </Accordion>
-
-  <Accordion title="Implement proper auth">
-    Always verify users can only access their own agents in production.
-  </Accordion>
-</AccordionGroup>

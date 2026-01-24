@@ -9,7 +9,8 @@ Demonstrates:
 import asyncio
 import io
 from contextlib import redirect_stdout, redirect_stderr
-from ai_query import generate_text, google, tool, Field, step_count_is, StepStartEvent, StepFinishEvent
+from ai_query import generate_text, tool, Field, step_count_is, StepStartEvent, StepFinishEvent
+from ai_query.providers import google
 
 
 # --- Code Execution Tool ---

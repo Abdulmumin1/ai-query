@@ -8,7 +8,8 @@ Demonstrates:
 
 import asyncio
 import aiohttp
-from ai_query import generate_text, google, tool, Field, step_count_is, StepFinishEvent
+from ai_query import generate_text, tool, Field, step_count_is, StepFinishEvent
+from ai_query.providers import google
 
 
 # --- Tools ---

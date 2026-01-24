@@ -8,7 +8,8 @@ Deploy AI agents to serverless platforms where each request starts fresh. The `h
 ## Quick Start
 
 ```python
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 class SupportAgent(Agent):
     def __init__(self, agent_id: str):
@@ -39,7 +40,8 @@ class SupportAgent(Agent):
 # main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 app = FastAPI()
 
@@ -94,7 +96,8 @@ async def get_state(agent_id: str):
 # handler.py
 import json
 import asyncio
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 class OrderAgent(Agent):
     def __init__(self, agent_id: str):
@@ -187,7 +190,8 @@ Resources:
 import json
 from http.server import BaseHTTPRequestHandler
 import asyncio
-from ai_query import Agent, MemoryStorage, openai
+from ai_query.agents import Agent, MemoryStorage
+from ai_query.providers import openai
 
 class AssistantAgent(Agent):
     def __init__(self, agent_id: str):
@@ -240,7 +244,8 @@ For Vercel with persistence, use a custom storage backend with Vercel KV (Redis)
 import os
 from flask import Flask, request, jsonify
 import asyncio
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 app = Flask(__name__)
 
@@ -336,7 +341,8 @@ class DynamoDBStorage:
 
 
 # Usage
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent(
     "my-agent",
@@ -377,7 +383,8 @@ class RedisStorage:
 
 
 # Usage
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent(
     "my-agent",
@@ -442,7 +449,8 @@ class PostgreSQLStorage:
 
 
 # Usage
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent(
     "my-agent",
@@ -460,7 +468,8 @@ Build complex workflows by having agents call each other via HTTP:
 ```python
 # orchestrator.py
 import httpx
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 class OrchestratorAgent(Agent):
     def __init__(self, agent_id: str):

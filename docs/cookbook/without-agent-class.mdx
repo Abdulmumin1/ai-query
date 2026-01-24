@@ -19,7 +19,8 @@ Both support tools, multiple providers, and conversation history.
 ## Basic Usage
 
 ```python
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 result = await generate_text(
     model=openai("gpt-4o"),
@@ -35,7 +36,8 @@ print(f"Tokens used: {result.usage.total_tokens}")
 ## Streaming
 
 ```python
-from ai_query import stream_text, openai
+from ai_query import stream_text
+from ai_query.providers import openai
 
 result = stream_text(
     model=openai("gpt-4o"),
@@ -54,7 +56,8 @@ print(f"\nTokens: {result.usage.total_tokens}")
 ## With Tools
 
 ```python
-from ai_query import generate_text, openai, tool, Field
+from ai_query import generate_text
+from ai_query.providers import openai, tool, Field
 
 @tool(description="Get current weather for a location")
 def get_weather(
@@ -84,7 +87,8 @@ print(result.text)
 Manage history yourself with a list of messages.
 
 ```python
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 messages = []
 
@@ -109,7 +113,8 @@ await chat("What did I just say?")  # Model remembers
 Build a minimal chatbot without `Agent`.
 
 ```python
-from ai_query import generate_text, stream_text, openai, tool, Field
+from ai_query import generate_text, stream_text
+from ai_query.providers import openai, tool, Field
 
 class SimpleChatbot:
     def __init__(self, model, system: str = "You are a helpful assistant."):
@@ -165,7 +170,8 @@ async for chunk in bot.stream("Now show me writing to a file"):
 Switch providers easily.
 
 ```python
-from ai_query import generate_text, openai, anthropic, google
+from ai_query import generate_text
+from ai_query.providers import openai, anthropic, google
 
 async def ask_all(question: str):
     providers = [
@@ -187,7 +193,8 @@ async def ask_all(question: str):
 Control tool execution loops.
 
 ```python
-from ai_query import generate_text, openai, tool, Field, step_count_is, has_tool_call
+from ai_query import generate_text
+from ai_query.providers import openai, tool, Field, step_count_is, has_tool_call
 
 @tool(description="Execute a step")
 def execute_step(step: str = Field(description="Step to execute")) -> str:
@@ -215,7 +222,8 @@ result = await generate_text(
 Monitor execution with callbacks.
 
 ```python
-from ai_query import generate_text, openai, tool, Field
+from ai_query import generate_text
+from ai_query.providers import openai, tool, Field
 
 @tool(description="Search")
 def search(q: str = Field(description="Query")) -> str:
@@ -243,7 +251,8 @@ result = await generate_text(
 Generate embeddings without agents.
 
 ```python
-from ai_query import embed, embed_many, openai
+from ai_query import embed, embed_many
+from ai_query.providers import openai
 
 # Single text
 embedding = await embed(
@@ -277,7 +286,8 @@ A complete command-line chatbot.
 
 ```python
 import asyncio
-from ai_query import stream_text, openai, tool, Field
+from ai_query import stream_text
+from ai_query.providers import openai, tool, Field
 
 @tool(description="Get current time")
 def get_time() -> str:

@@ -13,7 +13,7 @@ from aiohttp import web, WSMsgType
 from ai_query.agents.websocket import Connection, ConnectionContext
 
 if TYPE_CHECKING:
-    from ai_query.agents.base import Agent
+    from ai_query.agents.agent import Agent
     from ai_query.agents.transport import AgentTransport
     from ai_query.agents.events import EventBus
 
@@ -118,7 +118,7 @@ class AioHttpSSEConnection(Connection):
         await self._response.write_eof()
 
 
-class AgentServer(Generic[State]):
+class AgentServer:
     """Multi-agent WebSocket server with routing.
 
     Routes clients to independent agent instances based on URL path.
@@ -133,7 +133,7 @@ class AgentServer(Generic[State]):
         - GET  /agents                 → List active agents (if enabled)
 
     Example:
-        class ChatRoom(ChatAgent, InMemoryAgent):
+        class ChatRoom(Agent):
             system = "You are helpful"
 
         # Start multi-agent server
@@ -146,10 +146,10 @@ class AgentServer(Generic[State]):
 
     def __init__(
         self,
-        agent_cls: type["Agent[State]"],
+        agent_cls: type[Agent],
         config: AgentServerConfig | None = None,
-        transport: "AgentTransport | None" = None,
-        event_bus: "EventBus | None" = None,
+        transport: AgentTransport | None = None,
+        event_bus: EventBus | None = None,
     ):
         """Initialize the agent server.
 
@@ -173,7 +173,7 @@ class AgentServer(Generic[State]):
 
     # ─── Core API ────────────────────────────────────────────────────────
 
-    def get_or_create(self, agent_id: str) -> "Agent[State]":
+    def get_or_create(self, agent_id: str) -> Agent:
         """Get or lazily create an agent by ID.
 
         Args:
@@ -388,8 +388,11 @@ class AgentServer(Generic[State]):
         if last_event_id_str:
             try:
                 last_event_id = int(last_event_id_str)
-                # Replay events in the background to not block the connection
-                asyncio.create_task(agent.replay_events(connection, last_event_id))
+                # Replay events in the background
+                async def replay():
+                    async for event in agent.replay_events(last_event_id):
+                        await connection.send_event(event.type, event.data)
+                asyncio.create_task(replay())
             except ValueError:
                 # Ignore invalid ID
                 pass
@@ -458,7 +461,8 @@ class AgentServer(Generic[State]):
                 # Create connection adapter for replay
                 connection = AioHttpSSEConnection(response, request)
                 # Replay events immediately
-                await agent.replay_events(connection, last_event_id)
+                async for event in agent.replay_events(last_event_id):
+                    await connection.send_event(event.type, event.data)
             except ValueError:
                 pass
 

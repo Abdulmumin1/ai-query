@@ -44,7 +44,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ## Example
 
 ```python
-from ai_query import generate_text, anthropic
+from ai_query import generate_text
+from ai_query.providers import anthropic
 
 result = await generate_text(
     model=anthropic("claude-4-5-sonnet-20250929"),

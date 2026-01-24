@@ -64,7 +64,8 @@ ai-query supports these Python types:
 Pass tools as a dictionary:
 
 ```python
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field
 
 @tool(description="Add two numbers")
 async def add(
@@ -161,7 +162,8 @@ for tr in result.tool_results:
 Control the maximum number of tool execution loops using [`stop_when`](/api-reference/types/stop-conditions):
 
 ```python
-from ai_query import generate_text, google, step_count_is
+from ai_query import generate_text
+from ai_query.providers import google, step_count_is
 
 result = await generate_text(
     model=google("gemini-2.0-flash"),
