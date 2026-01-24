@@ -137,7 +137,7 @@ class TestOpenAIProvider:
 
     def test_openai_function_creates_model(self):
         """openai() should create a LanguageModel."""
-        from ai_query import openai
+        from ai_query.providers import openai
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             model = openai("gpt-4o")
@@ -148,14 +148,14 @@ class TestOpenAIProvider:
 
     def test_openai_with_custom_api_key(self):
         """openai() should accept custom API key."""
-        from ai_query import openai
+        from ai_query.providers import openai
 
         model = openai("gpt-4o", api_key="custom-key")
         assert model.provider.api_key == "custom-key"
 
     def test_openai_with_custom_base_url(self):
         """openai() should accept custom base URL."""
-        from ai_query import openai
+        from ai_query.providers import openai
 
         model = openai("gpt-4o", api_key="key", base_url="https://custom.api.com")
         assert model.provider.base_url == "https://custom.api.com"
@@ -216,7 +216,7 @@ class TestAnthropicProvider:
 
     def test_anthropic_function_creates_model(self):
         """anthropic() should create a LanguageModel."""
-        from ai_query import anthropic
+        from ai_query.providers import anthropic
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
             model = anthropic("claude-sonnet-4-20250514")
@@ -227,7 +227,7 @@ class TestAnthropicProvider:
 
     def test_anthropic_with_custom_api_key(self):
         """anthropic() should accept custom API key."""
-        from ai_query import anthropic
+        from ai_query.providers import anthropic
 
         model = anthropic("claude-sonnet-4-20250514", api_key="custom-key")
         assert model.provider.api_key == "custom-key"
@@ -268,7 +268,7 @@ class TestGoogleProvider:
 
     def test_google_function_creates_model(self):
         """google() should create a LanguageModel."""
-        from ai_query import google
+        from ai_query.providers import google
 
         with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
             model = google("gemini-2.0-flash")
@@ -279,7 +279,7 @@ class TestGoogleProvider:
 
     def test_google_with_custom_api_key(self):
         """google() should accept custom API key."""
-        from ai_query import google
+        from ai_query.providers import google
 
         model = google("gemini-2.0-flash", api_key="custom-key")
         assert model.provider.api_key == "custom-key"

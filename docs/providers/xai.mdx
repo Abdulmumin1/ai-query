@@ -18,7 +18,8 @@ Get your API key from [xAI Console](https://console.x.ai/).
 ## Usage
 
 ```python
-from ai_query import generate_text, xai
+from ai_query import generate_text
+from ai_query.providers import xai
 
 result = await generate_text(
     model=xai("grok-2-1212"),
@@ -59,7 +60,8 @@ result = await generate_text(
 Tool calling is fully supported:
 
 ```python
-from ai_query import generate_text, xai, tool, Field
+from ai_query import generate_text
+from ai_query.providers import xai, tool, Field
 
 @tool(description="Get weather")
 async def get_weather(location: str = Field(description="City")) -> str:
@@ -75,7 +77,8 @@ result = await generate_text(
 ## Streaming
 
 ```python
-from ai_query import stream_text, xai
+from ai_query import stream_text
+from ai_query.providers import xai
 
 result = stream_text(
     model=xai("grok-2-1212"),

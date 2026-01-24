@@ -12,7 +12,8 @@ Messages can contain multiple parts (text, images, files).
 ```python
 import asyncio
 import base64
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 class MultimodalChatbot:
     def __init__(self, model, system_prompt: str = None):
@@ -83,7 +84,8 @@ asyncio.run(main())
 You can also use `Message` and content part objects for type safety:
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 from ai_query.types import Message, TextPart, ImagePart
 
 messages = [
@@ -104,7 +106,8 @@ result = await generate_text(model=google("gemini-2.0-flash"), messages=messages
 ```python
 import asyncio
 import base64
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 class PDFChatbot:
     def __init__(self, model):
@@ -165,7 +168,8 @@ asyncio.run(main())
 ```python
 import asyncio
 import base64
-from ai_query import generate_text, anthropic
+from ai_query import generate_text
+from ai_query.providers import anthropic
 
 async def compare_images(image_paths: list[str], question: str) -> str:
     """Compare multiple images."""
@@ -202,7 +206,8 @@ asyncio.run(main())
 ```python
 import asyncio
 import base64
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 async def debug_screenshot(
     screenshot_path: str,

@@ -11,7 +11,9 @@ Connect:
     curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"message": "Hello @ai"}'
 """
 
-from ai_query import Agent, MemoryStorage, stream_text, google, tool, Field
+from ai_query import stream_text, tool, Field
+from ai_query.agents import Agent, MemoryStorage
+from ai_query.providers import google
 
 
 class CustomAIAgent(Agent):

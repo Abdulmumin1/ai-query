@@ -3,111 +3,47 @@ title: "Persistent Chatbot"
 description: "Build an AI chatbot that remembers conversations across sessions"
 ---
 
-Create a chatbot that persists conversation history, so users can continue where they left off.
-
-## What You'll Build
-
-A support chatbot that:
-- Remembers previous conversations
-- Uses tools to look up information
-- Persists state between restarts
+Create a chatbot that persists conversation history using SQLite, so users can continue where they left off.
 
 ## Full Example
 
 ```python
 import asyncio
-from ai_query import Agent, SQLiteStorage, openai, tool, Field
+from ai_query import tool, Field
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 class SupportBot(Agent):
     def __init__(self, user_id: str):
-        @tool(description="Look up order details by order ID")
-        async def lookup_order(
-            order_id: str = Field(description="The order ID to look up")
-        ) -> str:
-            orders = {
-                "ORD-123": "MacBook Pro - Shipped Jan 5, Arrives Jan 8",
-                "ORD-456": "AirPods Pro - Processing, Ships tomorrow",
-                "ORD-789": "iPhone Case - Delivered Jan 3",
-            }
-            return orders.get(order_id, f"Order {order_id} not found")
-
-        @tool(description="Create a support ticket")
-        async def create_ticket(
-            subject: str = Field(description="Ticket subject"),
-            priority: str = Field(description="low, medium, or high")
-        ) -> str:
-            ticket_num = self.state.get("ticket_count", 0) + 1
-            await self.update_state(ticket_count=ticket_num)
-            return f"Created ticket #{ticket_num}: {subject} (Priority: {priority})"
-
-        @tool(description="Remember the user's name")
-        async def remember_name(
-            name: str = Field(description="The user's name")
-        ) -> str:
-            await self.update_state(user_name=name)
-            return f"I'll remember your name is {name}"
-
         super().__init__(
             user_id,
             model=openai("gpt-4o"),
-            system="""You are a helpful customer support agent.
-
-            Remember:
-            - Be friendly and professional
-            - Use tools to look up orders and create tickets
-            - If the user has told you their name, use it
-            - Reference previous conversations when relevant
-            """,
+            system="You are a helpful customer support agent.",
             storage=SQLiteStorage("./support_bot.db"),
-            initial_state={"ticket_count": 0, "user_name": None},
-            tools={
-                "lookup_order": lookup_order,
-                "create_ticket": create_ticket,
-                "remember_name": remember_name,
-            }
+            initial_state={"ticket_count": 0}
         )
 
+    @tool(description="Create a support ticket")
+    async def create_ticket(
+        self,
+        subject: str = Field(description="Ticket subject")
+    ) -> str:
+        count = self.state.get("ticket_count", 0) + 1
+        await self.update_state(ticket_count=count)
+        return f"Created ticket #{count}: {subject}"
 
 async def main():
-    user_id = "user-12345"
-
-    print("=" * 50)
-    print("Support Bot - Session 1")
-    print("=" * 50)
-
+    user_id = "user-123"
+    
+    # Session 1
     bot = SupportBot(user_id)
     async with bot:
-        # First interaction
-        response = await bot.chat(
-            "Hi! My name is Sarah. Can you check on order ORD-123?"
-        )
-        print(f"Bot: {response}\n")
+        print(await bot.chat("Hi, I'm Alice. Create a ticket for my keyboard."))
 
-        # Follow up
-        response = await bot.chat(
-            "Great! Can you also create a ticket about late delivery?"
-        )
-        print(f"Bot: {response}\n")
-
-    print("\n" + "=" * 50)
-    print("Support Bot - Session 2 (After Restart)")
-    print("=" * 50)
-
-    # Simulate restart - conversation history is preserved!
+    # Session 2 (Persistent!)
     bot2 = SupportBot(user_id)
     async with bot2:
-        print(f"Loaded {len(bot2.messages)} previous messages\n")
-
-        # Bot should remember the context
-        response = await bot2.chat(
-            "What was the status of my order again?"
-        )
-        print(f"Bot: {response}\n")
-
-        # Check if name was remembered
-        response = await bot2.chat("Do you remember my name?")
-        print(f"Bot: {response}")
-
+        print(await bot2.chat("What was that ticket number again?"))
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -115,84 +51,17 @@ if __name__ == "__main__":
 
 ## How It Works
 
-### 1. Agent with Injected Storage
+### Composition over Inheritance
+
+The `Agent` class uses composition for storage. Instead of inheriting from a specific storage agent, you pass a storage backend to the constructor:
 
 ```python
-class SupportBot(Agent):
-    def __init__(self, user_id: str):
-        super().__init__(
-            user_id,
-            model=openai("gpt-4o"),
-            storage=SQLiteStorage("./support_bot.db"),
-            ...
-        )
+agent = Agent("id", storage=SQLiteStorage("db.sqlite"))
 ```
 
-The new Agent uses composition:
-- **model**: The AI model to use for chat
-- **storage**: Where to persist state and messages (SQLiteStorage for persistence)
+### Automatic Persistence
 
-### 2. Dynamic System Prompt
-
-You can customize the system prompt based on state:
-
-```python
-# Access state in tools or hooks
-name = self.state.get("user_name")
-if name:
-    # Personalize the experience
-    ...
-```
-
-### 3. Tools with State Access
-
-Tools can access and modify agent state:
-
-```python
-@tool(description="Create a support ticket")
-async def create_ticket(subject: str, priority: str) -> str:
-    # Access self.state here
-    ticket_num = self.state.get("ticket_count", 0) + 1
-    await self.update_state(ticket_count=ticket_num)
-    return f"Created ticket #{ticket_num}"
-```
-
-## Streaming Responses
-
-For real-time UX, stream the responses:
-
-```python
-bot = SupportBot(user_id)
-async with bot:
-    print("Bot: ", end="")
-    async for chunk in bot.stream("Tell me about your services"):
-        print(chunk, end="", flush=True)
-    print()
-```
-
-## Running with Different Users
-
-Each user gets their own conversation history:
-
-```python
-# Alice's conversation
-alice = SupportBot("alice-id")
-async with alice:
-    await alice.chat("I'm Alice, I need help with ORD-123")
-
-# Bob's conversation (completely separate)
-bob = SupportBot("bob-id")
-async with bob:
-    await bob.chat("I'm Bob, check ORD-456 please")
-```
-
-## Next Steps
-
-<CardGroup cols={2}>
-  <Card title="Real-time Agent" href="/cookbook/realtime-agent">
-    Add WebSocket support for live updates
-  </Card>
-  <Card title="Agent API Reference" href="/api-reference/agent">
-    Full API documentation
-  </Card>
-</CardGroup>
+When using `async with agent:`, the agent automatically:
+1. Loads state and messages from storage on start.
+2. Saves messages after every `chat()` or `stream()` call.
+3. Saves state whenever `set_state()` or `update_state()` is called.

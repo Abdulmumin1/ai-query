@@ -97,7 +97,8 @@ async def search(
 ### Using Tools
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 result = await generate_text(
     model=google("gemini-2.0-flash"),

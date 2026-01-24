@@ -23,7 +23,8 @@ Control when the agent loop terminates using [stop conditions](/api-reference/ty
 Use `step_count_is(n)` to stop after a specific number of steps:
 
 ```python
-from ai_query import generate_text, google, step_count_is
+from ai_query import generate_text
+from ai_query.providers import google, step_count_is
 
 result = await generate_text(
     model=google("gemini-2.0-flash"),
@@ -38,7 +39,8 @@ result = await generate_text(
 Use `has_tool_call(name)` to stop when a specific tool is called:
 
 ```python
-from ai_query import generate_text, google, has_tool_call, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, has_tool_call, tool, Field
 
 @tool(description="Mark the task as complete")
 async def complete_task(
@@ -70,7 +72,8 @@ Monitor agent execution with callbacks for each step.
 Called when a new step begins:
 
 ```python
-from ai_query import generate_text, google, StepStartEvent
+from ai_query import generate_text
+from ai_query.providers import google, StepStartEvent
 
 def handle_step_start(event: StepStartEvent):
     print(f"Starting step {event.step_number}")
@@ -88,7 +91,8 @@ result = await generate_text(
 Called when a step completes:
 
 ```python
-from ai_query import generate_text, google, StepFinishEvent
+from ai_query import generate_text
+from ai_query.providers import google, StepFinishEvent
 
 def handle_step_finish(event: StepFinishEvent):
     print(f"Step {event.step_number} complete")
@@ -110,9 +114,10 @@ Here's a complete example of a task planning agent:
 ```python
 import asyncio
 from ai_query import (
-    generate_text, google, tool, Field,
+    generate_text, tool, Field,
     has_tool_call, StepStartEvent, StepFinishEvent
 )
+from ai_query.providers import google
 
 # Define tools
 @tool(description="Create a plan for a task")
@@ -185,7 +190,8 @@ for i, step in enumerate(result.steps):
 Agent loops work with streaming too:
 
 ```python
-from ai_query import stream_text, google
+from ai_query import stream_text
+from ai_query.providers import google
 
 result = stream_text(
     model=google("gemini-2.0-flash"),

@@ -9,7 +9,8 @@ Demonstrates:
 import asyncio
 import aiohttp
 from datetime import datetime
-from ai_query import generate_text, google, tool, Field, has_tool_call, step_count_is, StepFinishEvent
+from ai_query import generate_text, tool, Field, has_tool_call, step_count_is, StepFinishEvent
+from ai_query.providers import google
 
 
 # --- Task State ---

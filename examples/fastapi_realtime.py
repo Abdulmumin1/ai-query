@@ -19,7 +19,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ai_query import Agent, MemoryStorage, tool, Field, google
+from ai_query import tool, Field
+from ai_query.agents import Agent, MemoryStorage
+from ai_query.providers import google
 
 
 # ─── Agent Definition ───────────────────────────────────────────────────

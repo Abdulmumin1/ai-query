@@ -272,7 +272,8 @@ def has_tool_call(tool_name: str) -> StopCondition
 ### Example
 
 ```python
-from ai_query import generate_text, google, step_count_is, has_tool_call
+from ai_query import generate_text
+from ai_query.providers import google, step_count_is, has_tool_call
 
 # Stop after 5 steps
 result = await generate_text(

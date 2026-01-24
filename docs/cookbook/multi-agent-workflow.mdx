@@ -10,7 +10,8 @@ Build workflows where multiple specialized agents collaborate to complete comple
 Create specialized agents for different tasks, then orchestrate them with a coordinator:
 
 ```python
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field
 
 # Specialized "agents" as tools
 @tool(description="Research agent: searches and gathers information")
@@ -52,7 +53,8 @@ A full content creation pipeline with research, writing, and editing:
 
 ```python
 import asyncio
-from ai_query import generate_text, google, tool, Field, step_count_is
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field, step_count_is
 
 class ContentPipeline:
     def __init__(self):
@@ -151,7 +153,8 @@ asyncio.run(main())
 For more complex workflows where agents need to maintain state:
 
 ```python
-from ai_query import Agent, MemoryStorage, openai
+from ai_query.agents import Agent, MemoryStorage
+from ai_query.providers import openai
 
 class ResearcherAgent(Agent):
     def __init__(self):
@@ -205,7 +208,8 @@ Run multiple agents in parallel for faster results:
 
 ```python
 import asyncio
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field
 
 async def analyze_with_specialists(data: str) -> dict:
     async def technical_analysis(data: str) -> str:

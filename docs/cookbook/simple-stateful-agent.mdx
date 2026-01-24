@@ -21,7 +21,7 @@ The simplest stateful agent uses `MemoryStorage`:
 
 ```python
 import asyncio
-from ai_query import Agent, MemoryStorage
+from ai_query.agents import Agent, MemoryStorage
 
 class CounterAgent(Agent):
     def __init__(self, agent_id: str):
@@ -67,7 +67,7 @@ Switch to `SQLiteStorage` for data that survives restarts:
 
 ```python
 import asyncio
-from ai_query import Agent, SQLiteStorage
+from ai_query.agents import Agent, SQLiteStorage
 
 class PersistentCounter(Agent):
     def __init__(self, agent_id: str):
@@ -111,7 +111,7 @@ React to agent events:
 
 ```python
 import asyncio
-from ai_query import Agent, SQLiteStorage
+from ai_query.agents import Agent, SQLiteStorage
 
 class LoggingCounter(Agent):
     def __init__(self, agent_id: str):
@@ -155,7 +155,7 @@ Each agent ID is independent:
 
 ```python
 import asyncio
-from ai_query import Agent, SQLiteStorage
+from ai_query.agents import Agent, SQLiteStorage
 
 class UserStats(Agent):
     def __init__(self, agent_id: str):

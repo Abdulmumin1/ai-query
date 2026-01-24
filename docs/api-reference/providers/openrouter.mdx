@@ -45,7 +45,8 @@ export OPENROUTER_API_KEY="sk-or-v1-..."
 ## Example
 
 ```python
-from ai_query import generate_text, openrouter
+from ai_query import generate_text
+from ai_query.providers import openrouter
 
 result = await generate_text(
     model=openrouter("openai/gpt-4o"),

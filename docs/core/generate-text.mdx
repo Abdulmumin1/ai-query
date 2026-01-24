@@ -9,7 +9,8 @@ The `generate_text` function is the primary way to generate text using ai-query.
 
 ```python
 import asyncio
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 async def main():
     result = await generate_text(
@@ -40,7 +41,8 @@ asyncio.run(main())
 For multi-turn conversations, use the `messages` parameter:
 
 ```python
-from ai_query import generate_text, anthropic
+from ai_query import generate_text
+from ai_query.providers import anthropic
 
 result = await generate_text(
     model=anthropic("claude-sonnet-4-20250514"),

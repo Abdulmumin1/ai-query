@@ -45,7 +45,8 @@ export GROQ_API_KEY="gsk_..."
 ## Example
 
 ```python
-from ai_query import generate_text, groq
+from ai_query import generate_text
+from ai_query.providers import groq
 
 result = await generate_text(
     model=groq("llama-3.3-70b-versatile"),

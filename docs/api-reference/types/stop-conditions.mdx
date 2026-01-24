@@ -36,7 +36,8 @@ def step_count_is(n: int) -> StopCondition
 #### Example
 
 ```python
-from ai_query import generate_text, google, step_count_is
+from ai_query import generate_text
+from ai_query.providers import google, step_count_is
 
 result = await generate_text(
     model=google("gemini-2.0-flash"),
@@ -69,7 +70,8 @@ def has_tool_call(tool_name: str) -> StopCondition
 #### Example
 
 ```python
-from ai_query import generate_text, google, has_tool_call, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, has_tool_call, tool, Field
 
 @tool(description="Mark the task as complete")
 async def finish(summary: str = Field(description="Summary")) -> str:
@@ -92,7 +94,8 @@ result = await generate_text(
 You can create custom stop conditions by defining a function that matches the `StopCondition` signature:
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 from ai_query.types import StepResult
 
 def stop_on_error(step: StepResult) -> bool:
@@ -145,7 +148,8 @@ result = await generate_text(
 The `stop_when` parameter accepts any `StopCondition`:
 
 ```python
-from ai_query import generate_text, stream_text, google, step_count_is, has_tool_call
+from ai_query import generate_text, stream_text
+from ai_query.providers import google, step_count_is, has_tool_call
 
 # With generate_text
 result = await generate_text(

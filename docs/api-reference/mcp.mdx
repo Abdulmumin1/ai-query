@@ -171,7 +171,8 @@ TransportType = Literal["stdio", "sse", "streamable_http"]
 ## Example
 
 ```python
-from ai_query import generate_text, openai, mcp, merge_tools, tool, Field
+from ai_query import generate_text
+from ai_query.providers import openai, mcp, merge_tools, tool, Field
 
 @tool(description="Add two numbers")
 def add(a: int = Field(description="First number"),

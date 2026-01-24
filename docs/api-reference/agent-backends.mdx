@@ -8,7 +8,9 @@ ai-query provides built-in storage backends for different use cases. Storage bac
 ## Import
 
 ```python
-from ai_query import Storage, MemoryStorage, SQLiteStorage
+from ai_query import Storage
+from ai_query.agents import MemoryStorage
+from ai_query.agents import SQLiteStorage
 ```
 
 ## Storage Protocol
@@ -32,7 +34,7 @@ class Storage(Protocol):
 In-memory storage for development and testing. Data is lost when the process exits.
 
 ```python
-from ai_query import MemoryStorage
+from ai_query.agents import MemoryStorage
 ```
 
 ### Constructor
@@ -46,7 +48,8 @@ No parameters required. Creates an empty in-memory store.
 ### Usage
 
 ```python
-from ai_query import Agent, MemoryStorage, openai
+from ai_query.agents import Agent, MemoryStorage
+from ai_query.providers import openai
 
 agent = Agent(
     "my-agent",
@@ -74,7 +77,7 @@ async with agent:
 Async SQLite persistence using `aiosqlite`. Non-blocking database operations that won't freeze your event loop.
 
 ```python
-from ai_query import SQLiteStorage
+from ai_query.agents import SQLiteStorage
 ```
 
 ### Constructor
@@ -90,7 +93,8 @@ SQLiteStorage(path: str)
 ### Usage
 
 ```python
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 agent = Agent(
     "user-123",
@@ -172,7 +176,8 @@ class RedisStorage:
         return await self.client.keys(f"{prefix}*")
 
 # Use it
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent(
     "bot",

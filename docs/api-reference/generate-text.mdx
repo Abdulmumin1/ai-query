@@ -86,7 +86,8 @@ async def generate_text(
 ### Basic Usage
 
 ```python
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 result = await generate_text(
     model=openai("gpt-4o"),
@@ -108,7 +109,8 @@ result = await generate_text(
 ### With Tools
 
 ```python
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field
 
 @tool(description="Get current time")
 def get_time() -> str:
@@ -125,7 +127,8 @@ result = await generate_text(
 ### With Messages
 
 ```python
-from ai_query import generate_text, anthropic
+from ai_query import generate_text
+from ai_query.providers import anthropic
 
 result = await generate_text(
     model=anthropic("claude-sonnet-4-20250514"),
@@ -140,7 +143,8 @@ result = await generate_text(
 ### With Stop Condition
 
 ```python
-from ai_query import generate_text, google, has_tool_call, step_count_is
+from ai_query import generate_text
+from ai_query.providers import google, has_tool_call, step_count_is
 
 # Stop when a specific tool is called
 result = await generate_text(

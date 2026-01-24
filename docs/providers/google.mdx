@@ -16,7 +16,8 @@ export GOOGLE_API_KEY="..."
 ## Usage
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 result = await generate_text(
     model=google("gemini-2.5-flash"),
@@ -135,7 +136,8 @@ Available thresholds: `BLOCK_NONE`, `BLOCK_ONLY_HIGH`, `BLOCK_MEDIUM_AND_ABOVE`,
 Gemini models support tool calling:
 
 ```python
-from ai_query import generate_text, google, tool, Field
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field
 
 @tool(description="Get current stock price")
 async def get_stock_price(
@@ -156,7 +158,8 @@ result = await generate_text(
 ## Streaming
 
 ```python
-from ai_query import stream_text, google
+from ai_query import stream_text
+from ai_query.providers import google
 
 result = stream_text(
     model=google("gemini-2.0-flash"),

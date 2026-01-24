@@ -14,6 +14,8 @@ from ai_query.agents.websocket import Connection, ConnectionContext
 
 if TYPE_CHECKING:
     from ai_query.types import ProviderOptions, StopCondition, ToolSet
+    from ai_query.agents.transport import AgentTransport
+    from ai_query.agents.events import EventBus
 
 
 Content = str | list[Any]
@@ -76,6 +78,8 @@ class Agent:
         initial_state: dict[str, Any] | None = None,
         stop_when: "StopCondition | list[StopCondition] | None" = None,
         provider_options: "ProviderOptions | None" = None,
+        transport: "AgentTransport | None" = None,
+        event_bus: "EventBus | None" = None,
     ) -> None:
         self._id = id
         self._storage = storage or MemoryStorage()
@@ -94,6 +98,10 @@ class Agent:
         # Event log for durability & replay
         self._event_log: list[dict[str, Any]] = []
         self._event_counter: int = 0
+
+        # Communication
+        self._transport = transport
+        self._event_bus = event_bus
 
         # Emit handler - injected by transport layer (serve, AgentServer, etc.)
         # Signature: async def handler(event_type: str, data: dict, event_id: int)
@@ -492,12 +500,61 @@ class Agent:
 
         return {"error": f"Unknown action: {action}"}
 
+    async def call(
+        self,
+        agent_id: str,
+        method: str,
+        *,
+        timeout: float = 30.0,
+        **kwargs: Any
+    ) -> Any:
+        """Call another agent's method via the transport layer.
+
+        Args:
+            agent_id: The target agent's ID.
+            method: The method to call.
+            timeout: Timeout in seconds.
+            **kwargs: Arguments for the method.
+
+        Returns:
+            The result of the call.
+        """
+        if self._transport is None:
+            raise RuntimeError(
+                "No transport configured. Agents must be managed by an AgentServer "
+                "or provided a transport manually to use call()."
+            )
+
+        payload = {"method": method, "params": kwargs}
+        result = await self._transport.invoke(agent_id, payload, timeout=timeout)
+        
+        if "error" in result:
+            raise RuntimeError(f"Agent call failed: {result['error']}")
+            
+        return result.get("result")
+
     async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Handle an invoke() call. Override to implement custom logic."""
-        raise NotImplementedError(
-            f"Agent {self.id} does not implement handle_invoke(). "
-            "Override this method to handle invoke() calls."
-        )
+        """Handle an incoming call from another agent.
+
+        Default implementation routes to 'method' if present in payload.
+        Override this for custom routing logic.
+        """
+        method = payload.get("method")
+        params = payload.get("params", {})
+
+        if not method:
+            return {"error": "Missing 'method' in call payload"}
+
+        # Look for method on self
+        handler = getattr(self, f"on_call_{method}", None)
+        if handler and callable(handler):
+            try:
+                result = await handler(**params)
+                return {"result": result}
+            except Exception as e:
+                return {"error": str(e)}
+
+        return {"error": f"Method '{method}' not implemented on agent {self.id}"}
 
     async def handle_request_stream(self, request: dict[str, Any]) -> AsyncIterator[str]:
         """Serverless streaming request handler.

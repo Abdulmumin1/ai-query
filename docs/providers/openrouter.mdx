@@ -18,7 +18,8 @@ Get your API key from [OpenRouter](https://openrouter.ai/keys).
 ## Usage
 
 ```python
-from ai_query import generate_text, openrouter
+from ai_query import generate_text
+from ai_query.providers import openrouter
 
 result = await generate_text(
     model=openrouter("openai/gpt-4o"),
@@ -63,7 +64,8 @@ result = await generate_text(
 Tool calling works the same as with other providers:
 
 ```python
-from ai_query import generate_text, openrouter, tool, Field
+from ai_query import generate_text
+from ai_query.providers import openrouter, tool, Field
 
 @tool(description="Search the web")
 async def search(query: str = Field(description="Search query")) -> str:
@@ -79,7 +81,8 @@ result = await generate_text(
 ## Streaming
 
 ```python
-from ai_query import stream_text, openrouter
+from ai_query import stream_text
+from ai_query.providers import openrouter
 
 result = stream_text(
     model=openrouter("openai/gpt-4o"),

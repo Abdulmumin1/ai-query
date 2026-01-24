@@ -11,7 +11,9 @@ Or use curl:
     curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d '{"message": "Add a task: buy groceries"}'
 """
 
-from ai_query import Agent, MemoryStorage, tool, Field, google
+from ai_query import tool, Field
+from ai_query.agents import Agent, MemoryStorage
+from ai_query.providers import google
 
 
 class TaskAssistant(Agent):

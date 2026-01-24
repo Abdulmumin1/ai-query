@@ -28,7 +28,8 @@ poetry add ai-query
 
 ```python
 import asyncio
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 async def main():
     result = await generate_text(
@@ -47,7 +48,8 @@ The same code works with any provider:
 <CodeGroup>
 
 ```python OpenAI
-from ai_query import generate_text, openai
+from ai_query import generate_text
+from ai_query.providers import openai
 
 result = await generate_text(
     model=openai("gpt-4o"),
@@ -56,7 +58,8 @@ result = await generate_text(
 ```
 
 ```python Anthropic
-from ai_query import generate_text, anthropic
+from ai_query import generate_text
+from ai_query.providers import anthropic
 
 result = await generate_text(
     model=anthropic("claude-sonnet-4-20250514"),
@@ -65,7 +68,8 @@ result = await generate_text(
 ```
 
 ```python Google
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 result = await generate_text(
     model=google("gemini-2.0-flash"),
@@ -80,7 +84,8 @@ result = await generate_text(
 For real-time output:
 
 ```python
-from ai_query import stream_text, openai
+from ai_query import stream_text
+from ai_query.providers import openai
 
 async for chunk in stream_text(
     model=openai("gpt-4o"),
@@ -94,7 +99,8 @@ async for chunk in stream_text(
 Give your AI the ability to call functions:
 
 ```python
-from ai_query import generate_text, openai, tool, Field
+from ai_query import generate_text
+from ai_query.providers import openai, tool, Field
 
 @tool(description="Get the current weather for a location")
 async def get_weather(
@@ -115,7 +121,8 @@ print(result.text)
 Create an agent that remembers conversations:
 
 ```python
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent("assistant", model=openai("gpt-4o"))
 
@@ -129,7 +136,8 @@ async with agent:
 Make your agent remember across restarts:
 
 ```python
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 agent = Agent(
     "assistant",
@@ -150,7 +158,8 @@ async with agent:
 Use abort signals for timeouts and cancellation:
 
 ```python
-from ai_query import generate_text, openai, AbortSignal
+from ai_query import generate_text
+from ai_query.providers import openai, AbortSignal
 
 result = await generate_text(
     model=openai("gpt-4o"),

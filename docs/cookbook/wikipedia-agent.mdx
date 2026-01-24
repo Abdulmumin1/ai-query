@@ -16,7 +16,8 @@ This example demonstrates building a research agent that can search Wikipedia an
 ```python
 import asyncio
 import aiohttp
-from ai_query import stream_text, google, tool, Field
+from ai_query import stream_text
+from ai_query.providers import google, tool, Field
 
 @tool(description="Search Wikipedia for articles matching a query")
 async def search_wikipedia(

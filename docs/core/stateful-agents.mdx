@@ -8,7 +8,8 @@ ai-query provides a powerful `Agent` class for building stateful AI applications
 ## Quick Start
 
 ```python
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent("assistant", model=openai("gpt-4o"))
 
@@ -23,7 +24,8 @@ async with agent:
 ## 30 Seconds to Your First Agent
 
 ```python
-from ai_query import Agent, openai
+from ai_query.agents import Agent
+from ai_query.providers import openai
 
 agent = Agent("my-agent", model=openai("gpt-4o"))
 
@@ -34,7 +36,8 @@ async with agent:
 ## 60 Seconds to Persistence
 
 ```python
-from ai_query import Agent, SQLiteStorage, openai
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
 
 agent = Agent(
     "my-agent",
@@ -86,7 +89,7 @@ Choose where your data lives by passing a storage backend:
 | Custom | Redis, DynamoDB, etc. | Production, distributed |
 
 ```python
-from ai_query import Agent, MemoryStorage, SQLiteStorage
+from ai_query.agents import Agent, MemoryStorage, SQLiteStorage
 
 # In-memory (default)
 agent = Agent("bot", storage=MemoryStorage())
@@ -128,7 +131,8 @@ agent = Agent("bot", storage=RedisStorage("redis://localhost"))
 Give your agent capabilities:
 
 ```python
-from ai_query import Agent, openai, tool, Field
+from ai_query.agents import Agent
+from ai_query.providers import openai, tool, Field
 
 @tool(description="Search the web")
 async def search(query: str = Field(description="Search query")) -> str:
@@ -167,7 +171,7 @@ async with agent:
 Cancel long-running operations:
 
 ```python
-from ai_query import Agent, AbortController, AbortError
+from ai_query.agents import Agent, AbortController, AbortError
 
 controller = AbortController()
 
@@ -246,7 +250,8 @@ For production, use `AgentServer` which supports:
 - Rate limiting hooks
 
 ```python
-from ai_query import AgentServer, AgentServerConfig
+from ai_query.agents import AgentServer
+from ai_query.agents import AgentServerConfig
 
 async def auth_check(request):
     return request.headers.get("X-API-Key") == "secret"

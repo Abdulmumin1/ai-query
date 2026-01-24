@@ -62,7 +62,8 @@ async def embed(
 #### Basic Usage
 
 ```python
-from ai_query import embed, openai
+from ai_query import embed
+from ai_query.providers import openai
 
 result = await embed(
     model=openai.embedding("text-embedding-3-small"),
@@ -85,7 +86,8 @@ print(len(result.embedding))  # 256
 #### Using Google
 
 ```python
-from ai_query import embed, google
+from ai_query import embed
+from ai_query.providers import google
 
 result = await embed(
     model=google.embedding("gemini-embedding-001"),
@@ -152,7 +154,8 @@ async def embed_many(
 #### Basic Usage
 
 ```python
-from ai_query import embed_many, openai
+from ai_query import embed_many
+from ai_query.providers import openai
 
 result = await embed_many(
     model=openai.embedding("text-embedding-3-small"),
@@ -188,7 +191,7 @@ result = await embed_many(
 A wrapper combining an embedding provider and model identifier.
 
 ```python
-from ai_query import openai, google
+from ai_query.providers import openai, google
 
 # Create with provider embedding functions
 model = openai.embedding("text-embedding-3-small")

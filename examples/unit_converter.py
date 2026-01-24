@@ -7,7 +7,8 @@ Demonstrates:
 """
 
 import asyncio
-from ai_query import generate_text, google, tool, Field, step_count_is
+from ai_query import generate_text, tool, Field, step_count_is
+from ai_query.providers import google
 
 
 # --- Conversion Tools ---

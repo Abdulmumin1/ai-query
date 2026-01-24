@@ -16,7 +16,9 @@ This example demonstrates how `enable_event_log=True` enables automatic event re
 import os
 import asyncio
 from datetime import datetime
-from ai_query import Agent, AgentServer, AgentServerConfig, SQLiteStorage, tool, Field, step_count_is, google
+from ai_query.agents import Agent, AgentServer
+from ai_query.agents import AgentServerConfig, SQLiteStorage, tool, Field, step_count_is
+from ai_query.providers import google
 
 # You'll need TAVILY_API_KEY env var for this example
 # https://tavily.com

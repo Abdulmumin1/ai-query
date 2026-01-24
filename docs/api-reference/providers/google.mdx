@@ -43,7 +43,8 @@ export GOOGLE_API_KEY="..."
 ## Example
 
 ```python
-from ai_query import generate_text, google
+from ai_query import generate_text
+from ai_query.providers import google
 
 result = await generate_text(
     model=google("gemini-2.5-flash"),

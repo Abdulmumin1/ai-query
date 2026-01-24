@@ -14,7 +14,9 @@ Each user's research history and findings are isolated.
 """
 
 import json
-from ai_query import Agent, AgentServer, AgentServerConfig, MemoryStorage, tool, Field, google
+from ai_query import tool, Field
+from ai_query.agents import Agent, AgentServer, AgentServerConfig, MemoryStorage
+from ai_query.providers import google
 
 
 class ResearchAssistant(Agent):

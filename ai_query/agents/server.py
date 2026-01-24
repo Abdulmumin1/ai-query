@@ -11,7 +11,7 @@ from aiohttp import web, WSMsgType
 from ai_query.agents.websocket import Connection, ConnectionContext
 
 if TYPE_CHECKING:
-    from ai_query.agents.v2 import Agent
+    from ai_query.agents.agent import Agent
 
 
 class AioHttpConnection(Connection):
