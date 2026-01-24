@@ -4,6 +4,7 @@ description: "OSINT Intelligence Tool with Durable SSE Streaming"
 ---
 
 A professional-grade profile investigation agent with:
+
 - **Server-Sent Events (SSE)** for real-time streaming
 - **Durability by Default** - research continues if you disconnect
 - **Event Replay** - never miss an update by reconnecting with `last_event_id`
@@ -191,7 +192,7 @@ async function startResearch(name) {
   await fetch(`http://localhost:8080/agent/${AGENT_ID}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: `Research ${name}` })
+    body: JSON.stringify({ message: `Research ${name}` }),
   });
   // Events will start flowing via SSE
 }
@@ -214,7 +215,7 @@ The `enable_event_log = True` setting persists all emitted events to storage. Wh
 
 ## Why This Works Well
 
-1. **Simple API**: Just `await self.emit("event_type", data)` - no complex output adapters
+1. **Simple API**: Just `await self.emit("event_type", data)` ([docs](/core/events)) - no complex output adapters
 2. **Transport-Agnostic**: Agent emits events, transport layer delivers them (WebSocket, SSE, etc.)
 3. **True Durability**: SQLiteStorage persists state, messages, and event log to disk
 4. **Standard SSE**: Uses standard `Last-Event-ID` mechanism for reconnection

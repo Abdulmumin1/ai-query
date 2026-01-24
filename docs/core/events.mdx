@@ -1,0 +1,114 @@
+---
+title: "Agent Events"
+description: "Emit real-time updates with automatic replay and persistence"
+---
+
+Agents in **ai-query** are designed to be real-time. Instead of just waiting for a final response, agents can emit events throughout their execution to keep users informed.
+
+The event system is built on three core pillars:
+
+1.  **Transport Agnostic** - Emit once, deliver via SSE, WebSocket, or HTTP.
+2.  **Durable** - Events are persisted to storage (SQLite, Postgres, etc.).
+3.  **Resumable** - Clients can reconnect and automatically replay missed events.
+
+## The emit() API
+
+The implementation is simple. Any method in your `Agent` subclass can call `self.emit()`:
+
+```python
+async def emit(self, event: str, data: dict[str, Any]) -> int
+```
+
+- **event**: A string identifying the event type (e.g., "status", "log", "chunk")
+- **data**: A JSON-serializable dictionary with the payload
+- **Returns**: A unique, strictly increasing integer ID for the event
+
+### Basic Example
+
+```python
+class SearchAgent(Agent):
+    async def search(self, query: str):
+        # 1. Notify user that work started
+        await self.emit("status", {"text": f"Searching for: {query}"})
+
+        # 2. Emit intermediate findings
+        results = await self.perform_search(query)
+        await self.emit("log", {"level": "info", "message": f"Found {len(results)} items"})
+
+        # 3. Stream chunks if generating text
+        async for chunk in self.stream_summary(results):
+             await self.emit("chunk", {"content": chunk})
+```
+
+## Event Persistence & Replay
+
+One of the most powerful features is **Automatic Event Replay**.
+
+In distributed systems, connections drop. Mobile users lose signal. If an agent emits an event while the user is disconnected, that information is usually lost.
+
+**ai-query** solves this with the `enable_event_log` flag.
+
+```python
+class MyAgent(Agent):
+    enable_event_log = True  # <--- Enables persistence
+```
+
+When enabled:
+
+1.  Every emitted event is saved to the agent's storage.
+2.  Events are assigned a strictly increasing ID (1, 2, 3...).
+3.  Clients can connect with a `Last-Event-ID` header (standard SSE mechanism).
+4.  The server automatically sends all events with `ID > Last-Event-ID` before sending new ones.
+
+This guarantees exactly-once delivery semantics for your UI, even on flaky networks.
+
+## Consuming Events
+
+The `Agent.serve()` method automatically exposes endpoints for consuming events.
+
+### Server-Sent Events (SSE)
+
+The recommended way to consume events is via the specialized event stream endpoint:
+
+`GET /agent/{agent_id}/events`
+
+This endpoint streams events in standard text/event-stream format.
+
+```javascript
+const eventSource = new EventSource("/agent/my-agent/events");
+
+eventSource.addEventListener("status", (e) => {
+  const data = JSON.parse(e.data);
+  console.log("Status:", data.text);
+});
+
+// Automatic Replay: Browser EventSource handles Last-Event-ID automatically!
+```
+
+### WebSocket
+
+If you connect via WebSocket (`/agent/{agent_id}/ws`), events are sent as JSON messages:
+
+```json
+{
+  "type": "status",
+  "id": 15,
+  "data": { "text": "Searching..." }
+}
+```
+
+## Custom Transports
+
+If you use `FastAPI` or another framework instead of `Agent.serve()`, you can inject a custom handler to deliver events however you like (e.g., to a message queue or a custom socket).
+
+```python
+# Function to handle emitted events
+async def my_handler(event: str, data: dict, event_id: int):
+    print(f"Agent emitted {event} (ID: {event_id})")
+    await websocket.send_json({...})
+
+# Inject the handler
+agent._emit_handler = my_handler
+```
+
+See the [FastAPI Integration](/cookbook/fastapi-integration) cookbook for a full example.

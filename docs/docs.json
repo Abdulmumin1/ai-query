@@ -32,6 +32,7 @@
               "core/conversations",
               "core/tools",
               "core/agents",
+              "core/events",
               "core/abort",
               "core/mcp"
             ]
