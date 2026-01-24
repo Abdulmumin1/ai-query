@@ -68,7 +68,7 @@ async def chat_stream(request: ChatRequest):
 
 ## Agent with Custom Transport
 
-Use the Agent class with FastAPI by injecting a custom emit handler.
+Use the Agent class with FastAPI by injecting a custom emit handler. (See [Events Guide](/core/events) for the standard behavior).
 
 ```python
 from fastapi import FastAPI, WebSocket
@@ -307,12 +307,12 @@ curl -X POST http://localhost:8000/chat \
 
 ## When to Use FastAPI vs serve()
 
-| Use Case | Recommendation |
-|----------|----------------|
-| Quick prototype | `agent.serve()` |
-| Simple WebSocket/SSE | `agent.serve()` |
-| Custom middleware | FastAPI |
-| Complex routing | FastAPI |
-| Existing FastAPI app | FastAPI |
-| Multiple apps on one server | FastAPI |
-| Serverless deployment | FastAPI + `handle_request` |
+| Use Case                    | Recommendation             |
+| --------------------------- | -------------------------- |
+| Quick prototype             | `agent.serve()`            |
+| Simple WebSocket/SSE        | `agent.serve()`            |
+| Custom middleware           | FastAPI                    |
+| Complex routing             | FastAPI                    |
+| Existing FastAPI app        | FastAPI                    |
+| Multiple apps on one server | FastAPI                    |
+| Serverless deployment       | FastAPI + `handle_request` |

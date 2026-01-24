@@ -34,8 +34,8 @@ Agent(
 </ParamField>
 
 <ParamField path="model" type="LanguageModel">
-  The language model to use. Created with provider functions like `openai("gpt-4o")`.
-  If not provided, defaults to `google("gemini-2.0-flash")`.
+  The language model to use. Created with provider functions like
+  `openai("gpt-4o")`. If not provided, defaults to `google("gemini-2.0-flash")`.
 </ParamField>
 
 <ParamField path="storage" type="Storage">
@@ -64,6 +64,17 @@ async def emit(self, event: str, data: dict[str, Any]) -> int
 ```
 
 Emit an event to connected clients. Returns the unique event ID.
+See the [Events Guide](/core/events) for a deep dive on persistence and replay.
+
+### Parameters
+
+<ParamField path="event" type="str" required>
+  The type of event (e.g., "status", "chunk").
+</ParamField>
+
+<ParamField path="data" type="dict" required>
+  The event payload.
+</ParamField>
 
 ### call
 

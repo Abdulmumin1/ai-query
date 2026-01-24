@@ -94,11 +94,11 @@ def create_agent(agent_id: str):
 result = await self.invoke(agent_id, payload, timeout=30.0)
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `agent_id` | `str` | ID of the agent to call |
-| `payload` | `dict` | Data to send (you define the structure) |
-| `timeout` | `float` | Max seconds to wait (default: 30) |
+| Parameter  | Type    | Description                             |
+| ---------- | ------- | --------------------------------------- |
+| `agent_id` | `str`   | ID of the agent to call                 |
+| `payload`  | `dict`  | Data to send (you define the structure) |
+| `timeout`  | `float` | Max seconds to wait (default: 30)       |
 
 **Returns:** Whatever dict the target agent returns from `handle_invoke()`.
 
@@ -194,10 +194,18 @@ class AnalysisAgent(Agent):
         return result
 ```
 
+It is best practice for agents to communicate progress via events.
+
+For full details on event persistence and replay, see the [Events Guide](/core/events).
+
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Serverless Agents" icon="cloud" href="/cookbook/serverless-agents">
+  <Card
+    title="Serverless Agents"
+    icon="cloud"
+    href="/cookbook/serverless-agents"
+  >
     Deploy agents to Lambda, Vercel, and other platforms
   </Card>
   <Card title="Multi-Agent Server" icon="server" href="/core/agent-server">
