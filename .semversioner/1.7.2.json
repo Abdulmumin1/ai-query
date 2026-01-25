@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Refactored agent communication to a fluent, type-safe RPC API and fixed event broadcasting to WebSocket/SSE clients in AgentServer.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-25T13:11:39+00:00",
+  "version": "1.7.2"
+}

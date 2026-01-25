@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.2
+
+- patch: Refactored agent communication to a fluent, type-safe RPC API and fixed event broadcasting to WebSocket/SSE clients in AgentServer.
+
 ## 1.7.1
 
 - patch: feat(agents): unify agents around the v2 architecture and reorganize the import structure for better modularity.
