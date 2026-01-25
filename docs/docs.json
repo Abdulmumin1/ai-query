@@ -81,6 +81,20 @@
             "pages": [
               "providers/bedrock"
             ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "api-reference/providers/openai",
+              "api-reference/providers/anthropic",
+              "api-reference/providers/google",
+              "api-reference/providers/openrouter",
+              "api-reference/providers/deepseek",
+              "api-reference/providers/groq",
+              "api-reference/providers/llama",
+              "api-reference/providers/xai",
+              "api-reference/providers/bedrock"
+            ]
           }
         ]
       },
@@ -101,7 +115,17 @@
             "pages": [
               "api-reference/agent",
               "api-reference/agent-backends",
-              "api-reference/agent-server"
+              "api-reference/agent-server",
+              "api-reference/agent-registry"
+            ]
+          },
+          {
+            "group": "Transport Layer",
+            "pages": [
+              "api-reference/http-transport",
+              "api-reference/remote-agent",
+              "api-reference/transport-base",
+              "api-reference/serverless-adapters"
             ]
           },
           {
@@ -132,10 +156,24 @@
             "group": "Agents & Servers",
             "pages": [
               "cookbook/profile-research-agent",
+              "cookbook/wikipedia-agent",
               "cookbook/fastapi-integration",
               "cookbook/persistent-chatbot",
               "cookbook/per-user-assistant",
               "cookbook/serverless-agents"
+            ]
+          },
+          {
+            "group": "Transport Layer",
+            "pages": [
+              "guides/unified-transport-layer",
+              "examples/complete-multi-agent-setup"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/complete-multi-agent-setup"
             ]
           },
           {

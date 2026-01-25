@@ -1,0 +1,576 @@
+---
+title: "Unified Transport Layer Guide"
+description: "Complete guide to multi-agent routing, local and remote agents, and serverless deployment"
+---
+
+This comprehensive guide shows how to use the unified transport layer to build scalable multi-agent systems that can run anywhere - from a single process to distributed microservices and serverless functions.
+
+## Quick Start
+
+### Single Agent Setup
+
+```python
+from ai_query.agents import Agent
+from ai_query.agents.server import AgentServer
+from ai_query.providers import openai, MemoryStorage
+
+# Create agent
+agent = Agent(
+    "chatbot",
+    model=openai("gpt-4o"),
+    system="You are a helpful assistant.",
+    storage=MemoryStorage()
+)
+
+# Start server (old way - still works)
+AgentServer(agent).serve(port=8080)
+```
+
+### Multi-Agent Registry Setup
+
+```python
+from ai_query.agents import AgentRegistry, AgentServer
+from ai_query.agents.transport import HTTPTransport
+from my_agents import ChatBot, WriterAgent, ResearchAgent
+
+# Create registry
+registry = AgentRegistry()
+
+# Register local agents
+registry.register("chatbot", ChatBot)
+registry.register("writer-.*", WriterAgent)
+registry.register("research-.*", ResearchAgent)
+
+# Register remote agents (serverless)
+registry.register("summarizer", HTTPTransport(
+    "https://lambda.execute-api.amazonaws.com/prod"
+))
+
+registry.register("translator", HTTPTransport(
+    "https://my-app.vercel.app/api"
+))
+
+# Start unified server
+AgentServer(registry).serve(port=8080)
+```
+
+---
+
+## Architecture Overview
+
+The unified transport layer consists of:
+
+1. **AgentRegistry** - Maps agent IDs to implementations (local classes or remote transports)
+2. **AgentServer** - Unified server that can serve both local and remote agents
+3. **HTTPTransport** - Communicates with remote agents via HTTP
+4. **RemoteAgent** - Client-side proxy for remote agents
+5. **Serverless Adapters** - Deploy agents on FastAPI, Vercel, AWS Lambda
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Client App    │    │   AgentServer   │    │  Remote Agents  │
+│                 │    │   (Registry)    │    │                 │
+│  RemoteAgent    │◄──►│  - chatbot      │◄──►│  - AWS Lambda   │
+│  HTTPTransport  │    │  - writer-.*    │    │  - Vercel       │
+│                 │    │  - summarizer   │    │  - FastAPI      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+---
+
+## Complete Multi-Agent Example
+
+### 1. Define Agent Classes
+
+```python
+# agents.py
+from ai_query.agents import Agent
+from ai_query.providers import openai
+
+class ChatBot(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a friendly chat assistant."
+        )
+
+class WriterAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a creative writer."
+        )
+
+class ResearchAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a research assistant."
+        )
+```
+
+### 2. Create Server with Registry
+
+```python
+# server.py
+from ai_query.agents import AgentRegistry, AgentServer, AgentServerConfig
+from ai_query.agents.transport import HTTPTransport
+from agents import ChatBot, WriterAgent, ResearchAgent
+
+def create_server():
+    # Configure registry
+    registry = AgentRegistry()
+    
+    # Local agents
+    registry.register("chatbot", ChatBot)
+    registry.register("writer-.*", WriterAgent)
+    registry.register("research-.*", ResearchAgent)
+    
+    # Remote agents (serverless functions)
+    registry.register("summarizer", HTTPTransport(
+        "https://lambda.execute-api.amazonaws.com/prod/summarizer",
+        headers={"X-API-Key": "your-lambda-key"}
+    ))
+    
+    registry.register("translator", HTTPTransport(
+        "https://my-vercel-app.vercel.app/api/translator"
+    ))
+    
+    # Server configuration
+    config = AgentServerConfig(
+        idle_timeout=600,
+        max_agents=100,
+        enable_list_agents=True,
+        allowed_origins=["*"]
+    )
+    
+    # Create and return server
+    return AgentServer(registry, config=config)
+
+if __name__ == "__main__":
+    server = create_server()
+    server.serve(host="0.0.0.0", port=8080)
+```
+
+### 3. Client Usage
+
+```python
+# client.py
+import asyncio
+from ai_query.agents.remote import connect
+
+async def demo_client():
+    # Connect to different agents
+    chatbot = connect("http://localhost:8080/agent/chatbot")
+    writer = connect("http://localhost:8080/agent/writer-1")
+    researcher = connect("http://localhost:8080/agent/research-ai")
+    summarizer = connect("http://localhost:8080/agent/summarizer")
+    
+    try:
+        # 1. Chat with bot
+        response = await chatbot.chat("Hello! How are you?")
+        print(f"Chatbot: {response}")
+        
+        # 2. Get research
+        research = await researcher.chat("What are the latest AI trends?")
+        print(f"Research: {research}")
+        
+        # 3. Write article
+        article = await writer.chat(f"Write an article about: {research}")
+        print(f"Article: {article[:100]}...")
+        
+        # 4. Summarize (remote agent)
+        print("Summarizing via Lambda...")
+        async for chunk in summarizer.stream(f"Summarize: {article}"):
+            print(chunk, end="", flush=True)
+        print()
+        
+    finally:
+        # Cleanup
+        await chatbot.close()
+        await writer.close()
+        await researcher.close()
+        await summarizer.close()
+
+if __name__ == "__main__":
+    asyncio.run(demo_client())
+```
+
+---
+
+## Serverless Deployment
+
+### FastAPI Deployment
+
+```python
+# fastapi_app.py
+from fastapi import FastAPI
+from ai_query.agents import AgentRegistry, AgentRouter
+from ai_query.agents.transport import HTTPTransport
+from agents import ChatBot, WriterAgent, ResearchAgent
+
+# Create FastAPI app
+app = FastAPI(title="Multi-Agent API")
+
+# Configure registry
+registry = AgentRegistry()
+registry.register("chatbot", ChatBot)
+registry.register("writer", WriterAgent)
+registry.register("researcher", ResearchAgent)
+
+# Add remote agents
+registry.register("summarizer", HTTPTransport(
+    "https://lambda.execute-api.amazonaws.com/prod/summarizer"
+))
+
+# Include router
+app.include_router(
+    AgentRouter(registry),
+    prefix="/api/v1/agents",
+    tags=["agents"]
+)
+
+@app.get("/")
+async def root():
+    return {
+        "message": "Multi-Agent API Service",
+        "available_agents": [
+            "chatbot", "writer", "researcher", "summarizer"
+        ],
+        "usage": {
+            "chat": "POST /api/v1/agents/chatbot/chat",
+            "write": "POST /api/v1/agents/writer/chat",
+            "research": "POST /api/v1/agents/researcher/chat",
+            "summarize": "POST /api/v1/agents/summarizer/chat"
+        }
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+### Vercel Deployment
+
+```python
+# api/chatbot.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+# Create agent
+agent = Agent(
+    "chatbot",
+    model=openai("gpt-4o"),
+    system="You are a helpful assistant hosted on Vercel."
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+    
+    def do_GET(self):
+        handle_vercel(agent, self)
+```
+
+```python
+# api/writer.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+agent = Agent(
+    "writer",
+    model=openai("gpt-4o"),
+    system="You are a creative writer hosted on Vercel."
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+```
+
+### AWS Lambda Deployment
+
+```python
+# lambda_function.py
+from ai_query.agents import Agent
+from ai_query.adapters.aws import handle_lambda
+from ai_query.providers import openai
+import os
+
+# Configure agent
+agent = Agent(
+    "lambda-agent",
+    model=openai(
+        model=os.getenv("MODEL_NAME", "gpt-4o"),
+        api_key=os.getenv("OPENAI_API_KEY")
+    ),
+    system=os.getenv("SYSTEM_PROMPT", "You are a helpful AWS Lambda agent."),
+    max_tokens=int(os.getenv("MAX_TOKENS", "1000"))
+)
+
+def lambda_handler(event, context):
+    """Handle Lambda requests."""
+    return handle_lambda(agent, event, context)
+```
+
+---
+
+## Advanced Patterns
+
+### 1. Agent Chain Orchestration
+
+```python
+# orchestration.py
+from ai_query.agents.remote import connect
+
+class AgentChain:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.agents = {}
+        
+    async def connect_agent(self, name: str, agent_id: str):
+        self.agents[name] = connect(f"{self.base_url}/agent/{agent_id}")
+        
+    async def process_pipeline(self, input_text: str) -> str:
+        # 1. Research
+        research = await self.agents["researcher"].chat(f"Research: {input_text}")
+        
+        # 2. Write
+        draft = await self.agents["writer"].chat(f"Write about: {research}")
+        
+        # 3. Edit
+        edited = await self.agents["editor"].chat(f"Improve: {draft}")
+        
+        # 4. Summarize
+        summary = await self.agents["summarizer"].chat(f"Summarize: {edited}")
+        
+        return summary
+
+async def demo_pipeline():
+    chain = AgentChain("http://localhost:8080")
+    await chain.connect_agent("researcher", "research-1")
+    await chain.connect_agent("writer", "writer-1")
+    await chain.connect_agent("editor", "editor-1")
+    await chain.connect_agent("summarizer", "summarizer")
+    
+    result = await chain.process_pipeline("artificial intelligence trends 2024")
+    print(f"Final result: {result}")
+```
+
+### 2. Load Balancing
+
+```python
+# load_balancer.py
+import random
+from ai_query.agents.remote import connect
+
+class LoadBalancer:
+    def __init__(self, agent_urls: list[str]):
+        self.agents = [connect(url) for url in agent_urls]
+        self.current = 0
+        
+    async def invoke(self, message: str) -> str:
+        # Round-robin selection
+        agent = self.agents[self.current]
+        self.current = (self.current + 1) % len(self.agents)
+        
+        try:
+            return await agent.chat(message)
+        except Exception:
+            # Fallback to random agent
+            backup = random.choice(self.agents)
+            return await backup.chat(message)
+
+# Usage
+balancer = LoadBalancer([
+    "http://localhost:8080/agent/worker-1",
+    "http://localhost:8080/agent/worker-2", 
+    "http://localhost:8080/agent/worker-3"
+])
+
+result = await balancer.invoke("Process this data")
+```
+
+### 3. Custom Transport with Retry
+
+```python
+# retry_transport.py
+import asyncio
+from ai_query.agents.transport import HTTPTransport, AgentTransport
+
+class RetryTransport(AgentTransport):
+    def __init__(self, base_url: str, max_retries: int = 3):
+        self.base_transport = HTTPTransport(base_url)
+        self.max_retries = max_retries
+        
+    async def invoke(self, agent_id: str, payload: dict, timeout: float = 30.0):
+        last_error = None
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await self.base_transport.invoke(agent_id, payload, timeout)
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    delay = 2 ** attempt  # Exponential backoff
+                    await asyncio.sleep(delay)
+                    
+        raise last_error
+
+# Usage in registry
+from ai_query.agents import AgentRegistry
+
+registry = AgentRegistry()
+registry.register("flaky-agent", RetryTransport(
+    "https://unreliable-api.com/agents",
+    max_retries=5
+))
+```
+
+---
+
+## Testing and Development
+
+### Local Development Setup
+
+```python
+# dev_server.py
+from ai_query.agents import AgentRegistry, AgentServer
+from ai_query.agents.transport import HTTPTransport
+from test_agents import *
+
+# Mock remote agents for testing
+class MockHTTPTransport:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        
+    async def invoke(self, agent_id: str, payload: dict, timeout: float = 30.0):
+        # Simulate remote behavior
+        return {"result": f"Mock response from {agent_id}"}
+        
+    async def chat(self, agent_id: str, message: str, timeout: float = 30.0):
+        return f"Mock chat response from {agent_id}: {message}"
+
+# Create development registry
+registry = AgentRegistry()
+registry.register("local-agent", LocalTestAgent)
+registry.register("remote-agent", MockHTTPTransport("https://mock-api.com"))
+
+# Start dev server
+server = AgentServer(registry)
+server.serve(port=8080)
+```
+
+### Integration Testing
+
+```python
+# test_integration.py
+import pytest
+import asyncio
+from ai_query.agents.remote import connect
+from ai_query.agents import AgentRegistry, AgentServer
+from test_agents import TestAgent
+
+@pytest.fixture
+async def test_server():
+    registry = AgentRegistry()
+    registry.register("test-agent", TestAgent)
+    server = AgentServer(registry)
+    
+    # Start server in background
+    import threading
+    server_thread = threading.Thread(target=server.serve, kwargs={"port": 8081})
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # Give server time to start
+    await asyncio.sleep(1)
+    
+    yield "http://localhost:8081"
+
+async def test_remote_agent_connection(test_server):
+    agent = connect(f"{test_server}/agent/test-agent")
+    response = await agent.chat("Hello!")
+    assert "Hello!" in response
+    await agent.close()
+
+async def test_streaming(test_server):
+    agent = connect(f"{test_server}/agent/test-agent")
+    chunks = []
+    async for chunk in agent.stream("Stream this"):
+        chunks.append(chunk)
+    assert len(chunks) > 0
+    await agent.close()
+```
+
+---
+
+## Performance and Scalability
+
+### Connection Pooling
+
+```python
+# pooled_transport.py
+import httpx
+from ai_query.agents.transport import HTTPTransport
+
+class PooledHTTPTransport(HTTPTransport):
+    def __init__(self, base_url: str, pool_size: int = 10):
+        self.client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=pool_size),
+            base_url=base_url
+        )
+        super().__init__(base_url, client=self.client)
+
+# Usage with registry
+registry = AgentRegistry()
+registry.register("pooled-agent", PooledHTTPTransport(
+    "https://api.myapp.com/agents",
+    pool_size=20
+))
+```
+
+### Batching Requests
+
+```python
+# batch_processor.py
+import asyncio
+from collections import defaultdict
+from ai_query.agents.remote import connect
+
+class BatchProcessor:
+    def __init__(self, base_url: str, batch_size: int = 10, timeout: float = 1.0):
+        self.base_url = base_url
+        self.batch_size = batch_size
+        self.timeout = timeout
+        self.pending = defaultdict(list)
+        self.batch_task = None
+        
+    async def invoke(self, agent_id: str, payload: dict) -> dict:
+        future = asyncio.get_event_loop().create_future()
+        self.pending[agent_id].append((payload, future))
+        
+        if self.batch_task is None:
+            self.batch_task = asyncio.create_task(self._process_batches())
+            
+        return await future
+        
+    async def _process_batches(self):
+        while any(self.pending.values()):
+            await asyncio.sleep(self.timeout)
+            
+            for agent_id, requests in list(self.pending.items()):
+                if len(requests) >= self.batch_size:
+                    batch = requests[:self.batch_size]
+                    self.pending[agent_id] = requests[self.batch_size:]
+                    await self._process_batch(agent_id, batch)
+```
+
+This unified transport layer enables you to build sophisticated multi-agent systems that can scale from a single process to global distributed deployments while maintaining the same simple API.

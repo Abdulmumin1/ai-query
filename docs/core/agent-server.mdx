@@ -49,12 +49,15 @@ AgentServer(agent).serve(port=8080)
 
 ## Architecture
 
-The Agent Server uses an **Agent Registry** to route requests.
+The Agent Server uses an **Agent Registry** to route requests between local and remote agents.
 
 1.  **Request**: `POST /agent/user-123/chat`
-2.  **Registry**: Matches `user-123` to the registered `Agent` class.
-3.  **Instantiation**: Creates (or retrieves) the agent instance for `user-123`.
-4.  **Execution**: Runs the agent logic.
+2.  **Registry**: Matches `user-123` to registered target (Agent class or Transport).
+3.  **Execution**: 
+    - **Local**: Instantiates agent and executes locally
+    - **Remote**: Delegates to transport (HTTP, WebSocket, etc.)
+
+For detailed API reference, see [AgentServer API Reference](/api-reference/agent-server) and [AgentRegistry API Reference](/api-reference/agent-registry).
 
 ## Configuration
 

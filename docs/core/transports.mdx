@@ -19,6 +19,16 @@ Transports handle the low-level communication between agents.
 - **`LocalTransport`**: Direct in-memory communication. Used when agents are in the same process.
 - **`HTTPTransport`**: Uses HTTP/REST to communicate with agents on other servers (or serverless functions).
 
+## Detailed API Reference
+
+For comprehensive API documentation and examples, see:
+
+- **[AgentRegistry](/api-reference/agent-registry)** - Registry for multi-agent routing
+- **[HTTPTransport](/api-reference/http-transport)** - HTTP transport for remote agents
+- **[RemoteAgent](/api-reference/remote-agent)** - Client-side proxy for remote agents
+- **[Transport Base Classes](/api-reference/transport-base)** - Abstract base for custom transports
+- **[Serverless Adapters](/api-reference/serverless-adapters)** - FastAPI, Vercel, AWS Lambda adapters
+
 ## Configuration
 
 ### Basic (Single Agent Class)
