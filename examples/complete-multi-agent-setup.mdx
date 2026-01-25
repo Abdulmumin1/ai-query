@@ -1,0 +1,637 @@
+---
+title: "Complete Multi-Agent Setup Example"
+description: "End-to-end example of unified transport layer with local and remote agents"
+---
+
+This example demonstrates a complete multi-agent system using the unified transport layer, combining local agents, remote agents, and serverless deployment.
+
+## Project Structure
+
+```
+multi-agent-system/
+├── agents/
+│   ├── __init__.py
+│   ├── chat_agent.py
+│   ├── research_agent.py
+│   └── writer_agent.py
+├── server/
+│   ├── main.py              # Main server with registry
+│   └── config.py            # Server configuration
+├── clients/
+│   ├── demo_client.py       # Example client usage
+│   └── agent_chain.py       # Agent orchestration
+├── serverless/
+│   ├── lambda/
+│   │   └── lambda_function.py
+│   └── vercel/
+│       └── api/
+│           └── summarizer.py
+├── fastapi_app.py          # FastAPI deployment
+└── requirements.txt
+```
+
+## 1. Agent Definitions
+
+### Chat Agent
+
+```python
+# agents/chat_agent.py
+from ai_query.agents import Agent
+from ai_query.providers import openai
+
+class ChatAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a helpful and friendly assistant."
+        )
+```
+
+### Research Agent
+
+```python
+# agents/research_agent.py
+from ai_query.agents import Agent, action
+from ai_query.providers import openai
+import json
+
+class ResearchAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a research assistant. Provide factual, well-researched information.",
+            initial_state={"search_count": 0}
+        )
+    
+    @action
+    async def search(self, query: str, max_results: int = 5) -> dict:
+        """Simulate web search and summarize results."""
+        self.state["search_count"] += 1
+        
+        # Simulate search results (in real implementation, use actual search API)
+        search_prompt = f"""
+        Search for information about: {query}
+        Provide {max_results} key findings in JSON format:
+        {{
+            "query": "{query}",
+            "results": [
+                {{"title": "...", "summary": "...", "url": "..."}},
+                ...
+            ]
+        }}
+        """
+        
+        response = await self.chat(search_prompt)
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {
+                "query": query,
+                "results": [{"title": "Error", "summary": "Failed to parse search results"}]
+            }
+    
+    @action
+    async def get_search_stats(self) -> dict:
+        """Get search statistics."""
+        return {
+            "total_searches": self.state.get("search_count", 0),
+            "agent_id": self.id
+        }
+```
+
+### Writer Agent
+
+```python
+# agents/writer_agent.py
+from ai_query.agents import Agent, action
+from ai_query.providers import openai
+
+class WriterAgent(Agent):
+    def __init__(self, agent_id: str):
+        super().__init__(
+            agent_id,
+            model=openai("gpt-4o"),
+            system="You are a creative writer. Generate engaging content in various styles.",
+            initial_state={"articles_written": 0}
+        )
+    
+    @action
+    async def write_article(self, topic: str, style: str = "informative", length: str = "medium") -> dict:
+        """Write an article on the given topic."""
+        self.state["articles_written"] += 1
+        
+        length_guide = {
+            "short": "2-3 paragraphs",
+            "medium": "4-6 paragraphs", 
+            "long": "8-10 paragraphs"
+        }
+        
+        style_guide = {
+            "informative": "professional and educational",
+            "casual": "conversational and friendly",
+            "academic": "formal and scholarly"
+        }
+        
+        prompt = f"""
+        Write a {length_guide.get(length, 'medium')} article about: {topic}
+        Style: {style_guide.get(style, 'informative')}
+        Include a catchy title and clear structure.
+        """
+        
+        article = await self.chat(prompt)
+        
+        return {
+            "topic": topic,
+            "style": style,
+            "length": length,
+            "content": article,
+            "agent_id": self.id
+        }
+    
+    @action
+    async def get_writing_stats(self) -> dict:
+        """Get writing statistics."""
+        return {
+            "articles_written": self.state.get("articles_written", 0),
+            "agent_id": self.id
+        }
+```
+
+## 2. Server Configuration
+
+```python
+# server/config.py
+from ai_query.agents import AgentServerConfig
+import os
+
+def get_server_config() -> AgentServerConfig:
+    return AgentServerConfig(
+        # Lifecycle
+        idle_timeout=float(os.getenv("AGENT_IDLE_TIMEOUT", "600")),  # 10 minutes
+        max_agents=int(os.getenv("MAX_AGENTS", "100")),
+        
+        # Security
+        allowed_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
+        
+        # Routes
+        base_path=os.getenv("BASE_PATH", "/agent"),
+        enable_rest_api=True,
+        enable_list_agents=os.getenv("ENABLE_LIST_AGENTS", "false").lower() == "true"
+    )
+```
+
+## 3. Main Server with Registry
+
+```python
+# server/main.py
+import os
+from ai_query.agents import AgentRegistry, AgentServer
+from ai_query.agents.transport import HTTPTransport
+from agents.chat_agent import ChatAgent
+from agents.research_agent import ResearchAgent
+from agents.writer_agent import WriterAgent
+from server.config import get_server_config
+
+def create_registry() -> AgentRegistry:
+    """Create and configure the agent registry."""
+    registry = AgentRegistry()
+    
+    # Register local agents with patterns
+    registry.register("chatbot", ChatAgent)
+    registry.register("research-.*", ResearchAgent)
+    registry.register("writer-.*", WriterAgent)
+    
+    # Register remote serverless agents
+    if os.getenv("SUMMARIZER_URL"):
+        registry.register("summarizer", HTTPTransport(
+            os.getenv("SUMMARIZER_URL"),
+            headers={"Authorization": f"Bearer {os.getenv('SUMMARIZER_KEY')}"}
+        ))
+    
+    if os.getenv("TRANSLATOR_URL"):
+        registry.register("translator", HTTPTransport(
+            os.getenv("TRANSLATOR_URL")
+        ))
+    
+    # External services
+    if os.getenv("EXTERNAL_API_URL"):
+        registry.register("external-api", HTTPTransport(
+            os.getenv("EXTERNAL_API_URL"),
+            headers={"X-API-Key": os.getenv("EXTERNAL_API_KEY")}
+        ))
+    
+    return registry
+
+def create_server() -> AgentServer:
+    """Create and configure the agent server."""
+    registry = create_registry()
+    config = get_server_config()
+    return AgentServer(registry, config=config)
+
+if __name__ == "__main__":
+    server = create_server()
+    
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8080"))
+    
+    print(f"Starting multi-agent server on {host}:{port}")
+    print("Available agent patterns:")
+    print("  - chatbot")
+    print("  - research-.*")
+    print("  - writer-.*")
+    print("  - summarizer" + (" (remote)" if os.getenv("SUMMARIZER_URL") else ""))
+    print("  - translator" + (" (remote)" if os.getenv("TRANSLATOR_URL") else ""))
+    
+    server.serve(host=host, port=port)
+```
+
+## 4. Client Examples
+
+### Demo Client
+
+```python
+# clients/demo_client.py
+import asyncio
+from ai_query.agents.remote import connect
+
+async def demo_basic_usage():
+    """Demonstrate basic agent usage."""
+    base_url = "http://localhost:8080"
+    
+    # Connect to different agents
+    chatbot = connect(f"{base_url}/agent/chatbot")
+    researcher = connect(f"{base_url}/agent/research-1")
+    writer = connect(f"{base_url}/agent/writer-1")
+    
+    try:
+        # 1. Simple chat
+        print("=== Chat Bot ===")
+        response = await chatbot.chat("Hello! Tell me about yourself.")
+        print(f"Chatbot: {response}\n")
+        
+        # 2. Research with action
+        print("=== Research Agent ===")
+        search_result = await researcher.call().search("artificial intelligence trends 2024", max_results=3)
+        print(f"Search results: {search_result}\n")
+        
+        # 3. Writing with action
+        print("=== Writer Agent ===")
+        article = await writer.call().write_article(
+            topic="AI Trends 2024",
+            style="informative",
+            length="medium"
+        )
+        print(f"Article topic: {article['topic']}")
+        print(f"Content preview: {article['content'][:200]}...\n")
+        
+        # 4. Check stats
+        print("=== Agent Statistics ===")
+        research_stats = await researcher.call().get_search_stats()
+        writer_stats = await writer.call().get_writing_stats()
+        print(f"Research stats: {research_stats}")
+        print(f"Writer stats: {writer_stats}")
+        
+    finally:
+        # Cleanup connections
+        await asyncio.gather(
+            chatbot.close(),
+            researcher.close(),
+            writer.close(),
+            return_exceptions=True
+        )
+
+async def demo_streaming():
+    """Demonstrate streaming capabilities."""
+    agent = connect("http://localhost:8080/agent/writer-creative")
+    
+    try:
+        print("=== Streaming Example ===")
+        print("Agent writing a story:")
+        print("Agent: ", end="", flush=True)
+        
+        async for chunk in agent.stream("Write a short story about a robot discovering music"):
+            print(chunk, end="", flush=True)
+        print("\n")
+        
+    finally:
+        await agent.close()
+
+if __name__ == "__main__":
+    asyncio.run(demo_basic_usage())
+    asyncio.run(demo_streaming())
+```
+
+### Agent Chain Orchestration
+
+```python
+# clients/agent_chain.py
+import asyncio
+from ai_query.agents.remote import connect
+from typing import List, Dict, Any
+
+class AgentChain:
+    """Orchestrates multiple agents in a workflow."""
+    
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.agents = {}
+        
+    async def connect_agent(self, name: str, agent_id: str):
+        """Connect to an agent."""
+        self.agents[name] = connect(f"{self.base_url}/agent/{agent_id}")
+        
+    async def research_to_article_pipeline(self, topic: str) -> Dict[str, Any]:
+        """Complete pipeline: research -> write -> summarize."""
+        results = {}
+        
+        try:
+            # Step 1: Research
+            print(f"🔍 Researching: {topic}")
+            search_results = await self.agents["researcher"].call().search(topic, max_results=5)
+            results["research"] = search_results
+            
+            # Step 2: Write article
+            print(f"✍️  Writing article about: {topic}")
+            article = await self.agents["writer"].call().write_article(
+                topic=topic,
+                style="informative", 
+                length="long"
+            )
+            results["article"] = article
+            
+            # Step 3: Summarize (if available)
+            if "summarizer" in self.agents:
+                print(f"📝 Summarizing article...")
+                summary = await self.agents["summarizer"].chat(
+                    f"Summarize this article: {article['content']}"
+                )
+                results["summary"] = summary
+                
+            return results
+            
+        except Exception as e:
+            print(f"❌ Pipeline failed: {e}")
+            raise
+            
+    async def parallel_research(self, topics: List[str]) -> Dict[str, Any]:
+        """Research multiple topics in parallel."""
+        tasks = []
+        
+        for topic in topics:
+            task = self.agents["researcher"].call().search(topic, max_results=3)
+            tasks.append((topic, task))
+            
+        results = {}
+        
+        # Execute all searches in parallel
+        completed_tasks = await asyncio.gather(
+            *[task for _, task in tasks],
+            return_exceptions=True
+        )
+        
+        for (topic, _), result in zip(tasks, completed_tasks):
+            if isinstance(result, Exception):
+                results[topic] = {"error": str(result)}
+            else:
+                results[topic] = result
+                
+        return results
+        
+    async def close_all(self):
+        """Close all agent connections."""
+        await asyncio.gather(
+            *[agent.close() for agent in self.agents.values()],
+            return_exceptions=True
+        )
+
+async def demo_chains():
+    """Demonstrate agent chains."""
+    chain = AgentChain("http://localhost:8080")
+    
+    # Connect agents
+    await chain.connect_agent("researcher", "research-1")
+    await chain.connect_agent("writer", "writer-1")
+    await chain.connect_agent("summarizer", "summarizer")
+    
+    try:
+        # Complete pipeline
+        print("=== Research to Article Pipeline ===")
+        pipeline_result = await chain.research_to_article_pipeline("quantum computing basics")
+        print(f"Pipeline completed successfully!")
+        print(f"Research found {len(pipeline_result['research']['results'])} results")
+        print(f"Article written by: {pipeline_result['article']['agent_id']}")
+        if 'summary' in pipeline_result:
+            print(f"Summary generated")
+        print()
+        
+        # Parallel research
+        print("=== Parallel Research ===")
+        topics = ["machine learning", "neural networks", "deep learning"]
+        parallel_results = await chain.parallel_research(topics)
+        
+        for topic, result in parallel_results.items():
+            if "error" in result:
+                print(f"❌ {topic}: {result['error']}")
+            else:
+                print(f"✅ {topic}: {len(result['results'])} results found")
+                
+    finally:
+        await chain.close_all()
+
+if __name__ == "__main__":
+    asyncio.run(demo_chains())
+```
+
+## 5. Serverless Deployments
+
+### AWS Lambda
+
+```python
+# serverless/lambda/lambda_function.py
+import os
+from ai_query.agents import Agent
+from ai_query.adapters.aws import handle_lambda
+from ai_query.providers import openai
+
+# Create specialized summarizer agent
+agent = Agent(
+    "lambda-summarizer",
+    model=openai(
+        model=os.getenv("MODEL_NAME", "gpt-4o"),
+        api_key=os.getenv("OPENAI_API_KEY")
+    ),
+    system="You are a content summarizer. Create concise, informative summaries.",
+    max_tokens=int(os.getenv("MAX_TOKENS", "500"))
+)
+
+def lambda_handler(event, context):
+    """Handle AWS Lambda requests."""
+    return handle_lambda(agent, event, context)
+```
+
+### Vercel
+
+```python
+# serverless/vercel/api/summarizer.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+agent = Agent(
+    "vercel-summarizer",
+    model=openai("gpt-4o"),
+    system="You are a content summarizer. Create concise, informative summaries.",
+    max_tokens=500
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+    
+    def do_GET(self):
+        handle_vercel(agent, self)
+```
+
+## 6. FastAPI Deployment
+
+```python
+# fastapi_app.py
+from fastapi import FastAPI
+from ai_query.agents import AgentRegistry, AgentRouter
+from ai_query.agents.transport import HTTPTransport
+from agents.chat_agent import ChatAgent
+from agents.research_agent import ResearchAgent
+from agents.writer_agent import WriterAgent
+
+# Create FastAPI app
+app = FastAPI(
+    title="Multi-Agent API",
+    description="FastAPI service with ai-query agents",
+    version="1.0.0"
+)
+
+# Configure registry
+registry = AgentRegistry()
+registry.register("chatbot", ChatAgent)
+registry.register("researcher", ResearchAgent)
+registry.register("writer", WriterAgent)
+
+# Add remote agents (environment variables for flexibility)
+import os
+if os.getenv("SUMMARIZER_URL"):
+    registry.register("summarizer", HTTPTransport(os.getenv("SUMMARIZER_URL")))
+
+# Include router
+app.include_router(
+    AgentRouter(registry),
+    prefix="/api/v1/agents",
+    tags=["agents"]
+)
+
+@app.get("/")
+async def root():
+    return {
+        "service": "Multi-Agent API",
+        "version": "1.0.0",
+        "endpoints": {
+            "chat": "POST /api/v1/agents/chatbot/chat",
+            "research": "POST /api/v1/agents/researcher/invoke",
+            "write": "POST /api/v1/agents/writer/invoke",
+            "summarize": "POST /api/v1/agents/summarizer/chat" if os.getenv("SUMMARIZER_URL") else "Not configured"
+        },
+        "usage": {
+            "chat": "POST /api/v1/agents/chatbot/chat - Simple chat",
+            "research": "POST /api/v1/agents/researcher/invoke - RPC calls",
+            "write": "POST /api/v1/agents/writer/invoke - Generate content",
+            "stream": "Add ?stream=true to any chat endpoint for streaming"
+        }
+    }
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+## 7. Environment Configuration
+
+```bash
+# .env.example
+# Server Configuration
+HOST=0.0.0.0
+PORT=8080
+BASE_PATH=/agent
+MAX_AGENTS=100
+AGENT_IDLE_TIMEOUT=600
+ENABLE_LIST_AGENTS=false
+ALLOWED_ORIGINS=*
+
+# Remote Agents
+SUMMARIZER_URL=https://lambda.execute-api.amazonaws.com/prod/summarizer
+SUMMARIZER_KEY=your-lambda-api-key
+TRANSLATOR_URL=https://my-vercel-app.vercel.app/api
+EXTERNAL_API_URL=https://api.external-service.com/agents
+EXTERNAL_API_KEY=your-external-api-key
+
+# Model Configuration
+MODEL_NAME=gpt-4o
+MAX_TOKENS=1000
+OPENAI_API_KEY=your-openai-key
+```
+
+## 8. Running the System
+
+### Development Setup
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+cp .env.example .env
+# Edit .env with your API keys
+
+# Start the main server
+python server/main.py
+```
+
+### FastAPI Deployment
+
+```bash
+# Start FastAPI service
+python fastapi_app.py
+# or with uvicorn directly
+uvicorn fastapi_app:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Testing
+
+```bash
+# Test basic functionality
+python clients/demo_client.py
+
+# Test agent chains
+python clients/agent_chain.py
+```
+
+### Deployment
+
+```bash
+# Deploy to AWS Lambda
+serverless/lambda/deploy.sh
+
+# Deploy to Vercel
+cd serverless/vercel
+vercel --prod
+
+# Deploy FastAPI to production
+gunicorn fastapi_app:app -w 4 -k uvicorn.workers.UvicornWorker
+```
+
+This complete example demonstrates the full power of the unified transport layer, enabling seamless integration between local agents, remote agents, and various deployment platforms while maintaining a consistent API throughout.
