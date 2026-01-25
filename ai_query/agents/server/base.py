@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import TYPE_CHECKING, Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, Callable, Awaitable, Union
 
 from aiohttp import web
 
@@ -31,10 +31,10 @@ class AgentServer:
 
     def __init__(
         self,
-        agent_cls_or_registry: type[Agent] | AgentRegistry,
-        config: AgentServerConfig | None = None,
-        transport: AgentTransport | None = None,
-        event_bus: EventBus | None = None,
+        agent_cls_or_registry: Union[type["Agent"], "AgentRegistry"],
+        config: Union["AgentServerConfig", None] = None,
+        transport: Union["AgentTransport", None] = None,
+        event_bus: Union["EventBus", None] = None,
     ):
         """Initialize the agent server.
 
@@ -57,8 +57,8 @@ class AgentServer:
 
         self._config = config or AgentServerConfig()
         self._agents: dict[str, AgentMeta] = {}
-        self._eviction_task: asyncio.Task | None = None
-        self._shutdown_event: asyncio.Event | None = None
+        self._eviction_task: Union[asyncio.Task, None] = None
+        self._shutdown_event: Union[asyncio.Event, None] = None
         self._transport = transport
         self._event_bus = event_bus
         self._transport_initialized = False
@@ -85,13 +85,11 @@ class AgentServer:
         # Resolve agent class from registry
         target = self.registry.resolve(agent_id)
         
-        # If target is a Transport (remote agent), we can't instantiate it locally.
-        # This server only hosts LOCAL agents. 
-        # Ideally, we should proxy the request if it's remote, but for now we assume
-        # this server is only for local hosting.
         if not isinstance(target, type):
              # It's an instance (Transport), not a class
-             raise ValueError(f"Agent ID '{agent_id}' resolves to a remote transport, not a local class.")
+             # This happens if a handler (like handle_chat) is called for a remote ID.
+             # In this case, we can't return an Agent instance.
+             raise web.HTTPNotFound(text=f"Agent '{agent_id}' is not hosted on this server (it's remote).")
         
         agent_cls = target
         agent = agent_cls(agent_id)
@@ -245,20 +243,6 @@ class AgentServer:
 
     def create_app(self) -> web.Application:
         """Create and return the configured aiohttp Application."""
-        # This will be implemented by importing handlers from a separate module
-        # to keep this file clean. But for circular dependency reasons, we might
-        # need to define handlers here or inject them.
-        
-        # For now, let's keep the core server logic here and move handlers 
-        # to a mixin or just keep them here if we want to avoid complex imports.
-        # Given the instruction to break down files, I'll use a mixin approach
-        # or just import the handlers function.
-        
-        # Actually, to properly break the file, we should inherit from a base
-        # that has the handlers, or put the handlers in this file but import
-        # the request handling logic from another file.
-        
-        # Let's import the route setup logic.
         from ai_query.agents.server.handlers import setup_routes
         return setup_routes(self)
 

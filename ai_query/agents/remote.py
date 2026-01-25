@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, AsyncIterator, TypeVar
+from typing import TYPE_CHECKING, Any, AsyncIterator, TypeVar, Union
 
 from ai_query.agents.agent import AgentCallProxy
 from ai_query.agents.transport.http import HTTPTransport
@@ -33,7 +33,7 @@ class RemoteAgent:
         self,
         message: str,
         *,
-        signal: AbortSignal | None = None,
+        signal: Union[AbortSignal, None] = None,
     ) -> str:
         """Send a chat message to the remote agent."""
         # TODO: Pass abort signal to transport
@@ -43,14 +43,14 @@ class RemoteAgent:
         self,
         message: str,
         *,
-        signal: AbortSignal | None = None,
+        signal: Union[AbortSignal, None] = None,
     ) -> AsyncIterator[str]:
         """Stream a response chunk by chunk."""
         # TODO: Pass abort signal to transport
         async for chunk in self._transport.stream(self._agent_id, message):
             yield chunk
 
-    def call(self, *, agent_cls: type[T] | None = None) -> AgentCallProxy[T]:
+    def call(self, *, agent_cls: Union[type[T], None] = None) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to the remote agent."""
         # We need to construct a fake "Agent" object because AgentCallProxy expects one.
         # But AgentCallProxy only needs `_transport` and `_target_id` (conceptually).
@@ -75,7 +75,7 @@ class RemoteAgent:
             await self._transport.close()
 
 
-def connect(url: str, headers: dict[str, str] | None = None) -> RemoteAgent:
+def connect(url: str, headers: Union[dict[str, str], None] = None) -> RemoteAgent:
     """Connect to a remote agent.
 
     Args:

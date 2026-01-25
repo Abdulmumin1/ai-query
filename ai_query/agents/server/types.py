@@ -4,40 +4,22 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Union
 
 from aiohttp import web
 
 
 @dataclass
 class AgentServerConfig:
-    """Configuration for AgentServer lifecycle and security.
-
-    Attributes:
-        idle_timeout: Seconds before evicting idle agents (None = never).
-        max_agents: Maximum concurrent agents (None = unlimited).
-        auth: Async function to validate requests. Return True to allow, False to reject.
-        allowed_origins: List of allowed CORS origins (None = allow all).
-        base_path: Base path for agent routes (default: "/agent").
-        enable_rest_api: Enable state REST endpoints (GET/PUT /agent/{id}/state).
-        enable_list_agents: Enable GET /agents endpoint (security risk, off by default).
-
-    Example:
-        config = AgentServerConfig(
-            idle_timeout=300,  # 5 minutes
-            max_agents=100,
-            auth=my_auth_function,
-            allowed_origins=["https://myapp.com"],
-        )
-    """
+    """Configuration for AgentServer lifecycle and security."""
 
     # Lifecycle
-    idle_timeout: float | None = 300.0
-    max_agents: int | None = None
+    idle_timeout: Union[float, None] = 300.0
+    max_agents: Union[int, None] = None
 
     # Security
-    auth: Callable[[web.Request], Awaitable[bool]] | None = None
-    allowed_origins: list[str] | None = None
+    auth: Union[Callable[[web.Request], Awaitable[bool]], None] = None
+    allowed_origins: Union[list[str], None] = None
 
     # Routes
     base_path: str = "/agent"

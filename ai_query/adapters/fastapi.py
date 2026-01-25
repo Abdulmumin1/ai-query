@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 try:
     from fastapi import APIRouter, Request, HTTPException
@@ -44,7 +44,7 @@ class AgentRouter(APIRouter):
         app.include_router(AgentRouter(registry), prefix="/agents")
     """
 
-    def __init__(self, target: "Agent | AgentRegistry", **kwargs: Any):
+    def __init__(self, target: Union["Agent", "AgentRegistry"], **kwargs: Any):
         if APIRouter is object:
             raise ImportError("FastAPI is not installed. Run 'pip install fastapi'.")
             
@@ -68,7 +68,7 @@ class AgentRouter(APIRouter):
             self.add_api_route("/state", self._handle_get_state, methods=["GET"])
             self.add_api_route("/", self._handle_request, methods=["POST"])
 
-    async def _get_agent(self, agent_id: str | None = None) -> "Agent":
+    async def _get_agent(self, agent_id: Union[str, None] = None) -> "Agent":
         if self.is_registry:
             if not agent_id:
                 raise HTTPException(status_code=400, detail="Missing agent_id")
@@ -91,7 +91,7 @@ class AgentRouter(APIRouter):
         if agent._state is None:
             await agent.start()
 
-    async def _handle_chat(self, request: Request, agent_id: str | None = None) -> Any:
+    async def _handle_chat(self, request: Request, agent_id: Union[str, None] = None) -> Any:
         agent = await self._get_agent(agent_id)
         await self._ensure_started(agent)
         
@@ -122,7 +122,7 @@ class AgentRouter(APIRouter):
         async for chunk in agent.handle_request_stream(stream_req):
             yield chunk
 
-    async def _handle_invoke(self, request: Request, agent_id: str | None = None) -> Any:
+    async def _handle_invoke(self, request: Request, agent_id: Union[str, None] = None) -> Any:
         agent = await self._get_agent(agent_id)
         await self._ensure_started(agent)
         
@@ -138,7 +138,7 @@ class AgentRouter(APIRouter):
         })
         return JSONResponse(result)
 
-    async def _handle_get_state(self, agent_id: str | None = None) -> Any:
+    async def _handle_get_state(self, agent_id: Union[str, None] = None) -> Any:
         agent = await self._get_agent(agent_id)
         await self._ensure_started(agent)
         try:
@@ -146,7 +146,7 @@ class AgentRouter(APIRouter):
         except Exception:
             raise HTTPException(status_code=500, detail="State serialization failed")
 
-    async def _handle_request(self, request: Request, agent_id: str | None = None) -> Any:
+    async def _handle_request(self, request: Request, agent_id: Union[str, None] = None) -> Any:
         agent = await self._get_agent(agent_id)
         await self._ensure_started(agent)
         

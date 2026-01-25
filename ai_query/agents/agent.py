@@ -13,6 +13,10 @@ from typing import (
     Generic,
     TYPE_CHECKING,
     TypeVar,
+    Union,
+    Set,
+    List,
+    Dict,
 )
 
 from ai_query.agents.storage import MemoryStorage, Storage
@@ -26,10 +30,10 @@ if TYPE_CHECKING:
     from ai_query.types import ProviderOptions, StopCondition, ToolSet
 
 
-Content = str | list[Any]
+Content = Union[str, List[Any]]
 
 # Type alias for emit handler callback
-EmitHandler = Callable[[str, dict[str, Any], int], Awaitable[None]]
+EmitHandler = Callable[[str, Dict[str, Any], int], Awaitable[None]]
 
 # Generic TypeVar for type-safe agent proxies. T can be any subclass of Agent.
 T = TypeVar("T", bound="Agent")
@@ -39,8 +43,8 @@ T = TypeVar("T", bound="Agent")
 class Context:
     """Context for the current operation being processed by the agent."""
 
-    connection: Connection | None = None
-    ctx: ConnectionContext | None = None
+    connection: Union[Connection, None] = None
+    ctx: Union[ConnectionContext, None] = None
 
 
 def action(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -53,9 +57,9 @@ def action(func: Callable[..., Any]) -> Callable[..., Any]:
 class _Envelope:
     kind: str
     payload: Any
-    connection: Connection | None = None
-    ctx: ConnectionContext | None = None
-    future: asyncio.Future | None = None
+    connection: Union[Connection, None] = None
+    ctx: Union[ConnectionContext, None] = None
+    future: Union[asyncio.Future, None] = None
 
 
 @dataclass
@@ -64,9 +68,9 @@ class Event:
 
     id: int
     type: str
-    data: dict[str, Any]
+    data: Dict[str, Any]
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "type": self.type, "data": self.data}
 
 
@@ -130,15 +134,15 @@ class Agent:
         self,
         id: str,
         *,
-        model: LanguageModel | None = None,
+        model: Union[LanguageModel, None] = None,
         system: str = "You are a helpful assistant.",
-        tools: "ToolSet | None" = None,
-        storage: Storage | None = None,
-        initial_state: dict[str, Any] | None = None,
-        stop_when: "StopCondition | list[StopCondition] | None" = None,
-        provider_options: "ProviderOptions | None" = None,
-        transport: "AgentTransport | None" = None,
-        event_bus: "EventBus | None" = None,
+        tools: Union[ToolSet, None] = None,
+        storage: Union[Storage, None] = None,
+        initial_state: Union[Dict[str, Any], None] = None,
+        stop_when: Union[StopCondition, List[StopCondition], None] = None,
+        provider_options: Union[ProviderOptions, None] = None,
+        transport: Union[AgentTransport, None] = None,
+        event_bus: Union[EventBus, None] = None,
     ) -> None:
         self._id = id
         self._storage = storage or MemoryStorage()
@@ -151,11 +155,11 @@ class Agent:
         self.provider_options = provider_options
 
         # Agent state
-        self._state: dict[str, Any] | None = None
-        self._messages: list[Message] = []
+        self._state: Union[Dict[str, Any], None] = None
+        self._messages: List[Message] = []
 
         # Event log for durability & replay
-        self._event_log: list[dict[str, Any]] = []
+        self._event_log: List[Dict[str, Any]] = []
         self._event_counter: int = 0
 
         # Communication
@@ -164,22 +168,22 @@ class Agent:
 
         # Emit handler - injected by transport layer (serve, AgentServer, etc.)
         # Signature: async def handler(event_type: str, data: dict, event_id: int)
-        self._emit_handler: EmitHandler | None = None
+        self._emit_handler: Union[EmitHandler, None] = None
 
         # Connection tracking (used by serve() internally)
-        self._connections: set[Connection] = set()
-        self._sse_connections: set[Any] = set()
+        self._connections: Set[Connection] = set()
+        self._sse_connections: Set[Any] = set()
 
         # Actor mailbox for serialized message processing
         self._mailbox: asyncio.Queue[_Envelope] = asyncio.Queue()
-        self._processor_task: asyncio.Task | None = None
+        self._processor_task: Union[asyncio.Task, None] = None
         self._running = False
 
         # Current context (only valid during message processing)
         self.context = Context()
 
         # Action registry
-        self._action_map: dict[str, Callable[..., Awaitable[Any]]] = {}
+        self._action_map: Dict[str, Callable[..., Awaitable[Any]]] = {}
 
     # ─── Properties ────────────────────────────────────────────────────────
 
@@ -192,7 +196,7 @@ class Agent:
         return self._storage
 
     @property
-    def state(self) -> dict[str, Any]:
+    def state(self) -> Dict[str, Any]:
         if self._state is None:
             raise RuntimeError(
                 "Agent not started. Call 'await agent.start()' or use "
@@ -201,32 +205,13 @@ class Agent:
         return self._state
 
     @property
-    def messages(self) -> list[Message]:
+    def messages(self) -> List[Message]:
         return self._messages
 
     # ─── Event Emission (The Core API) ─────────────────────────────────────
 
-    async def emit(self, event: str, data: dict[str, Any]) -> int:
-        """Emit an event. Returns the event ID.
-
-        This is the primary method for sending events to clients. The transport
-        layer (serve, AgentServer, etc.) handles actual delivery.
-
-        When enable_event_log is True, events are persisted for replay on
-        client reconnection.
-
-        Args:
-            event: Event type (e.g., "status", "chunk", "result", "error")
-            data: Event payload
-
-        Returns:
-            The assigned event ID (useful for client-side tracking)
-
-        Example:
-            await self.emit("status", {"text": "Processing..."})
-            await self.emit("chunk", {"content": "Hello"})
-            await self.emit("done", {"total_tokens": 150})
-        """
+    async def emit(self, event: str, data: Dict[str, Any]) -> int:
+        """Emit an event. Returns the event ID."""
         # Assign ID
         self._event_counter += 1
         event_id = self._event_counter
@@ -246,16 +231,7 @@ class Agent:
         return event_id
 
     async def replay_events(self, after_id: int = 0) -> AsyncIterator[Event]:
-        """Yield events after the given ID for replay.
-
-        Used by transport layer to replay missed events on client reconnection.
-
-        Args:
-            after_id: Only yield events with ID > after_id (0 = all events)
-
-        Yields:
-            Event objects for each missed event
-        """
+        """Yield events after the given ID for replay."""
         for event_record in self._event_log:
             if event_record["id"] > after_id:
                 yield Event(
@@ -265,10 +241,7 @@ class Agent:
                 )
 
     async def clear_event_log(self) -> None:
-        """Clear the event log.
-
-        Use this to reset event history, e.g., after a conversation ends.
-        """
+        """Clear the event log."""
         self._event_log = []
         self._event_counter = 0
         if self.enable_event_log:
@@ -276,7 +249,7 @@ class Agent:
 
     # ─── State Management ──────────────────────────────────────────────────
 
-    async def set_state(self, state: dict[str, Any]) -> None:
+    async def set_state(self, state: Dict[str, Any]) -> None:
         """Set the agent's state and persist to storage."""
         self._state = state
         await self._storage.set(f"{self._id}:state", state)
@@ -299,7 +272,7 @@ class Agent:
         self,
         message: Content,
         *,
-        signal: AbortSignal | None = None,
+        signal: Union[AbortSignal, None] = None,
     ) -> str:
         """Send a message and get a response."""
         if signal:
@@ -362,7 +335,7 @@ class Agent:
         self,
         message: Content,
         *,
-        signal: AbortSignal | None = None,
+        signal: Union[AbortSignal, None] = None,
     ) -> AsyncIterator[str]:
         """Stream a response chunk by chunk."""
         if signal:
@@ -470,7 +443,7 @@ class Agent:
         """Called when a client connects. Override for custom logic."""
         self._connections.add(connection)
 
-    async def on_message(self, connection: Connection, message: str | bytes) -> None:
+    async def on_message(self, connection: Connection, message: Union[str, bytes]) -> None:
         """Called when a message is received. Override to handle messages."""
         pass
 
@@ -535,9 +508,9 @@ class Agent:
         self,
         kind: str,
         payload: Any = None,
-        connection: Connection | None = None,
-        ctx: ConnectionContext | None = None,
-        future: asyncio.Future | None = None,
+        connection: Union[Connection, None] = None,
+        ctx: Union[ConnectionContext, None] = None,
+        future: Union[asyncio.Future, None] = None,
     ) -> None:
         """Enqueue a message for serial processing."""
         self._mailbox.put_nowait(
@@ -557,65 +530,16 @@ class Agent:
         host: str = "localhost",
         port: int = 8080,
     ) -> None:
-        """Start a server with WebSocket, SSE, and REST endpoints.
-
-        Endpoints created:
-            - GET  /events       - SSE stream of events
-            - POST /chat         - Send message, get response
-            - WS   /ws           - WebSocket connection
-
-        The server automatically:
-            - Delivers emitted events to all connected clients
-            - Handles reconnection with last_event_id for replay
-        """
+        """Start a server with WebSocket, SSE, and REST endpoints."""
         from ai_query.agents.server import AgentServer
 
-        server = AgentServer(self.__class__)
-        # Pre-register this specific instance if possible?
-        # Actually AgentServer creates new instances by default.
-        # But if the user calls agent.serve(), they expect *this* instance to be served.
-        # AgentServer doesn't easily support serving a pre-existing instance for all IDs.
-        # It maps ID -> Class.
-        
-        # However, for single-agent convenience:
-        # We can implement a simple way. But `AgentServer` design assumes dynamic creation.
-        # If we just want to run this agent, we can rely on the class.
-        
-        # Wait, the docstring says "Start a server".
-        # If I have `bot = ResearchBot(...)` and call `bot.serve()`, 
-        # I probably want `bot` to be the instance.
-        
-        # The original `run_agent_server` likely handled this by checking if it's an instance or class.
-        # Let's check `AgentServer.__init__`.
-        # It takes `agent_cls_or_registry`. 
-        
-        # If I pass `self.__class__`, `AgentServer` will instantiate NEW agents for every request.
-        # That might be unexpected if the user configured `self` with specific tools/storage.
-        
-        # FIXME: Ideally AgentServer should support a "Singleton" mode or "Instance" mode.
-        # For now, to match previous behavior (which likely just ran the class), I'll use class.
-        # But wait, previous `run_agent_server` took `agent: Agent`.
-        
-        # Let's modify AgentServer to allow passing an instance?
-        # Or just instantiate it with the class for now as a safe fallback.
-        
         server = AgentServer(self.__class__)
         server.serve(host=host, port=port)
 
     # ─── Serverless Request Handling ───────────────────────────────────────
 
-    async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Handle a serverless request.
-
-        Args:
-            request: Request with 'action' and action-specific fields.
-                - action='chat': requires 'message'
-                - action='invoke': requires 'payload'
-                - action='state': returns current state
-
-        Returns:
-            Response dict with results
-        """
+    async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle a serverless request."""
         if self._state is None:
             await self.start()
 
@@ -661,25 +585,11 @@ class Agent:
         return {"error": f"Unknown action: {action}"}
 
     def call(self, agent_id: str, *, agent_cls: type[T]) -> AgentCallProxy[T]:
-        """Returns a type-safe proxy for making fluent calls to another agent.
-
-        This enables static analysis and autocompletion for remote agent methods.
-
-        Args:
-            agent_id: The target agent's ID.
-            agent_cls: The class of the target agent for type checking.
-
-        Returns:
-            An AgentCallProxy instance typed to the target agent class.
-        """
+        """Returns a type-safe proxy for making fluent calls to another agent."""
         return AgentCallProxy(self, agent_id)
 
-    async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Handle an incoming call from another agent.
-
-        Default implementation routes to '@action' methods or 'on_call_*' handlers.
-        Override this for custom routing logic.
-        """
+    async def handle_invoke(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle an incoming call from another agent."""
         method = payload.get("method")
         params = payload.get("params", {})
 
@@ -713,23 +623,9 @@ class Agent:
         return {"error": f"Method '{method}' not implemented on agent {self.id}"}
 
     async def handle_request_stream(
-        self, request: dict[str, Any]
+        self, request: Dict[str, Any]
     ) -> AsyncIterator[str]:
-        """Serverless streaming request handler.
-
-        Handles streaming requests, primarily for 'chat' action.
-        Yields SSE-formatted events:
-        - event: start (empty data)
-        - event: chunk (text delta)
-        - event: end (full accumulated text)
-        - event: error (error message)
-
-        Args:
-            request: The request with 'action' and action-specific fields.
-
-        Yields:
-            SSE formatted strings.
-        """
+        """Serverless streaming request handler."""
         # Ensure agent is started
         if self._state is None:
             await self.start()
