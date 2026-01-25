@@ -47,50 +47,67 @@ AgentServer(agent).serve(port=8080)
   </Card>
 </CardGroup>
 
-<Info>
-**serve() vs AgentServer**
-
-|                     | `agent.serve()`          | `AgentServer`              |
-| ------------------- | ------------------------ | -------------------------- |
-| **Use case**        | Development, prototyping | Production                 |
-| **Authentication**  | None                     | Custom auth middleware     |
-| **CORS**            | `*` (allow all)          | Configurable origins       |
-| **Agent instances** | Single                   | Multiple (routed by ID)    |
-| **Lifecycle hooks** | Basic                    | Full (create, evict, etc.) |
-
-Use `agent.serve()` for quick local development. Use `AgentServer` when you need authentication, multi-tenancy, or production deployment.
-
-</Info>
-
 ## Architecture
 
-![Agent Router](https://rawcontent.dearfutureself.me/agent-router.png)
+The Agent Server uses an **Agent Registry** to route requests.
 
-## Two Ways to Start
+1.  **Request**: `POST /agent/user-123/chat`
+2.  **Registry**: Matches `user-123` to the registered `Agent` class.
+3.  **Instantiation**: Creates (or retrieves) the agent instance for `user-123`.
+4.  **Execution**: Runs the agent logic.
 
-### Option 1: Agent.serve_many() Method
+## Configuration
 
-The simplest way—call directly on your agent:
+### Basic (Single Agent Type)
+
+The simplest way is to pass a single Agent class (or instance) to the server. This maps all IDs to that agent type.
 
 ```python
-agent.serve_many(port=8080)
+# Maps all IDs (.*) to MyAgent
+AgentServer(MyAgent).serve(port=8080)
 ```
 
-### Option 2: `AgentServer` Class
+### Advanced (Multi-Agent Registry)
 
-For more control over configuration:
+Use `AgentRegistry` to serve different types of agents from the same server.
 
 ```python
-from ai_query.agents import AgentServer
+from ai_query import AgentServer, AgentRegistry
+from agents import ChatBot, TaskWorker, AdminAgent
+
+registry = AgentRegistry()
+
+# 1. Exact Match
+registry.register("admin", AdminAgent)
+
+# 2. Pattern Match (Regex)
+registry.register("chat-.*", ChatBot)
+registry.register("worker-.*", TaskWorker)
+
+# Start server with registry
+AgentServer(registry).serve(port=8080)
+```
+
+Now requests are routed dynamically:
+- `/agent/admin` -> `AdminAgent("admin")`
+- `/agent/chat-123` -> `ChatBot("chat-123")`
+- `/agent/worker-abc` -> `TaskWorker("worker-abc")`
+
+### Server Configuration
+
+Control lifecycle and security with `AgentServerConfig`.
+
+```python
 from ai_query.agents import AgentServerConfig
 
 config = AgentServerConfig(
     idle_timeout=300,     # Evict after 5 min idle
     max_agents=100,       # Max 100 concurrent agents
     enable_rest_api=True, # Enable state REST endpoints
+    base_path="/api/v1",  # Custom base path
 )
 
-AgentServer(agent, config=config).serve(port=8080)
+AgentServer(registry, config=config).serve(port=8080)
 ```
 
 ## Endpoints
@@ -108,158 +125,67 @@ AgentServer(agent, config=config).serve(port=8080)
 ## Client Examples
 
 <Tabs>
+  <Tab title="Python (Client SDK)">
+    The recommended way to interact with the server.
+
+    ```python
+    from ai_query import connect
+
+    # Connect to a specific agent instance
+    agent = connect("http://localhost:8080/agent/user-123")
+
+    # Chat
+    response = await agent.chat("Hello!")
+
+    # Stream
+    async for chunk in agent.stream("Write a poem"):
+        print(chunk, end="")
+    ```
+  </Tab>
+
   <Tab title="REST (HTTP)">
-```bash
-# Chat with an agent
-curl -X POST http://localhost:8080/agent/user-123/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello, how can you help me?"}'
+    ```bash
+    # Chat with an agent
+    curl -X POST http://localhost:8080/agent/user-123/chat \
+      -H "Content-Type: application/json" \
+      -d '{"message": "Hello, how can you help me?"}'
 
-# Stream response
+    # Stream response
+    curl -X POST "http://localhost:8080/agent/user-123/chat?stream=true" \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Write a short poem"}'
 
-curl -X POST "http://localhost:8080/agent/user-123/chat?stream=true" \
- -H "Content-Type: application/json" \
- -d '{"message": "Write a short poem"}'
-
-# Invoke a task
-
-curl -X POST http://localhost:8080/agent/user-123/invoke \
- -H "Content-Type: application/json" \
- -d '{"task": "summarize", "text": "Long document here..."}'
-
-# Get agent state
-
-curl http://localhost:8080/agent/user-123/state
-
-# Update agent state
-
-curl -X PUT http://localhost:8080/agent/user-123/state \
- -H "Content-Type: application/json" \
- -d '{"preferences": {"theme": "dark"}}'
-
-````
+    # Invoke a task
+    curl -X POST http://localhost:8080/agent/user-123/invoke \
+     -H "Content-Type: application/json" \
+     -d '{"task": "summarize", "text": "Long document here..."}'
+    ```
   </Tab>
 
   <Tab title="SSE (Server-Sent Events)">
-```javascript
-// The recommended pattern: SSE for events, REST for messages
+    ```javascript
+    // The recommended pattern: SSE for events, REST for messages
 
-// 1. Connect to SSE first
-const evtSource = new EventSource(
-  "http://localhost:8080/agent/user-123/events"
-);
+    // 1. Connect to SSE first
+    const evtSource = new EventSource(
+      "http://localhost:8080/agent/user-123/events"
+    );
 
-// 2. Listen for events
-evtSource.addEventListener("chat_start", () => {
-  showSpinner();
-});
+    // 2. Listen for events
+    evtSource.addEventListener("chunk", (e) => {
+      const data = JSON.parse(e.data);
+      appendToOutput(data.content);
+    });
 
-evtSource.addEventListener("chunk", (e) => {
-  const data = JSON.parse(e.data);
-  appendToOutput(data.content);  // Real-time streaming
-});
-
-evtSource.addEventListener("status", (e) => {
-  const data = JSON.parse(e.data);
-  showStatus(data.text);  // Tool status like "Searching..."
-});
-
-evtSource.addEventListener("chat_complete", () => {
-  hideSpinner();
-});
-
-evtSource.addEventListener("state", (e) => {
-  const data = JSON.parse(e.data);
-  console.log("State updated:", data);
-});
-
-// 3. Send messages via REST - response streams via SSE
-fetch("http://localhost:8080/agent/user-123/chat", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ message: "Hello!" })
-});
-// Events flow: chat_start → chunk → chunk → ... → chat_complete
-````
-
-  </Tab>
-
-  <Tab title="WebSocket">
-```javascript
-const ws = new WebSocket("ws://localhost:8080/agent/user-123/ws");
-
-ws.onopen = () => {
-ws.send(JSON.stringify({ type: "message", content: "Hello!" }));
-};
-
-ws.onmessage = (event) => {
-const data = JSON.parse(event.data);
-console.log("Received:", data);
-};
-
-````
-
-```python
-import asyncio
-import websockets
-
-async def chat():
-    async with websockets.connect("ws://localhost:8080/agent/user-123/ws") as ws:
-        await ws.send("Hello!")
-        async for message in ws:
-            print(f"Agent: {message}")
-
-asyncio.run(chat())
-````
-
+    // 3. Send messages via REST
+    fetch("http://localhost:8080/agent/user-123/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Hello!" })
+    });
+    ```
   </Tab>
 </Tabs>
-
-## Configuration Options
-
-```python
-from ai_query.agents import AgentServerConfig
-
-config = AgentServerConfig(
-    # Lifecycle
-    idle_timeout=300.0,       # Seconds before evicting idle agents (None = never)
-    max_agents=None,          # Max concurrent agents (None = unlimited)
-
-    # Security
-    auth=my_auth_function,    # Async auth middleware (see below)
-    allowed_origins=["https://myapp.com"],  # CORS origins
-
-    # Routes
-    base_path="/agent",       # Base path for routes
-    enable_rest_api=True,     # Enable state REST endpoints
-    enable_list_agents=False, # Enable /agents (off by default - security)
-)
-```
-
-## Authentication
-
-Add authentication by providing an async function that returns `True` (allow) or `False` (reject):
-
-```python
-async def api_key_auth(request):
-    key = request.headers.get("X-API-Key")
-    return key == "your-secret-key"
-
-config = AgentServerConfig(auth=api_key_auth)
-```
-
-### Per-Agent Authorization
-
-```python
-async def per_agent_auth(request):
-    agent_id = request.match_info["agent_id"]
-    user = await get_user_from_token(request)
-
-    # Only allow access to user's own agents
-    return agent_id.startswith(f"user-{user.id}-")
-
-config = AgentServerConfig(auth=per_agent_auth)
-```
 
 ## Lifecycle Management
 
@@ -297,49 +223,7 @@ MyServer(agent, config=config).serve(port=8080)
 
 ## Custom Routes
 
-Add your own endpoints alongside the agent routes using either the `on_app_setup` hook or `create_app()` method.
-
-### Option 1: Override `on_app_setup`
-
-The simplest way to add custom routes:
-
-```python
-from aiohttp import web
-from ai_query.agents import Agent
-from ai_query.agents import AgentServer
-from ai_query.providers import openai, MemoryStorage
-
-agent = Agent(
-    "my-bot",
-    model=openai("gpt-4o"),
-    system="You are helpful.",
-    storage=MemoryStorage()
-)
-
-class MyServer(AgentServer):
-    def on_app_setup(self, app):
-        app.router.add_get("/health", self.health_check)
-        app.router.add_post("/webhook", self.handle_webhook)
-
-    async def health_check(self, request):
-        return web.json_response({
-            "status": "ok",
-            "active_agents": len(self._agents)
-        })
-
-    async def handle_webhook(self, request):
-        data = await request.json()
-        # Process webhook, maybe notify an agent
-        agent = self.get_or_create(data["agent_id"])
-        await agent.broadcast(f"Webhook received: {data['event']}")
-        return web.json_response({"received": True})
-
-MyServer(agent).serve(port=8080)
-```
-
-### Option 2: Use `create_app()` Directly
-
-For full control over the aiohttp application:
+Add your own endpoints alongside the agent routes using `create_app()`.
 
 ```python
 from aiohttp import web
@@ -353,168 +237,7 @@ async def health_handler(request):
     return web.json_response({"status": "ok"})
 
 app.router.add_get("/health", health_handler)
-app.router.add_static("/static", "./static")
-
-# Add custom middleware
-@web.middleware
-async def timing_middleware(request, handler):
-    import time
-    start = time.time()
-    response = await handler(request)
-    response.headers["X-Response-Time"] = str(time.time() - start)
-    return response
-
-app.middlewares.append(timing_middleware)
 
 # Run with aiohttp directly
 web.run_app(app, port=8080)
 ```
-
-### Accessing Agents from Custom Routes
-
-Your custom routes can interact with agents:
-
-```python
-class MyServer(AgentServer):
-    def on_app_setup(self, app):
-        app.router.add_post("/broadcast", self.broadcast_to_all)
-        app.router.add_get("/agent/{agent_id}/custom", self.custom_agent_endpoint)
-
-    async def broadcast_to_all(self, request):
-        data = await request.json()
-        for agent_id in self.list_agents():
-            agent = self.get_or_create(agent_id)
-            await agent.broadcast(data["message"])
-        return web.json_response({"sent_to": len(self._agents)})
-
-    async def custom_agent_endpoint(self, request):
-        agent_id = request.match_info["agent_id"]
-        agent = self.get_or_create(agent_id)
-
-        # Start agent if needed
-        if agent._state is None:
-            await agent.start()
-
-        return web.json_response({
-            "agent_id": agent_id,
-            "state": agent.state,
-            "message_count": len(agent.messages)
-        })
-```
-
-## Complete Example: Per-User Research Assistant
-
-Each user gets their own AI research assistant with persistent findings:
-
-```python
-from ai_query.agents import Agent, AgentServer
-from ai_query.agents import AgentServerConfig, SQLiteStorage, tool, Field
-from ai_query.providers.google import google
-
-class ResearchAssistant(Agent):
-    def __init__(self):
-        @tool(description="Save an important research finding")
-        async def save_finding(
-            topic: str = Field(description="Topic of the finding"),
-            finding: str = Field(description="The finding to save"),
-        ) -> str:
-            findings = self.state.get("findings", []) + [{"topic": topic, "finding": finding}]
-            await self.update_state(findings=findings)
-            return f"Saved finding #{len(findings)}"
-
-        @tool(description="List all saved findings")
-        async def list_findings() -> str:
-            findings = self.state.get("findings", [])
-            if not findings:
-                return "No findings saved yet."
-            return "\n".join([f"- [{f['topic']}] {f['finding']}" for f in findings])
-
-        super().__init__(
-            "research-assistant",
-            model=google("gemini-2.0-flash"),
-            system="You are a research assistant. Help users research topics and save findings.",
-            storage=SQLiteStorage("research.db"),
-            initial_state={"findings": [], "total_queries": 0},
-            tools={"save_finding": save_finding, "list_findings": list_findings}
-        )
-
-    async def on_connect(self, connection, ctx):
-        await super().on_connect(connection, ctx)
-        findings_count = len(self.state.get("findings", []))
-        if findings_count > 0:
-            await connection.send(f"Welcome back! You have {findings_count} saved findings.")
-        else:
-            await connection.send("Hello! I can help you research topics.")
-
-    async def on_message(self, connection, message):
-        await self.update_state(total_queries=self.state.get("total_queries", 0) + 1)
-        async for chunk in self.stream(message):
-            await connection.send(chunk)
-
-
-if __name__ == "__main__":
-    config = AgentServerConfig(idle_timeout=600, max_agents=50)
-    AgentServer(ResearchAssistant(), config=config).serve(port=8080)
-```
-
-## Example: Parallel Task Workers
-
-Spawn independent agents to execute tasks in parallel:
-
-```python
-from ai_query.agents import Agent
-from ai_query.agents import AgentServer, SQLiteStorage, tool, Field
-from ai_query.providers import openai
-
-class TaskWorker(Agent):
-    def __init__(self):
-        @tool(description="Execute a step of the task")
-        async def execute_step(step: str = Field(description="Step to execute")) -> str:
-            steps = self.state.get("steps_completed", []) + [step]
-            await self.update_state(steps_completed=steps, status="working")
-            return f"Completed step {len(steps)}: {step}"
-
-        @tool(description="Mark the task as complete")
-        async def complete_task(summary: str = Field(description="Task summary")) -> str:
-            await self.update_state(status="complete")
-            return f"Task complete: {summary}"
-
-        super().__init__(
-            "task-worker",
-            model=openai("gpt-4o"),
-            system="You execute tasks step by step. Report progress and mark complete when done.",
-            storage=SQLiteStorage("./workers.db"),
-            initial_state={"status": "idle", "steps_completed": []},
-            tools={"execute_step": execute_step, "complete_task": complete_task}
-        )
-
-# Start worker pool
-AgentServer(TaskWorker()).serve(port=8080)
-
-# Create workers programmatically:
-# POST http://localhost:8080/agent/task-001/chat with task instructions
-# Or connect via ws://localhost:8080/agent/task-001/ws
-# Each task-XXX gets its own isolated worker
-```
-
-## Comparison
-
-| Feature         | `agent.serve()`   | `serve_many()` / `AgentServer`          |
-| --------------- | ----------------- | --------------------------------------- |
-| Agent instances | Single            | Multiple (routed by ID)                 |
-| WebSocket       | `/ws`             | `/agent/{id}/ws`                        |
-| REST API        | `/chat`, `/state` | `/agent/{id}/chat`, `/agent/{id}/state` |
-| SSE             | `/events`         | `/agent/{id}/events`                    |
-| State isolation | One shared state  | Each agent has own state                |
-| Use case        | Single assistant  | Multi-user, multi-tenant, task workers  |
-
-## Next Steps
-
-<CardGroup cols={2}>
-  <Card title="API Reference" icon="code" href="/api-reference/agent-server">
-    Full AgentServer and AgentServerConfig API
-  </Card>
-  <Card title="Stateful Agents" icon="database" href="/core/stateful-agents">
-    Learn about agent state and storage backends
-  </Card>
-</CardGroup>

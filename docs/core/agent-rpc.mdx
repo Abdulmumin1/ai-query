@@ -26,7 +26,7 @@ Actions can be called through multiple transports, making them highly versatile.
 
 ### 1. Via REST API (HTTP)
 
-`AgentServer` automatically creates a REST endpoint for each action.
+`AgentServer` and `AgentRouter` automatically create a REST endpoint for each action.
 
 - **URL**: `POST /agent/{agent_id}/action/{action_name}`
 - **Body**: JSON payload with action parameters.
@@ -53,10 +53,11 @@ socket.send(JSON.stringify({
 
 The agent will send an `action_result` event with the same `call_id` upon completion.
 
-### 3. Agent-to-Agent (Internal RPC)
+### 3. Agent-to-Agent (Location Transparent RPC)
 
-Use `self.call()` to get a type-safe proxy for communicating with another agent.
+Use `self.call()` to get a type-safe proxy for communicating with another agent, regardless of whether it's running locally or on a remote server.
 
+**Local Example:**
 ```python
 class ManagerAgent(Agent):
     async def escalate_ticket(self, ticket_id):
@@ -71,6 +72,30 @@ class ManagerAgent(Agent):
         )
         return result
 ```
+
+**Remote Example:**
+Now, imagine `support-agent-1` is deployed as a serverless function. With the **Agent Registry**, your `ManagerAgent` code **does not change**.
+
+```python
+# infrastructure.py
+from ai_query import AgentRegistry, AgentServer, HTTPTransport
+
+registry = AgentRegistry()
+
+# Manager is local
+registry.register("manager", ManagerAgent)
+
+# Support is remote
+registry.register(
+    "support-agent-1",
+    HTTPTransport("https://api.myapp.com/agents/support")
+)
+
+# Start the server
+AgentServer(registry).serve()
+```
+
+The `self.call("support-agent-1")` inside `ManagerAgent` is automatically routed over HTTP, but your business logic remains clean and unaware of the network. This is **Location Transparency**.
 
 ## Multi-User Metadata (Connection State)
 

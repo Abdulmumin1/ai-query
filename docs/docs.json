@@ -41,8 +41,10 @@
             "pages": [
               "core/stateful-agents",
               "core/agent-server",
+              "core/transports",
               "core/events",
-              "core/agent-rpc"
+              "core/agent-rpc",
+              "core/deployment"
             ]
           }
         ]

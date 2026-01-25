@@ -1,0 +1,121 @@
+---
+title: "Transports & Registry"
+description: "Configure how agents communicate and where they run"
+---
+
+The `ai-query` library uses a unified transport layer that decouples **Agent Logic** from **Infrastructure**. This allows you to write agent code once and deploy it anywhere—in a single process, across microservices, or on serverless functions.
+
+## Concepts
+
+### Agent Registry
+The Registry maps Agent IDs (e.g., `"researcher"`, `"room-1"`) to their implementation. It solves the problem of "Where does this agent live?".
+
+- **Local Mapping**: Maps an ID to a Python class. The `AgentServer` instantiates it on demand.
+- **Remote Mapping**: Maps an ID to a URL via a `Transport`. The agent lives on another server.
+
+### Transports
+Transports handle the low-level communication between agents.
+
+- **`LocalTransport`**: Direct in-memory communication. Used when agents are in the same process.
+- **`HTTPTransport`**: Uses HTTP/REST to communicate with agents on other servers (or serverless functions).
+
+## Configuration
+
+### Basic (Single Agent Class)
+The default behavior is simple: serve one type of agent for all IDs.
+
+```python
+from ai_query import AgentServer
+from my_agent import ChatBot
+
+# Implicitly creates a registry mapping ".*" -> ChatBot
+server = AgentServer(ChatBot)
+server.serve()
+```
+
+### Advanced (Multi-Agent Registry)
+Use `AgentRegistry` to serve multiple different agent types or route to remote agents.
+
+```python
+from ai_query import AgentServer, AgentRegistry, HTTPTransport
+from agents import WriterAgent, ResearchAgent
+
+registry = AgentRegistry()
+
+# 1. Route specific IDs to specific classes
+registry.register("writer", WriterAgent)
+
+# 2. Route patterns (Regex)
+registry.register("researcher-.*", ResearchAgent)
+
+# 3. Route to remote agents (e.g. Serverless functions)
+registry.register(
+    "summarizer", 
+    HTTPTransport("https://api.myapp.com/agents/summarizer")
+)
+
+server = AgentServer(registry)
+server.serve()
+```
+
+## Consuming Remote Agents
+
+You don't need `AgentServer` to use remote agents. You can use `connect()` in your client scripts or other applications.
+
+```python
+from ai_query import connect
+
+# Connect to a remote agent
+# This creates a "RemoteAgent" proxy
+agent = connect("https://api.myapp.com/agents/researcher")
+
+# Use it exactly like a local agent
+response = await agent.chat("Find me the latest AI news")
+
+# Streaming works seamlessly
+async for chunk in agent.stream("Summarize it"):
+    print(chunk, end="")
+
+# RPC calls are typed and auto-completed
+result = await agent.call().analyze_data(limit=10)
+```
+
+## Wire Protocol
+
+`HTTPTransport` uses a standard JSON protocol over HTTP POST.
+
+### Endpoints
+- `POST /{agent_id}/chat`: Standard chat interaction.
+- `POST /{agent_id}/invoke`: RPC method calls.
+
+### Chat Request
+```json
+POST /agent/my-agent/chat
+{
+  "action": "chat",
+  "message": "Hello world"
+}
+```
+
+### Streaming Request
+```json
+POST /agent/my-agent/chat?stream=true
+{
+  "action": "chat",
+  "message": "Hello world",
+  "stream": true
+}
+```
+*Response*: `text/event-stream` with `data: ...` chunks.
+
+### Invoke Request
+```json
+POST /agent/my-agent/invoke
+{
+  "action": "invoke",
+  "payload": {
+    "method": "my_method",
+    "params": {"arg1": "value"}
+  }
+}
+```

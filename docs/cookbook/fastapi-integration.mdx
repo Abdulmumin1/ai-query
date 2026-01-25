@@ -5,9 +5,33 @@ description: "Use ai-query with FastAPI for custom HTTP endpoints"
 
 Integrate ai-query with FastAPI when you need custom HTTP endpoints, middleware, or want to use your own server infrastructure instead of the built-in `serve()`.
 
-## Basic Chat Endpoint
+## Quick Integration (`AgentRouter`)
 
-The simplest integration - a REST endpoint that returns AI responses.
+The easiest way to serve an agent is using the `AgentRouter`. This adds a standard set of endpoints (`/chat`, `/invoke`, `/state`) to your application.
+
+```python
+from fastapi import FastAPI
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.adapters.fastapi import AgentRouter
+from ai_query.providers import openai
+
+app = FastAPI()
+
+# 1. Define Agent
+agent = Agent(
+    "support-bot",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.db")
+)
+
+# 2. Mount Router
+# This creates routes like POST /api/agent/chat, POST /api/agent/invoke
+app.include_router(AgentRouter(agent), prefix="/api/agent")
+```
+
+## Basic Chat Endpoint (Manual)
+
+If you only need a simple chat endpoint and don't want the full agent API:
 
 ```python
 from fastapi import FastAPI
@@ -66,253 +90,29 @@ async def chat_stream(request: ChatRequest):
     )
 ```
 
-## Agent with Custom Transport
+## Advanced: Custom Agent Integration
 
-Use the Agent class with FastAPI by injecting a custom emit handler. (See [Events Guide](/core/events) for the standard behavior).
-
-```python
-from fastapi import FastAPI, WebSocket
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-import json
-import asyncio
-
-from ai_query.agents import Agent, SQLiteStorage, tool, Field
-from ai_query.providers import openai
-
-app = FastAPI()
-
-# Create a shared agent instance
-class AssistantAgent(Agent):
-    enable_event_log = True
-
-    def __init__(self):
-        @tool(description="Search for information")
-        async def search(query: str = Field(description="Search query")) -> str:
-            await self.emit("status", {"text": f"Searching: {query}"})
-            # Your search implementation
-            return f"Results for: {query}"
-
-        super().__init__(
-            "assistant",
-            model=openai("gpt-4o"),
-            storage=SQLiteStorage("assistant.db"),
-            tools={"search": search}
-        )
-
-agent = AssistantAgent()
-
-@app.on_event("startup")
-async def startup():
-    await agent.start()
-
-@app.on_event("shutdown")
-async def shutdown():
-    await agent.stop()
-
-
-# REST chat endpoint
-class ChatRequest(BaseModel):
-    message: str
-
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    response = await agent.chat(request.message)
-    return {"response": response}
-
-
-# SSE streaming endpoint with events
-@app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
-    # Queue to collect emitted events
-    event_queue: asyncio.Queue = asyncio.Queue()
-
-    # Inject emit handler that pushes to queue
-    async def emit_to_queue(event: str, data: dict, event_id: int):
-        await event_queue.put(f"event: {event}\nid: {event_id}\ndata: {json.dumps(data)}\n\n")
-
-    agent._emit_handler = emit_to_queue
-
-    async def generate():
-        # Start chat in background
-        chat_task = asyncio.create_task(agent.chat(request.message))
-
-        # Yield events as they arrive
-        while not chat_task.done():
-            try:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-                yield event
-            except asyncio.TimeoutError:
-                continue
-
-        # Drain remaining events
-        while not event_queue.empty():
-            yield await event_queue.get()
-
-        # Final response
-        response = await chat_task
-        yield f"event: done\ndata: {json.dumps({'response': response})}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache"}
-    )
-
-
-# WebSocket endpoint
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-
-    # Inject emit handler for this connection
-    async def emit_to_ws(event: str, data: dict, event_id: int):
-        await websocket.send_json({"type": event, "id": event_id, **data})
-
-    agent._emit_handler = emit_to_ws
-
-    try:
-        while True:
-            message = await websocket.receive_text()
-
-            # Stream response
-            async for chunk in agent.stream(message):
-                await websocket.send_json({"type": "chunk", "content": chunk})
-
-            await websocket.send_json({"type": "done"})
-    except Exception:
-        pass
-    finally:
-        agent._emit_handler = None
-```
-
-## Multi-User with Dependency Injection
-
-Handle multiple users with per-request agents using FastAPI dependencies.
+If `AgentRouter` doesn't fit your needs, you can integrate the `Agent` class manually.
 
 ```python
-from fastapi import FastAPI, Depends, Header
-from pydantic import BaseModel
-from typing import Annotated
-
+from fastapi import FastAPI, Depends, HTTPException
 from ai_query.agents import Agent, SQLiteStorage
 from ai_query.providers import openai
 
 app = FastAPI()
 
-# Agent cache
-agents: dict[str, Agent] = {}
+agent = Agent("my-agent", model=openai("gpt-4o"))
 
-async def get_agent(x_user_id: Annotated[str, Header()]) -> Agent:
-    """Get or create agent for this user."""
-    if x_user_id not in agents:
-        agent = Agent(
-            f"user-{x_user_id}",
-            model=openai("gpt-4o"),
-            storage=SQLiteStorage("agents.db"),
-            initial_state={"user_id": x_user_id}
-        )
-        await agent.start()
-        agents[x_user_id] = agent
-    return agents[x_user_id]
+@app.on_event("startup")
+async def startup():
+    await agent.start()
 
-class ChatRequest(BaseModel):
-    message: str
-
-@app.post("/chat")
-async def chat(
-    request: ChatRequest,
-    agent: Annotated[Agent, Depends(get_agent)]
-):
-    response = await agent.chat(request.message)
-    return {
-        "agent_id": agent.id,
-        "response": response,
-        "message_count": len(agent.messages)
-    }
-
-@app.get("/history")
-async def get_history(agent: Annotated[Agent, Depends(get_agent)]):
-    return {
-        "agent_id": agent.id,
-        "messages": [m.to_dict() for m in agent.messages]
-    }
-
-@app.delete("/history")
-async def clear_history(agent: Annotated[Agent, Depends(get_agent)]):
-    await agent.clear()
-    return {"status": "cleared"}
+@app.post("/custom-chat")
+async def chat(message: str):
+    # Use handle_request for consistent behavior
+    result = await agent.handle_request({
+        "action": "chat",
+        "message": message
+    })
+    return result
 ```
-
-## Serverless (handle_request)
-
-For serverless deployments (Vercel, AWS Lambda), use the agent's `handle_request` method.
-
-```python
-from fastapi import FastAPI, Request
-from ai_query.agents import Agent, MemoryStorage
-from ai_query.providers import openai
-
-app = FastAPI()
-
-@app.post("/agent/{agent_id}")
-async def handle_agent_request(agent_id: str, request: Request):
-    body = await request.json()
-
-    # Create agent for this request
-    agent = Agent(
-        agent_id,
-        model=openai("gpt-4o"),
-        storage=MemoryStorage()  # Use Redis/DynamoDB for real persistence
-    )
-
-    # handle_request manages lifecycle internally
-    response = await agent.handle_request(body)
-    return response
-```
-
-Example requests:
-
-```bash
-# Chat
-curl -X POST http://localhost:8000/agent/user-123 \
-  -H "Content-Type: application/json" \
-  -d '{"action": "chat", "message": "Hello!"}'
-
-# Get state
-curl -X POST http://localhost:8000/agent/user-123 \
-  -H "Content-Type: application/json" \
-  -d '{"action": "state"}'
-
-# Invoke custom handler
-curl -X POST http://localhost:8000/agent/user-123 \
-  -H "Content-Type: application/json" \
-  -d '{"action": "invoke", "payload": {"task": "summarize", "text": "..."}}'
-```
-
-## Running the Examples
-
-```bash
-# Install dependencies
-pip install fastapi uvicorn ai-query
-
-# Run the server
-uvicorn main:app --reload
-
-# Test
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello!"}'
-```
-
-## When to Use FastAPI vs serve()
-
-| Use Case                    | Recommendation             |
-| --------------------------- | -------------------------- |
-| Quick prototype             | `agent.serve()`            |
-| Simple WebSocket/SSE        | `agent.serve()`            |
-| Custom middleware           | FastAPI                    |
-| Complex routing             | FastAPI                    |
-| Existing FastAPI app        | FastAPI                    |
-| Multiple apps on one server | FastAPI                    |
-| Serverless deployment       | FastAPI + `handle_request` |

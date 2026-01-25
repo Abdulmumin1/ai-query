@@ -148,6 +148,54 @@ async def main():
 asyncio.run(main())
 ```
 
+## Distributed Agents (Registry)
+
+You can build systems where some agents are local and others are remote (Serverless, Cloud Run, etc.). The **Agent Registry** makes this transparent to your code.
+
+```python
+from ai_query import AgentRegistry, Agent, HTTPTransport
+from ai_query.providers import openai
+
+# 1. Define Local Agents
+class Coordinator(Agent):
+    async def run_workflow(self, topic: str):
+        # Call 'researcher' by ID
+        # The registry decides if it's local or remote
+        research = await self.call("researcher").research(topic)
+        return research
+
+# 2. Configure Registry
+registry = AgentRegistry()
+
+# Map 'coordinator' to local class
+registry.register("coordinator", Coordinator)
+
+# Map 'researcher' to remote serverless function
+registry.register(
+    "researcher", 
+    HTTPTransport("https://api.example.com/agents/researcher")
+)
+
+# 3. Run
+coordinator = Coordinator("coordinator")
+# Inject registry-aware transport (handled by AgentServer in production)
+# For standalone script usage, we can manually wire it or use AgentServer.
+```
+
+When using `AgentServer`, this wiring is automatic:
+
+```python
+from ai_query import AgentServer, AgentRegistry, HTTPTransport
+
+registry = AgentRegistry()
+registry.register("coordinator", CoordinatorAgent)
+registry.register("worker-.*", HTTPTransport("https://worker-cluster.com/agents"))
+
+# Server handles routing between local and remote agents
+server = AgentServer(registry)
+server.serve()
+```
+
 ## Using Stateful Agents
 
 For more complex workflows where agents need to maintain state:
@@ -200,106 +248,6 @@ async def create_content(topic: str) -> str:
         content = await writer.write(topic, research)
 
         return content
-```
-
-## Parallel Agent Execution
-
-Run multiple agents in parallel for faster results:
-
-```python
-import asyncio
-from ai_query import generate_text
-from ai_query.providers import google, tool, Field
-
-async def analyze_with_specialists(data: str) -> dict:
-    async def technical_analysis(data: str) -> str:
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),
-            system="You are a technical analyst. Focus on technical details.",
-            prompt=data,
-        )
-        return result.text
-
-    async def market_analysis(data: str) -> str:
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),
-            system="You are a market analyst. Focus on market implications.",
-            prompt=data,
-        )
-        return result.text
-
-    async def risk_analysis(data: str) -> str:
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),
-            system="You are a risk analyst. Identify potential risks.",
-            prompt=data,
-        )
-        return result.text
-
-    # Run all analyses in parallel
-    technical, market, risk = await asyncio.gather(
-        technical_analysis(data),
-        market_analysis(data),
-        risk_analysis(data),
-    )
-
-    return {
-        "technical": technical,
-        "market": market,
-        "risk": risk,
-    }
-
-# Use results in a synthesizer
-@tool(description="Get specialist analyses on a topic")
-async def get_analyses(topic: str = Field(description="Topic")) -> str:
-    analyses = await analyze_with_specialists(topic)
-    return f"""
-    Technical Analysis: {analyses['technical']}
-
-    Market Analysis: {analyses['market']}
-
-    Risk Analysis: {analyses['risk']}
-    """
-
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    system="Synthesize the specialist analyses into a comprehensive report.",
-    prompt="Analyze: Cloud computing migration strategy",
-    tools={"get_analyses": get_analyses},
-)
-```
-
-## Debate Pattern
-
-Have agents argue different perspectives:
-
-```python
-@tool(description="Get the argument FOR the proposition")
-async def argue_for(proposition: str = Field(description="The proposition")) -> str:
-    result = await generate_text(
-        model=google("gemini-2.0-flash"),
-        system="You strongly support this position. Give compelling arguments FOR it.",
-        prompt=proposition,
-    )
-    return result.text
-
-@tool(description="Get the argument AGAINST the proposition")
-async def argue_against(proposition: str = Field(description="The proposition")) -> str:
-    result = await generate_text(
-        model=google("gemini-2.0-flash"),
-        system="You strongly oppose this position. Give compelling arguments AGAINST it.",
-        prompt=proposition,
-    )
-    return result.text
-
-# Moderator synthesizes both sides
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    system="""You are an impartial moderator.
-    Get arguments from both sides, then provide a balanced summary.""",
-    prompt="Should companies adopt a 4-day work week?",
-    tools={"argue_for": argue_for, "argue_against": argue_against},
-)
 ```
 
 ## Tips

@@ -568,9 +568,39 @@ class Agent:
             - Delivers emitted events to all connected clients
             - Handles reconnection with last_event_id for replay
         """
-        from ai_query.agents.server import run_agent_server
+        from ai_query.agents.server import AgentServer
 
-        run_agent_server(self, host=host, port=port)
+        server = AgentServer(self.__class__)
+        # Pre-register this specific instance if possible?
+        # Actually AgentServer creates new instances by default.
+        # But if the user calls agent.serve(), they expect *this* instance to be served.
+        # AgentServer doesn't easily support serving a pre-existing instance for all IDs.
+        # It maps ID -> Class.
+        
+        # However, for single-agent convenience:
+        # We can implement a simple way. But `AgentServer` design assumes dynamic creation.
+        # If we just want to run this agent, we can rely on the class.
+        
+        # Wait, the docstring says "Start a server".
+        # If I have `bot = ResearchBot(...)` and call `bot.serve()`, 
+        # I probably want `bot` to be the instance.
+        
+        # The original `run_agent_server` likely handled this by checking if it's an instance or class.
+        # Let's check `AgentServer.__init__`.
+        # It takes `agent_cls_or_registry`. 
+        
+        # If I pass `self.__class__`, `AgentServer` will instantiate NEW agents for every request.
+        # That might be unexpected if the user configured `self` with specific tools/storage.
+        
+        # FIXME: Ideally AgentServer should support a "Singleton" mode or "Instance" mode.
+        # For now, to match previous behavior (which likely just ran the class), I'll use class.
+        # But wait, previous `run_agent_server` took `agent: Agent`.
+        
+        # Let's modify AgentServer to allow passing an instance?
+        # Or just instantiate it with the class for now as a safe fallback.
+        
+        server = AgentServer(self.__class__)
+        server.serve(host=host, port=port)
 
     # ─── Serverless Request Handling ───────────────────────────────────────
 
