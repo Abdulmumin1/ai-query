@@ -173,7 +173,7 @@ registry.register("coordinator", Coordinator)
 # Map 'researcher' to remote serverless function
 registry.register(
     "researcher", 
-    HTTPTransport("https://api.example.com/agents/researcher")
+    HTTPTransport("https://api.example.com/agent/researcher")
 )
 
 # 3. Run
@@ -189,7 +189,7 @@ from ai_query import AgentServer, AgentRegistry, HTTPTransport
 
 registry = AgentRegistry()
 registry.register("coordinator", CoordinatorAgent)
-registry.register("worker-.*", HTTPTransport("https://worker-cluster.com/agents"))
+registry.register("worker-.*", HTTPTransport("https://worker-cluster.com/agent"))
 
 # Server handles routing between local and remote agents
 server = AgentServer(registry)

@@ -51,7 +51,7 @@ registry.register("researcher-.*", ResearchAgent)
 # 3. Route to remote agents (e.g. Serverless functions)
 registry.register(
     "summarizer", 
-    HTTPTransport("https://api.myapp.com/agents/summarizer")
+    HTTPTransport("https://api.myapp.com/agent/summarizer")
 )
 
 server = AgentServer(registry)
@@ -67,7 +67,7 @@ from ai_query import connect
 
 # Connect to a remote agent
 # This creates a "RemoteAgent" proxy
-agent = connect("https://api.myapp.com/agents/researcher")
+agent = connect("https://api.myapp.com/agent/researcher")
 
 # Use it exactly like a local agent
 response = await agent.chat("Find me the latest AI news")
