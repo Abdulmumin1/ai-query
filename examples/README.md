@@ -13,7 +13,7 @@ Real-world agent examples demonstrating different features of ai-query.
 | [multi_provider.py](multi_provider.py) | Compare OpenAI, Anthropic, Google | Multiple providers, streaming comparison |
 | [country_explorer.py](country_explorer.py) | Geography data explorer | REST API integration, `on_step_start` |
 | [unit_converter.py](unit_converter.py) | Unit conversion assistant | Simple sync tools, multiple conversions |
-| [rpc_agent.py](rpc_agent.py) | Interactive Chat Room | Fluent RPC API, WebSocket/SSE support, multiple clients |
+| [rpc](rpc/) | Interactive Chat Room | Fluent RPC API, WebSocket/SSE support, multiple clients |
 
 ## Running Examples
 
@@ -31,7 +31,7 @@ Run any example:
 cd examples
 uv run wikipedia_agent.py
 uv run hackernews_agent.py
-uv run task_planner.py
+uv run rpc/server.py
 ```
 
 ## Feature Highlights

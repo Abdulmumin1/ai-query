@@ -7,7 +7,7 @@ from typing import Any, Dict
 import aiohttp
 
 # Import the specific agent class for type-hinting
-from examples.rpc_agent import ChatRoom
+from examples.rpc.server import ChatRoom
 # Import the base Agent class to create our client-side dummy agent
 from ai_query.agents import Agent
 # Import the base Transport class to create a custom websocket transport

@@ -34,7 +34,7 @@ async def main(user_id: str):
 
     except aiohttp.ClientConnectorError as e:
         print(f"Connection error: {e}")
-        print("Is the agent server running? Try: `python examples/rpc_agent.py`")
+        print("Is the agent server running? Try: `python examples/rpc/server.py`")
     except asyncio.CancelledError:
         print("\nClient shut down.")
 
