@@ -89,7 +89,16 @@ async def call(
 ) -> Any
 ```
 
-Call another agent's method via the transport layer (requires `AgentServer`).
+Call another agent's method via the transport layer (requires `AgentServer`). This can be an `@action` or a legacy `on_call_*` handler.
+
+### @action
+
+```python
+@action
+async def my_action(self, param1: str) -> dict:
+```
+
+Decorator to mark a method as a callable RPC action. See the [Agent RPC & Actions](/core/agent-rpc) guide for details.
 
 ## Lifecycle Hooks
 

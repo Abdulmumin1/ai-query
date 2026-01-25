@@ -66,12 +66,14 @@ class _AgentMeta:
 
 class AioHttpConnection(Connection):
     """Wraps aiohttp WebSocket in our Connection interface."""
+    state: dict[str, Any]
 
     def __init__(self, ws: web.WebSocketResponse, request: web.Request):
         self._ws = ws
         self._request = request
         self.username: str | None = None
         self.agent_id: str | None = None
+        self.state = {}
 
     async def send(self, message: str | bytes) -> None:
         if isinstance(message, bytes):
@@ -90,10 +92,12 @@ class AioHttpConnection(Connection):
 
 class AioHttpSSEConnection(Connection):
     """Wraps aiohttp StreamResponse for SSE in our Connection interface."""
+    state: dict[str, Any]
 
     def __init__(self, response: web.StreamResponse, request: web.Request):
         self._response = response
         self._request = request
+        self.state = {}
 
     async def send(self, message: str | bytes) -> None:
         """Send message as SSE data event."""
@@ -202,7 +206,7 @@ class AgentServer:
         # Create new agent
         agent = self._agent_cls(agent_id)
 
-        # Inject transport and event bus
+        # Inject transport, event bus, and emit handler
         if self._transport is None and not self._transport_initialized:
             from ai_query.agents.transport import LocalTransport
             self._transport = LocalTransport(self)
@@ -214,9 +218,32 @@ class AgentServer:
 
         agent._transport = self._transport
         agent._event_bus = self._event_bus
+        agent._emit_handler = self._create_emit_handler(agent)
 
         self._agents[agent_id] = _AgentMeta(agent=agent)
         return agent
+
+    def _create_emit_handler(self, agent: "Agent") -> Callable[[str, dict, int], Awaitable[None]]:
+        """Create the emit handler that delivers events to all connected clients."""
+
+        async def deliver(event: str, data: dict, event_id: int) -> None:
+            # Deliver to WebSocket connections
+            ws_msg = json.dumps({"type": event, "id": event_id, **data})
+            for conn in list(agent._connections):
+                try:
+                    await conn.send(ws_msg)
+                except Exception:
+                    agent._connections.discard(conn)
+
+            # Deliver to SSE connections
+            sse_msg = f"id: {event_id}\nevent: {event}\ndata: {json.dumps(data)}\n\n"
+            for sse in list(agent._sse_connections):
+                try:
+                    await sse.write(sse_msg.encode())
+                except Exception:
+                    agent._sse_connections.discard(sse)
+
+        return deliver
 
     async def evict(self, agent_id: str) -> None:
         """Evict an agent, closing all connections and removing it.
@@ -305,7 +332,7 @@ class AgentServer:
                 # Skip for WebSocket upgrades and SSE streams (already handled)
                 if not isinstance(response, web.WebSocketResponse):
                     self._add_cors_headers(response, request)
-                return response
+                return response  # type: ignore
             except web.HTTPException as ex:
                 # Add CORS headers to HTTP exceptions (404, 401, etc.)
                 self._add_cors_headers(ex, request)
@@ -320,7 +347,7 @@ class AgentServer:
             if not allowed:
                 raise web.HTTPUnauthorized(text="Authentication required")
 
-    def _add_cors_headers(self, response: web.Response, request: web.Request | None = None) -> web.Response:
+    def _add_cors_headers(self, response: Any, request: web.Request | None = None) -> Any:
         """Add CORS headers based on request origin.
 
         The Access-Control-Allow-Origin header only accepts a single origin or '*'.
@@ -401,7 +428,41 @@ class AgentServer:
             async for msg in ws:
                 meta.last_activity = time.time()
                 if msg.type == WSMsgType.TEXT:
-                    agent.enqueue("message", msg.data, connection=connection)
+                    try:
+                        data = json.loads(msg.data)
+                        if isinstance(data, dict) and data.get("type") == "action":
+                            name = data.get("name")
+                            params = data.get("params", {})
+                            call_id = data.get("call_id")
+                            
+                            async def run_action(name, params, call_id, conn, context):
+                                future = asyncio.get_running_loop().create_future()
+                                agent.enqueue(
+                                    "action",
+                                    {"name": name, "params": params},
+                                    connection=conn,
+                                    ctx=context,
+                                    future=future
+                                )
+                                try:
+                                    result = await future
+                                    await conn.send(json.dumps({
+                                        "type": "action_result",
+                                        "call_id": call_id,
+                                        "result": result
+                                    }))
+                                except Exception as e:
+                                    await conn.send(json.dumps({
+                                        "type": "action_result",
+                                        "call_id": call_id,
+                                        "error": str(e)
+                                    }))
+                            
+                            asyncio.create_task(run_action(name, params, call_id, connection, ctx))
+                        else:
+                            agent.enqueue("message", msg.data, connection=connection)
+                    except json.JSONDecodeError:
+                        agent.enqueue("message", msg.data, connection=connection)
                 elif msg.type == WSMsgType.BINARY:
                     agent.enqueue("message", msg.data, connection=connection)
                 elif msg.type == WSMsgType.ERROR:
@@ -656,6 +717,49 @@ class AgentServer:
         )
         return self._add_cors_headers(response, request)
 
+    async def _handle_action(self, request: web.Request) -> web.Response:
+        """Handle POST /agent/{id}/action/{action_name}."""
+        await self._check_auth(request)
+
+        agent_id = request.match_info["agent_id"]
+        action_name = request.match_info["action_name"]
+        agent = self.get_or_create(agent_id)
+
+        # Start agent if needed
+        if agent._state is None:
+            await agent.start()
+            await self.on_agent_create(agent)
+
+        # Update activity
+        if agent_id in self._agents:
+            self._agents[agent_id].last_activity = time.time()
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            # Body might be empty for actions without params
+            body = {}
+
+        # Use handle_request for consistent behavior
+        result = await agent.handle_request({
+            "action": "action",
+            "name": action_name,
+            "params": body
+        })
+
+        if "error" in result:
+            response = web.Response(
+                text=json.dumps(result),
+                status=400,
+                content_type="application/json",
+            )
+        else:
+            response = web.Response(
+                text=json.dumps(result),
+                content_type="application/json",
+            )
+        return self._add_cors_headers(response, request)
+
     async def _handle_invoke(self, request: web.Request) -> web.Response:
         """Handle POST /agent/{id}/invoke - serverless-style invoke endpoint."""
         await self._check_auth(request)
@@ -786,7 +890,7 @@ class AgentServer:
         Call this method to programmatically stop the server.
         Equivalent to pressing Ctrl+C.
         """
-        if hasattr(self, '_shutdown_event') and self._shutdown_event:
+        if self._shutdown_event:
             self._shutdown_event.set()
 
     # ─── Server ──────────────────────────────────────────────────────────
@@ -840,6 +944,7 @@ class AgentServer:
             app.router.add_get(f"{base}/{{agent_id}}/messages", self._handle_get_messages)
             app.router.add_put(f"{base}/{{agent_id}}/state", self._handle_put_state)
             app.router.add_post(f"{base}/{{agent_id}}/chat", self._handle_chat)
+            app.router.add_post(f"{base}/{{agent_id}}/action/{{action_name}}", self._handle_action)
             app.router.add_post(f"{base}/{{agent_id}}/invoke", self._handle_invoke)
             app.router.add_post(f"{base}/{{agent_id}}", self._handle_request)
             app.router.add_delete(f"{base}/{{agent_id}}", self._handle_delete_agent)
@@ -927,7 +1032,9 @@ class AgentServer:
 
         def signal_handler() -> None:
             print("\nShutting down gracefully...")
-            self._shutdown_event.set()
+            event = self._shutdown_event
+            if event is not None:
+                event.set()
 
         # Register signal handlers
         loop = asyncio.get_running_loop()
@@ -943,7 +1050,8 @@ class AgentServer:
 
         # Run until shutdown signal
         try:
-            await self._shutdown_event.wait()
+            if self._shutdown_event:
+                await self._shutdown_event.wait()
         except asyncio.CancelledError:
             pass
         finally:

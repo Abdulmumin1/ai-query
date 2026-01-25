@@ -62,6 +62,14 @@ When enabled:
 
 This guarantees exactly-once delivery semantics for your UI, even on flaky networks.
 
+## Durability & Safety
+
+When building production agents, durability is non-negotiable. **ai-query** ensures that:
+
+1.  **State is Atomic**: Changes to `self.state` are committed to storage before the next message is processed.
+2.  **Events are Ordered**: Every event is assigned a monotonic ID, ensuring clients always receive them in the correct sequence.
+3.  **Logs are Immutable**: Once an event is emitted and persisted, it becomes part of the permanent record for that agent instance.
+
 ## Consuming Events
 
 The `Agent.serve()` method automatically exposes endpoints for consuming events.

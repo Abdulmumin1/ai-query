@@ -10,7 +10,23 @@ import json
 import aiohttp
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart, EmbedResult, EmbedManyResult, EmbeddingUsage
+from ai_query.types import (
+    GenerateTextResult,
+    Message,
+    ProviderOptions,
+    Usage,
+    StreamChunk,
+    ToolSet,
+    ToolCall,
+    ToolCallPart,
+    ToolResultPart,
+    EmbedResult,
+    EmbedManyResult,
+    EmbeddingUsage,
+    TextPart,
+    ImagePart,
+    FilePart,
+)
 from ai_query.model import LanguageModel, EmbeddingModel
 
 
@@ -199,9 +215,9 @@ class GoogleProvider(BaseProvider):
                                     "response": tr.result if isinstance(tr.result, dict) else {"result": tr.result},
                                 }
                             })
-                    elif hasattr(part, "text"):
+                    elif isinstance(part, TextPart):
                         parts.append({"text": part.text})
-                    elif hasattr(part, "image"):
+                    elif isinstance(part, ImagePart):
                         image_data = part.image
                         media_type = getattr(part, "media_type", "image/png")
 
@@ -218,7 +234,7 @@ class GoogleProvider(BaseProvider):
                                 "data": image_data,
                             }
                         })
-                    elif hasattr(part, "data"):  # FilePart
+                    elif isinstance(part, FilePart):
                         file_data = part.data
                         media_type = getattr(part, "media_type", None)
 

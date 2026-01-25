@@ -1,5 +1,5 @@
 ---
-title: "Multi-Agent Server"
+title: "Agent Server"
 description: "Run multiple independent agent instances on a single server with routing"
 ---
 
@@ -50,15 +50,16 @@ AgentServer(agent).serve(port=8080)
 <Info>
 **serve() vs AgentServer**
 
-| | `agent.serve()` | `AgentServer` |
-|---|---|---|
-| **Use case** | Development, prototyping | Production |
-| **Authentication** | None | Custom auth middleware |
-| **CORS** | `*` (allow all) | Configurable origins |
-| **Agent instances** | Single | Multiple (routed by ID) |
-| **Lifecycle hooks** | Basic | Full (create, evict, etc.) |
+|                     | `agent.serve()`          | `AgentServer`              |
+| ------------------- | ------------------------ | -------------------------- |
+| **Use case**        | Development, prototyping | Production                 |
+| **Authentication**  | None                     | Custom auth middleware     |
+| **CORS**            | `*` (allow all)          | Configurable origins       |
+| **Agent instances** | Single                   | Multiple (routed by ID)    |
+| **Lifecycle hooks** | Basic                    | Full (create, evict, etc.) |
 
 Use `agent.serve()` for quick local development. Use `AgentServer` when you need authentication, multi-tenancy, or production deployment.
+
 </Info>
 
 ## Architecture
@@ -94,15 +95,15 @@ AgentServer(agent, config=config).serve(port=8080)
 
 ## Endpoints
 
-| Endpoint | Type | Description |
-|----------|------|-------------|
-| `/agent/{id}/ws` | WebSocket | Bidirectional communication |
-| `/agent/{id}/events` | SSE | AI streaming (server-sent events) |
-| `/agent/{id}/chat` | REST | Chat with the agent (supports `?stream=true`) |
-| `/agent/{id}/invoke` | REST | Invoke agent tasks |
-| `/agent/{id}/state` | REST | Get/PUT agent state |
-| `/agent/{id}` | REST | DELETE to evict agent |
-| `/agents` | REST | List active agents (if enabled) |
+| Endpoint             | Type      | Description                                   |
+| -------------------- | --------- | --------------------------------------------- |
+| `/agent/{id}/ws`     | WebSocket | Bidirectional communication                   |
+| `/agent/{id}/events` | SSE       | AI streaming (server-sent events)             |
+| `/agent/{id}/chat`   | REST      | Chat with the agent (supports `?stream=true`) |
+| `/agent/{id}/invoke` | REST      | Invoke agent tasks                            |
+| `/agent/{id}/state`  | REST      | Get/PUT agent state                           |
+| `/agent/{id}`        | REST      | DELETE to evict agent                         |
+| `/agents`            | REST      | List active agents (if enabled)               |
 
 ## Client Examples
 
@@ -115,23 +116,28 @@ curl -X POST http://localhost:8080/agent/user-123/chat \
   -d '{"message": "Hello, how can you help me?"}'
 
 # Stream response
+
 curl -X POST "http://localhost:8080/agent/user-123/chat?stream=true" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Write a short poem"}'
+ -H "Content-Type: application/json" \
+ -d '{"message": "Write a short poem"}'
 
 # Invoke a task
+
 curl -X POST http://localhost:8080/agent/user-123/invoke \
-  -H "Content-Type: application/json" \
-  -d '{"task": "summarize", "text": "Long document here..."}'
+ -H "Content-Type: application/json" \
+ -d '{"task": "summarize", "text": "Long document here..."}'
 
 # Get agent state
+
 curl http://localhost:8080/agent/user-123/state
 
 # Update agent state
+
 curl -X PUT http://localhost:8080/agent/user-123/state \
-  -H "Content-Type: application/json" \
-  -d '{"preferences": {"theme": "dark"}}'
-```
+ -H "Content-Type: application/json" \
+ -d '{"preferences": {"theme": "dark"}}'
+
+````
   </Tab>
 
   <Tab title="SSE (Server-Sent Events)">
@@ -174,7 +180,8 @@ fetch("http://localhost:8080/agent/user-123/chat", {
   body: JSON.stringify({ message: "Hello!" })
 });
 // Events flow: chat_start → chunk → chunk → ... → chat_complete
-```
+````
+
   </Tab>
 
   <Tab title="WebSocket">
@@ -182,14 +189,15 @@ fetch("http://localhost:8080/agent/user-123/chat", {
 const ws = new WebSocket("ws://localhost:8080/agent/user-123/ws");
 
 ws.onopen = () => {
-  ws.send(JSON.stringify({ type: "message", content: "Hello!" }));
+ws.send(JSON.stringify({ type: "message", content: "Hello!" }));
 };
 
 ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log("Received:", data);
+const data = JSON.parse(event.data);
+console.log("Received:", data);
 };
-```
+
+````
 
 ```python
 import asyncio
@@ -202,7 +210,8 @@ async def chat():
             print(f"Agent: {message}")
 
 asyncio.run(chat())
-```
+````
+
   </Tab>
 </Tabs>
 
@@ -490,14 +499,14 @@ AgentServer(TaskWorker()).serve(port=8080)
 
 ## Comparison
 
-| Feature | `agent.serve()` | `serve_many()` / `AgentServer` |
-|---------|-----------------|--------------------------------|
-| Agent instances | Single | Multiple (routed by ID) |
-| WebSocket | `/ws` | `/agent/{id}/ws` |
-| REST API | `/chat`, `/state` | `/agent/{id}/chat`, `/agent/{id}/state` |
-| SSE | `/events` | `/agent/{id}/events` |
-| State isolation | One shared state | Each agent has own state |
-| Use case | Single assistant | Multi-user, multi-tenant, task workers |
+| Feature         | `agent.serve()`   | `serve_many()` / `AgentServer`          |
+| --------------- | ----------------- | --------------------------------------- |
+| Agent instances | Single            | Multiple (routed by ID)                 |
+| WebSocket       | `/ws`             | `/agent/{id}/ws`                        |
+| REST API        | `/chat`, `/state` | `/agent/{id}/chat`, `/agent/{id}/state` |
+| SSE             | `/events`         | `/agent/{id}/events`                    |
+| State isolation | One shared state  | Each agent has own state                |
+| Use case        | Single assistant  | Multi-user, multi-tenant, task workers  |
 
 ## Next Steps
 
