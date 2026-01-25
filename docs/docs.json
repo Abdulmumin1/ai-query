@@ -171,12 +171,6 @@
             ]
           },
           {
-            "group": "Examples",
-            "pages": [
-              "examples/complete-multi-agent-setup"
-            ]
-          },
-          {
             "group": "Tools & Tasks",
             "pages": [
               "cookbook/task-planner",
