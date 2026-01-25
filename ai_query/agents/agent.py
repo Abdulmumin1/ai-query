@@ -5,23 +5,48 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Awaitable, TYPE_CHECKING
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generic,
+    TYPE_CHECKING,
+    TypeVar,
+)
 
-from ai_query.types import Message, AbortSignal, AbortError
-from ai_query.model import LanguageModel
-from ai_query.agents.storage import Storage, MemoryStorage
+from ai_query.agents.storage import MemoryStorage, Storage
 from ai_query.agents.websocket import Connection, ConnectionContext
+from ai_query.model import LanguageModel
+from ai_query.types import AbortError, AbortSignal, Message
 
 if TYPE_CHECKING:
-    from ai_query.types import ProviderOptions, StopCondition, ToolSet
-    from ai_query.agents.transport import AgentTransport
     from ai_query.agents.events import EventBus
+    from ai_query.agents.transport import AgentTransport
+    from ai_query.types import ProviderOptions, StopCondition, ToolSet
 
 
 Content = str | list[Any]
 
 # Type alias for emit handler callback
 EmitHandler = Callable[[str, dict[str, Any], int], Awaitable[None]]
+
+# Generic TypeVar for type-safe agent proxies. T can be any subclass of Agent.
+T = TypeVar("T", bound="Agent")
+
+
+@dataclass
+class Context:
+    """Context for the current operation being processed by the agent."""
+
+    connection: Connection | None = None
+    ctx: ConnectionContext | None = None
+
+
+def action(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator to mark an agent method as an externally callable action."""
+    setattr(func, "__is_action__", True)
+    return func
 
 
 @dataclass
@@ -36,12 +61,46 @@ class _Envelope:
 @dataclass
 class Event:
     """An emitted event with ID for replay support."""
+
     id: int
     type: str
     data: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "type": self.type, "data": self.data}
+
+
+class AgentCallProxy(Generic[T]):
+    """A type-safe proxy for making fluent calls to another agent.
+
+    This class enables static analysis and autocompletion for remote agent calls.
+    """
+
+    def __init__(self, agent: "Agent", target_id: str):
+        self._agent = agent
+        self._target_id = target_id
+
+    def __getattr__(self, name: str) -> Callable[..., Awaitable[Any]]:
+        """Captures the method name and returns an awaitable RPC function."""
+
+        async def method_proxy(**kwargs: Any) -> Any:
+            """The inner function that is awaited to perform the RPC call."""
+            if self._agent._transport is None:
+                raise RuntimeError(
+                    "No transport configured. Agents must be managed by an AgentServer "
+                    "or provided a transport manually to use call()."
+                )
+
+            # The payload format is compatible with the agent's handle_invoke method
+            payload = {"method": name, "params": kwargs}
+            result = await self._agent._transport.invoke(self._target_id, payload)
+
+            if "error" in result:
+                raise RuntimeError(f"Agent call failed: {result['error']}")
+
+            return result.get("result")
+
+        return method_proxy
 
 
 class Agent:
@@ -115,6 +174,12 @@ class Agent:
         self._mailbox: asyncio.Queue[_Envelope] = asyncio.Queue()
         self._processor_task: asyncio.Task | None = None
         self._running = False
+
+        # Current context (only valid during message processing)
+        self.context = Context()
+
+        # Action registry
+        self._action_map: dict[str, Callable[..., Awaitable[Any]]] = {}
 
     # ─── Properties ────────────────────────────────────────────────────────
 
@@ -242,6 +307,7 @@ class Agent:
 
         if self.model is None:
             from ai_query.providers.google import google
+
             self.model = google("gemini-2.0-flash")
 
         msg_content = message if isinstance(message, str) else message
@@ -269,9 +335,12 @@ class Agent:
 
     async def _do_chat(self) -> str:
         from ai_query import stream_text
+        from ai_query.providers.google import google
+
+        model = self.model or google("gemini-2.0-flash")
 
         result = stream_text(
-            model=self.model,
+            model=model,
             system=self.system,
             messages=self._messages,
             tools=self.tools if self.tools else None,
@@ -301,7 +370,11 @@ class Agent:
 
         if self.model is None:
             from ai_query.providers.google import google
+
             self.model = google("gemini-2.0-flash")
+
+        # Ensure model is set for type checker
+        assert self.model is not None
 
         msg_content = message if isinstance(message, str) else message
         self._messages.append(Message(role="user", content=msg_content))
@@ -342,8 +415,7 @@ class Agent:
         messages_data = await self._storage.get(f"{self._id}:messages")
         if messages_data:
             self._messages = [
-                Message(role=m["role"], content=m["content"])
-                for m in messages_data
+                Message(role=m["role"], content=m["content"]) for m in messages_data
             ]
 
         # Load event log if persistence is enabled
@@ -354,6 +426,12 @@ class Agent:
                 self._event_counter = max(
                     (e.get("id", 0) for e in self._event_log), default=0
                 )
+
+        # Build action map
+        for name in dir(self):
+            attr = getattr(self, name)
+            if hasattr(attr, "__is_action__"):
+                self._action_map[name] = attr
 
         self._running = True
         self._processor_task = asyncio.create_task(self._process_mailbox())
@@ -421,29 +499,56 @@ class Agent:
                 self._mailbox.task_done()
 
     async def _handle_envelope(self, envelope: _Envelope) -> Any:
-        if envelope.kind == "connect":
-            await self.on_connect(envelope.connection, envelope.ctx)
-        elif envelope.kind == "message":
-            await self.on_message(envelope.connection, envelope.payload)
-        elif envelope.kind == "close":
-            code, reason = envelope.payload
-            await self.on_close(envelope.connection, code, reason)
-        return None
+        # Set context for this operation
+        self.context.connection = envelope.connection
+        self.context.ctx = envelope.ctx
+
+        try:
+            if envelope.kind == "connect":
+                assert envelope.connection is not None
+                assert envelope.ctx is not None
+                await self.on_connect(envelope.connection, envelope.ctx)
+            elif envelope.kind == "message":
+                assert envelope.connection is not None
+                await self.on_message(envelope.connection, envelope.payload)
+            elif envelope.kind == "close":
+                assert envelope.connection is not None
+                code, reason = envelope.payload
+                await self.on_close(envelope.connection, code, reason)
+            elif envelope.kind == "action":
+                name = envelope.payload["name"]
+                params = envelope.payload["params"]
+                if name not in self._action_map:
+                    raise ValueError(f"Action '{name}' not found on agent {self.id}")
+
+                res = self._action_map[name](**params)
+                if asyncio.iscoroutine(res):
+                    return await res
+                return res
+            return None
+        finally:
+            # Clear context
+            self.context.connection = None
+            self.context.ctx = None
 
     def enqueue(
         self,
         kind: str,
-        payload: Any,
+        payload: Any = None,
         connection: Connection | None = None,
         ctx: ConnectionContext | None = None,
+        future: asyncio.Future | None = None,
     ) -> None:
         """Enqueue a message for serial processing."""
-        self._mailbox.put_nowait(_Envelope(
-            kind=kind,
-            payload=payload,
-            connection=connection,
-            ctx=ctx,
-        ))
+        self._mailbox.put_nowait(
+            _Envelope(
+                kind=kind,
+                payload=payload,
+                connection=connection,
+                ctx=ctx,
+                future=future,
+            )
+        )
 
     # ─── Server ────────────────────────────────────────────────────────────
 
@@ -464,6 +569,7 @@ class Agent:
             - Handles reconnection with last_event_id for replay
         """
         from ai_query.agents.server import run_agent_server
+
         run_agent_server(self, host=host, port=port)
 
     # ─── Serverless Request Handling ───────────────────────────────────────
@@ -490,8 +596,32 @@ class Agent:
             response = await self.chat(message)
             return {"agent_id": self.id, "response": response}
 
+        elif action == "action":
+            name = request.get("name")
+            params = request.get("params", {})
+            if not name:
+                return {"error": "Missing 'name' in action request"}
+
+            # Enqueue to ensure sequential execution
+            future = asyncio.get_running_loop().create_future()
+            self.enqueue("action", {"name": name, "params": params}, future=future)
+            result = await future
+            return {"agent_id": self.id, "result": result}
+
         elif action == "invoke":
             payload = request.get("payload", {})
+            # Try to handle as action if it has 'method'
+            if "method" in payload:
+                method = payload["method"]
+                params = payload.get("params", {})
+                if method in self._action_map:
+                    future = asyncio.get_running_loop().create_future()
+                    self.enqueue(
+                        "action", {"name": method, "params": params}, future=future
+                    )
+                    result = await future
+                    return {"agent_id": self.id, "result": result}
+
             result = await self.handle_invoke(payload)
             return {"agent_id": self.id, "result": result}
 
@@ -500,43 +630,24 @@ class Agent:
 
         return {"error": f"Unknown action: {action}"}
 
-    async def call(
-        self,
-        agent_id: str,
-        method: str,
-        *,
-        timeout: float = 30.0,
-        **kwargs: Any
-    ) -> Any:
-        """Call another agent's method via the transport layer.
+    def call(self, agent_id: str, *, agent_cls: type[T]) -> AgentCallProxy[T]:
+        """Returns a type-safe proxy for making fluent calls to another agent.
+
+        This enables static analysis and autocompletion for remote agent methods.
 
         Args:
             agent_id: The target agent's ID.
-            method: The method to call.
-            timeout: Timeout in seconds.
-            **kwargs: Arguments for the method.
+            agent_cls: The class of the target agent for type checking.
 
         Returns:
-            The result of the call.
+            An AgentCallProxy instance typed to the target agent class.
         """
-        if self._transport is None:
-            raise RuntimeError(
-                "No transport configured. Agents must be managed by an AgentServer "
-                "or provided a transport manually to use call()."
-            )
-
-        payload = {"method": method, "params": kwargs}
-        result = await self._transport.invoke(agent_id, payload, timeout=timeout)
-        
-        if "error" in result:
-            raise RuntimeError(f"Agent call failed: {result['error']}")
-            
-        return result.get("result")
+        return AgentCallProxy(self, agent_id)
 
     async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle an incoming call from another agent.
 
-        Default implementation routes to 'method' if present in payload.
+        Default implementation routes to '@action' methods or 'on_call_*' handlers.
         Override this for custom routing logic.
         """
         method = payload.get("method")
@@ -545,18 +656,35 @@ class Agent:
         if not method:
             return {"error": "Missing 'method' in call payload"}
 
-        # Look for method on self
+        # 1. Check if it's a registered action
+        if method in self._action_map:
+            try:
+                # Enqueue to ensure sequential execution
+                future = asyncio.get_running_loop().create_future()
+                self.enqueue("action", {"name": method, "params": params}, future=future)
+                result = await future
+                return {"result": result}
+            except Exception as e:
+                return {"error": str(e)}
+
+        # 2. Legacy support: look for on_call_ method on self
         handler = getattr(self, f"on_call_{method}", None)
         if handler and callable(handler):
             try:
-                result = await handler(**params)
+                res = handler(**params)
+                if asyncio.iscoroutine(res):
+                    result = await res
+                else:
+                    result = res
                 return {"result": result}
             except Exception as e:
                 return {"error": str(e)}
 
         return {"error": f"Method '{method}' not implemented on agent {self.id}"}
 
-    async def handle_request_stream(self, request: dict[str, Any]) -> AsyncIterator[str]:
+    async def handle_request_stream(
+        self, request: dict[str, Any]
+    ) -> AsyncIterator[str]:
         """Serverless streaming request handler.
 
         Handles streaming requests, primarily for 'chat' action.
@@ -601,4 +729,3 @@ class Agent:
                 yield f"event: error\ndata: {str(e)}\n\n"
         else:
             yield f"event: error\ndata: Streaming not supported for action: {action}\n\n"
-

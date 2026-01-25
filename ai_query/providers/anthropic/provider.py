@@ -7,7 +7,20 @@ from typing import Any, AsyncIterator
 import json
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall
+from ai_query.types import (
+    GenerateTextResult,
+    Message,
+    ProviderOptions,
+    Usage,
+    StreamChunk,
+    ToolSet,
+    ToolCall,
+    ToolCallPart,
+    ToolResultPart,
+    TextPart,
+    ImagePart,
+    FilePart,
+)
 from ai_query.model import LanguageModel
 
 import aiohttp
@@ -160,9 +173,9 @@ class AnthropicProvider(BaseProvider):
                                 })
 
                     # Handle dataclass-style parts
-                    elif hasattr(part, "text"):
+                    elif isinstance(part, TextPart):
                         content_parts.append({"type": "text", "text": part.text})
-                    elif hasattr(part, "image"):
+                    elif isinstance(part, ImagePart):
                         image_data = part.image
                         media_type = getattr(part, "media_type", "image/png")
 
@@ -181,7 +194,7 @@ class AnthropicProvider(BaseProvider):
                                 "data": image_data,
                             },
                         })
-                    elif hasattr(part, "data"): # FilePart
+                    elif isinstance(part, FilePart):
                         file_data = part.data
                         media_type = getattr(part, "media_type", None)
 
@@ -202,7 +215,7 @@ class AnthropicProvider(BaseProvider):
                                 "data": file_data,
                             },
                         })
-                    elif hasattr(part, "type") and part.type == "tool_call":
+                    elif isinstance(part, ToolCallPart):
                         tc = part.tool_call
                         if tc:
                             content_parts.append({
@@ -211,7 +224,7 @@ class AnthropicProvider(BaseProvider):
                                 "name": tc.name,
                                 "input": tc.arguments,
                             })
-                    elif hasattr(part, "type") and part.type == "tool_result":
+                    elif isinstance(part, ToolResultPart):
                         tr = part.tool_result
                         if tr:
                             content_parts.append({

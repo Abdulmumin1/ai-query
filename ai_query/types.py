@@ -509,7 +509,7 @@ class Message:
                 content_list.append(p)
             else:
                 # Handle ContentPart objects
-                part_dict = {"type": p.type}
+                part_dict: dict[str, Any] = {"type": p.type}
                 if isinstance(p, TextPart):
                     part_dict["text"] = p.text
                 elif isinstance(p, ImagePart):

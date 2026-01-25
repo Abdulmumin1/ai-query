@@ -1,0 +1,104 @@
+---
+title: "Agent RPC & Actions"
+description: "Build robust, multi-user agents with a structured RPC system."
+---
+
+The `Agent` class includes a powerful RPC (Remote Procedure Call) system that allows you to expose methods as callable **Actions**. This brings a structured, ergonomic, and type-safe approach to agent communication, moving beyond simple message passing.
+
+## What is an Action?
+
+An Action is a Python method on your `Agent` subclass that is decorated with `@action`. This decorator registers the method with the agent's RPC system, making it callable by external clients (HTTP, WebSocket) and other agents.
+
+```python
+from ai_query.agents import Agent, action
+
+class TicketAgent(Agent):
+    @action
+    async def resolve(self, ticket_id: int, reason: str):
+        # Your logic here...
+        await self.update_state(...)
+        return {"status": "resolved", "ticket_id": ticket_id}
+```
+
+## How to Call Actions
+
+Actions can be called through multiple transports, making them highly versatile.
+
+### 1. Via REST API (HTTP)
+
+`AgentServer` automatically creates a REST endpoint for each action.
+
+- **URL**: `POST /agent/{agent_id}/action/{action_name}`
+- **Body**: JSON payload with action parameters.
+
+```bash
+curl -X POST http://localhost:8080/agent/support/action/resolve \
+     -H "Content-Type: application/json" \
+     -d '{"ticket_id": 123, "reason": "Fixed."}'
+```
+
+### 2. Via WebSocket
+
+For stateful clients, actions can be called over an existing WebSocket connection.
+
+```javascript
+const callId = "req-1";
+socket.send(JSON.stringify({
+  type: "action",
+  name: "resolve",
+  params: { ticket_id: 123, reason: "Fixed." },
+  call_id: callId
+}));
+```
+
+The agent will send an `action_result` event with the same `call_id` upon completion.
+
+### 3. Agent-to-Agent (Internal RPC)
+
+Use `self.call()` to get a type-safe proxy for communicating with another agent.
+
+```python
+class ManagerAgent(Agent):
+    async def escalate_ticket(self, ticket_id):
+        # 1. Get proxy for the target agent
+        # (Pass the class for type safety and autocompletion)
+        support = self.call("support-agent-1", agent_cls=SupportAgent)
+
+        # 2. Call the action fluently
+        result = await support.resolve(
+            ticket_id=ticket_id,
+            reason="Escalated by manager."
+        )
+        return result
+```
+
+## Multi-User Metadata (Connection State)
+
+A key feature of the RPC system is its awareness of the caller. You can store metadata on a per-connection basis without polluting the agent's main state.
+
+### How it Works
+
+1.  **`on_connect`**: When a client connects, you can store information in `connection.state`.
+2.  **`self.context`**: When an action is executed, `self.context.connection` provides access to the state of the *specific client* who made the call.
+
+### Example: A Multi-User Chat Room
+
+```python
+from ai_query.agents import Agent, action, ConnectionContext
+
+class ChatRoom(Agent):
+    async def on_connect(self, connection: Connection, ctx: ConnectionContext):
+        """Store user_id for the connection."""
+        user_id = ctx.metadata.get("user_id", "anonymous")
+        connection.state["user_id"] = user_id
+        await self.emit("status", {"text": f"{user_id} has joined."})
+
+    @action
+    async def who_am_i(self) -> str:
+        """Returns the user_id of the caller."""
+        # Access the user_id of the specific client calling this action
+        user_id = self.context.connection.state.get("user_id", "unknown")
+        return f"You are {user_id}."
+```
+
+In this example, if two different users call the `who_am_i` action, they will each get their own `user_id` back, because the agent can distinguish between them using `self.context`.

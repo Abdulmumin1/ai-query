@@ -1,64 +1,32 @@
 # ai-query
 
-A unified Python SDK for querying AI models from multiple providers with a consistent interface.
+**The framework for building stateful, distributed AI agents.**
+
+ai-query is a unified Python SDK that transforms AI models into stateful Actors. It provides a robust foundation for building agents that maintain memory, persist identity, and communicate via type-safe RPC.
+
+## Key Features
+
+- **Actor Model**: Sequential message processing to prevent race conditions.
+- **Durable Identity**: Native support for SQLite, Redis, and Memory storage.
+- **Durable Event Log**: Persist every event and replay automatically on reconnection.
+- **Type-Safe RPC**: Call other agents fluently with full IDE autocompletion.
+- **Unified Providers**: One interface for OpenAI, Anthropic, Google, DeepSeek, and more.
+- **MCP Native**: Seamlessly use tools from any Model Context Protocol server.
 
 ## Installation
 
 ```bash
-uv add ai-query
-# or
 pip install ai-query
+# with MCP support
+pip install "ai-query[mcp]"
 ```
 
-For MCP (Model Context Protocol) support:
+## Quick Start: The Stateful Agent
 
-```bash
-uv add ai-query[mcp]
-# or
-pip install ai-query[mcp]
-```
-
-## Quick Start
+Create an agent that remembers context and persists history automatically.
 
 ```python
 import asyncio
-from ai_query import generate_text
-from ai_query.providers import openai
-
-async def main():
-    result = await generate_text(
-        model=openai("gpt-4o"),
-        prompt="What is the capital of France?"
-    )
-    print(result.text)
-
-asyncio.run(main())
-```
-
-## Streaming
-
-```python
-from ai_query import stream_text
-from ai_query.providers import google
-
-async def main():
-    result = stream_text(
-        model=google("gemini-2.0-flash"),
-        prompt="Write a short story."
-    )
-
-    async for chunk in result.text_stream:
-        print(chunk, end="", flush=True)
-
-    usage = await result.usage
-    print(f"\nTokens: {usage.total_tokens}")
-```
-
-## Stateful Agents
-
-ai-query provides a powerful Actor-based `Agent` class for building stateful AI applications that maintain memory and identity.
-
-```python
 from ai_query.agents import Agent, SQLiteStorage
 from ai_query.providers import openai
 
@@ -73,7 +41,7 @@ async def main():
     async with agent:
         # Agent remembers conversation history automatically
         response = await agent.chat("Hi, I'm Alice!")
-        print(response)
+        print(response) # "Hello Alice! How can I help you today?"
 
         response = await agent.chat("What's my name?")
         print(response) # "Your name is Alice."
@@ -81,61 +49,101 @@ async def main():
 asyncio.run(main())
 ```
 
-## Tool Calling
+## Multi-User Routing
 
-Define tools using the `@tool` decorator. The library handles the execution loop automatically.
+Host thousands of independent agent instances on a single server with automatic routing.
 
 ```python
-from ai_query import generate_text, tool, Field
+from ai_query.agents import Agent, AgentServer
 from ai_query.providers import google
 
-@tool(description="Get the current weather for a location")
-async def get_weather(
-    location: str = Field(description="City name")
-) -> str:
-    return f"Weather in {location}: 72°F, Sunny"
+class UserAssistant(Agent):
+    def __init__(self, id):
+        super().__init__(
+            id,
+            model=google("gemini-2.0-flash"),
+            system="You are a personal assistant."
+        )
 
-async def main():
-    result = await generate_text(
-        model=google("gemini-2.0-flash"),
-        prompt="What's the weather in Paris?",
-        tools={"weather": get_weather},
-    )
-    print(result.text)
-
-asyncio.run(main())
+# Start server - routes to /agent/{id}/ws and /agent/{id}/chat automatically
+AgentServer(UserAssistant).serve(port=8080)
 ```
 
-## MCP (Model Context Protocol) Support
+## Type-Safe RPC
 
-Connect to any MCP server and use its tools seamlessly.
+Agents can expose structured **Actions** and call each other fluently.
 
 ```python
-from ai_query import generate_text
-from ai_query.providers import google
-from ai_query.mcp import mcp
+from ai_query.agents import Agent, action
 
-async def main():
-    async with mcp("npx", "-y", "@modelcontextprotocol/server-fetch") as server:
-        result = await generate_text(
-            model=google("gemini-2.0-flash"),
-            prompt="Fetch and summarize https://example.com",
-            tools=server.tools,
-        )
-        print(result.text)
+class Researcher(Agent):
+    @action
+    async def get_summary(self, topic: str):
+        return await self.chat(f"Summarize {topic}")
 
-asyncio.run(main())
+class Manager(Agent):
+    async def handle_request(self, topic: str):
+        # Call another agent with full type safety and autocompletion
+        researcher = self.call("research-bot", agent_cls=Researcher)
+        summary = await researcher.get_summary(topic=topic)
+        return summary
+```
+
+## Real-time Events
+
+Send custom feedback or status updates to connected clients using `emit`.
+
+```python
+class ResearchAgent(Agent):
+    async def on_message(self, conn, msg):
+        await self.emit("status", {"text": "Searching web..."})
+        # ... logic ...
+        await self.emit("status", {"text": "Synthesizing results..."})
+```
+
+## Durability & Replay
+
+Enable the `enable_event_log` flag to persist every event. If a client disconnects, they can reconnect with their `last_event_id` and the agent will automatically replay missed events.
+
+```python
+class MyAgent(Agent):
+    enable_event_log = True  # Persists events for automatic replay
+    
+    async def on_start(self):
+        await self.emit("ready", {"timestamp": "..."})
+```
+
+## Core Generation
+
+If you don't need state, use the core functions directly for one-off tasks.
+
+```python
+from ai_query import generate_text, stream_text
+from ai_query.providers import anthropic
+
+# Complete response
+result = await generate_text(
+    model=anthropic("claude-3-5-sonnet-latest"),
+    prompt="Write a poem about agents."
+)
+
+# Real-time streaming
+result = stream_text(
+    model=anthropic("claude-3-5-sonnet-latest"),
+    prompt="Explain quantum physics."
+)
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
 ```
 
 ## Modular Imports
 
-The library is divided into clean modules:
+The library is strictly divided for a clean developer experience:
 
-- `ai_query`: Core generation functions (`generate_text`, `stream_text`, `embed`, `tool`, `Field`).
-- `ai_query.agents`: Stateful orchestration (`Agent`, `AgentServer`, `MemoryStorage`, `SQLiteStorage`).
-- `ai_query.providers`: Model gateways (`openai`, `anthropic`, `google`, `deepseek`, `groq`, etc.).
+- `ai_query`: Core generation (`generate_text`, `stream_text`, `embed`).
+- `ai_query.agents`: Stateful orchestration (`Agent`, `AgentServer`, `Storage`).
+- `ai_query.providers`: Model gateways (`openai`, `anthropic`, `google`, etc.).
 - `ai_query.mcp`: Model Context Protocol integration.
-- `ai_query.types`: Data models and types.
 
 ## License
 

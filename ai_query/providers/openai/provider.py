@@ -10,7 +10,23 @@ import base64
 import aiohttp
 
 from ai_query.providers.base import BaseProvider
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, Usage, StreamChunk, ToolSet, ToolCall, ToolCallPart, ToolResultPart, EmbedResult, EmbedManyResult, EmbeddingUsage
+from ai_query.types import (
+    GenerateTextResult,
+    Message,
+    ProviderOptions,
+    Usage,
+    StreamChunk,
+    ToolSet,
+    ToolCall,
+    ToolCallPart,
+    ToolResultPart,
+    EmbedResult,
+    EmbedManyResult,
+    EmbeddingUsage,
+    TextPart,
+    ImagePart,
+    FilePart,
+)
 from ai_query.model import LanguageModel, EmbeddingModel
 
 
@@ -174,7 +190,7 @@ class OpenAIProvider(BaseProvider):
                 tool_calls = []
 
                 for part in msg.content:
-                    if hasattr(part, "type") and part.type == "tool_call":
+                    if isinstance(part, ToolCallPart):
                         tc = part.tool_call
                         if tc:
                             tool_calls.append({
@@ -185,7 +201,7 @@ class OpenAIProvider(BaseProvider):
                                     "arguments": json.dumps(tc.arguments),
                                 }
                             })
-                    elif hasattr(part, "text"):
+                    elif isinstance(part, TextPart):
                         content_text += part.text
                     elif isinstance(part, dict):
                         if part.get("type") == "tool_call":
@@ -202,7 +218,7 @@ class OpenAIProvider(BaseProvider):
                         elif part.get("type") == "text":
                             content_text += part.get("text", "")
 
-                message_obj = {"role": "assistant"}
+                message_obj: dict[str, Any] = {"role": "assistant"}
                 if content_text:
                     message_obj["content"] = content_text
                 else:
@@ -215,7 +231,7 @@ class OpenAIProvider(BaseProvider):
                 continue
 
             # Handle standard multimodal content (user role usually)
-            content_parts = []
+            content_parts: list[dict[str, Any]] = []
             for part in msg.content:
                 # Handle dict-style parts (from user input)
                 if isinstance(part, dict):
@@ -258,9 +274,9 @@ class OpenAIProvider(BaseProvider):
                         })
 
                 # Handle dataclass-style parts
-                elif hasattr(part, "text"):
+                elif isinstance(part, TextPart):
                     content_parts.append({"type": "text", "text": part.text})
-                elif hasattr(part, "image"):
+                elif isinstance(part, ImagePart):
                     image_data = part.image
                     media_type = getattr(part, "media_type", "image/png")
 
@@ -274,7 +290,7 @@ class OpenAIProvider(BaseProvider):
                         "type": "image_url",
                         "image_url": {"url": image_data},
                     })
-                elif hasattr(part, "data"): # FilePart
+                elif isinstance(part, FilePart):
                     file_data = part.data
                     media_type = getattr(part, "media_type", None)
 

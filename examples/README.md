@@ -13,6 +13,7 @@ Real-world agent examples demonstrating different features of ai-query.
 | [multi_provider.py](multi_provider.py) | Compare OpenAI, Anthropic, Google | Multiple providers, streaming comparison |
 | [country_explorer.py](country_explorer.py) | Geography data explorer | REST API integration, `on_step_start` |
 | [unit_converter.py](unit_converter.py) | Unit conversion assistant | Simple sync tools, multiple conversions |
+| [rpc](rpc/) | Interactive Chat Room | Fluent RPC API, WebSocket/SSE support, multiple clients |
 
 ## Running Examples
 
@@ -30,7 +31,7 @@ Run any example:
 cd examples
 uv run wikipedia_agent.py
 uv run hackernews_agent.py
-uv run task_planner.py
+uv run rpc/server.py
 ```
 
 ## Feature Highlights
@@ -91,4 +92,15 @@ stop_when=step_count_is(5)
 
 # Multiple conditions (stops when any is true)
 stop_when=[has_tool_call("done"), step_count_is(10)]
+```
+
+### Type-Safe Fluent RPC
+Agents can call each other using a fluent, type-safe API that provides IDE autocompletion.
+
+```python
+# Get a proxy for the target agent
+proxy = client_agent.call("target-agent-id", agent_cls=ChatRoom)
+
+# Call methods directly on the proxy
+history = await proxy.get_history(user_id="alice")
 ```

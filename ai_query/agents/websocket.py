@@ -11,6 +11,7 @@ class Connection(Protocol):
     This protocol defines the interface that any WebSocket connection
     must implement to work with agents.
     """
+    state: dict[str, Any]
     
     async def send(self, message: str | bytes) -> None:
         """Send a message to the client."""
@@ -19,10 +20,11 @@ class Connection(Protocol):
     async def close(self, code: int = 1000, reason: str = "") -> None:
         """Close the connection."""
         ...
-
+    
     async def send_event(self, event: str, data: dict[str, Any]) -> None:
         """Send a structured event (optional)."""
         ...
+
 
 
 @dataclass

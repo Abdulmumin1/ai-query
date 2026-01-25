@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Any
 
 from aiohttp import web, WSMsgType
 
@@ -16,10 +16,12 @@ if TYPE_CHECKING:
 
 class AioHttpConnection(Connection):
     """Wraps aiohttp WebSocket in our Connection interface."""
+    state: dict[str, Any]
 
     def __init__(self, ws: web.WebSocketResponse, request: web.Request):
         self._ws = ws
         self._request = request
+        self.state = {}
 
     async def send(self, message: str | bytes) -> None:
         if isinstance(message, bytes):

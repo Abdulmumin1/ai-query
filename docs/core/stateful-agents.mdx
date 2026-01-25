@@ -78,15 +78,36 @@ async with agent:
     await agent.clear()
 ```
 
+### Durability & Event Replay
+
+A common challenge with real-time agents is network stability. If a client disconnects while the agent is streaming a response, that data is typically lost.
+
+**ai-query** provides **Durable Event Logging** to solve this. When `enable_event_log` is set to `True`, every event emitted by the agent is persisted to storage.
+
+```python
+class MyDurableAgent(Agent):
+    enable_event_log = True  # <--- Persist every event
+    storage = SQLiteStorage("agents.db")
+
+async with MyDurableAgent("researcher") as agent:
+    await agent.emit("status", {"text": "Starting research..."})
+```
+
+**Benefits of Durability:**
+
+1.  **Resilience**: Research or long-running tasks continue even if all clients disconnect.
+2.  **Automatic Replay**: When a client reconnects with a `last_event_id`, the server automatically replays all missed events before continuing the live stream.
+3.  **Audit Trail**: Every interaction and intermediate status update is saved for later analysis.
+
 ### Storage Backends
 
 Choose where your data lives by passing a storage backend:
 
-| Backend | Description | Best For |
-|---------|-------------|----------|
-| `MemoryStorage()` | RAM-only (default) | Testing, development |
-| `SQLiteStorage(path)` | Local file | Single-server apps, prototypes |
-| Custom | Redis, DynamoDB, etc. | Production, distributed |
+| Backend               | Description           | Best For                       |
+| --------------------- | --------------------- | ------------------------------ |
+| `MemoryStorage()`     | RAM-only (default)    | Testing, development           |
+| `SQLiteStorage(path)` | Local file            | Single-server apps, prototypes |
+| Custom                | Redis, DynamoDB, etc. | Production, distributed        |
 
 ```python
 from ai_query.agents import Agent, MemoryStorage, SQLiteStorage
@@ -236,6 +257,7 @@ agent.serve(port=8080)
 ```
 
 Endpoints:
+
 - `POST /chat` - Send message, get response (streams to SSE)
 - `GET /events` - SSE stream of events
 - `WS /ws` - WebSocket connection
@@ -245,6 +267,7 @@ Endpoints:
 **Security Note**: `agent.serve()` has no authentication built-in. It's designed for local development and prototyping.
 
 For production, use `AgentServer` which supports:
+
 - Custom authentication middleware
 - CORS configuration
 - Rate limiting hooks
@@ -265,6 +288,7 @@ AgentServer(MyAgent, config=config).serve(port=8080)
 ```
 
 See [Agent Server](/core/agent-server) for production deployment.
+
 </Warning>
 
 ## API Reference
@@ -273,7 +297,11 @@ See [Agent Server](/core/agent-server) for production deployment.
   <Card title="Agent API" icon="book" href="/api-reference/agent">
     Full methods and properties
   </Card>
-  <Card title="Storage Backends" icon="database" href="/api-reference/agent-backends">
+  <Card
+    title="Storage Backends"
+    icon="database"
+    href="/api-reference/agent-backends"
+  >
     MemoryStorage, SQLiteStorage, and custom
   </Card>
   <Card title="Abort/Cancellation" icon="circle-stop" href="/core/abort">

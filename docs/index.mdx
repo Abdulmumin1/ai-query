@@ -9,6 +9,7 @@ description: "Build stateful AI agents in Python"
 
 - **Stateful by Design** - Agents remember conversations, maintain state, and resume after restarts
 - **Real-time Events** - Emit events during work with automatic replay on reconnection
+- **Durable Identity** - Persist every event and agent state for robust connection recovery
 - **Built-in Server** - WebSocket, SSE, and REST endpoints with one line: `agent.serve()`
 - **Multi-Provider** - Same interface for OpenAI, Anthropic, Google, and more
 - **Production Ready** - Storage, multi-user routing, serverless support
@@ -135,9 +136,9 @@ curl http://localhost:8080/events
     Custom endpoints, middleware, and serverless patterns.
   </Card>
   <Card
-    title="Without the Agent Class"
+    title="Stateless Generation"
     icon="function"
-    href="/cookbook/without-agent-class"
+    href="/cookbook/stateless-generation"
   >
     Use generate_text and stream_text directly.
   </Card>

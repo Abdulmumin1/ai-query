@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
@@ -92,4 +93,6 @@ class LocalTransport(AgentTransport):
             await agent.start()
 
         # Enqueue the invoke and wait for response with timeout
-        return await agent.enqueue_invoke(payload, timeout=timeout)
+        future = asyncio.get_running_loop().create_future()
+        agent.enqueue("invoke", payload, future=future)
+        return await asyncio.wait_for(future, timeout=timeout)

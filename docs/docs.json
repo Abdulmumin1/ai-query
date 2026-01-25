@@ -32,7 +32,6 @@
               "core/conversations",
               "core/tools",
               "core/agents",
-              "core/events",
               "core/abort",
               "core/mcp"
             ]
@@ -41,7 +40,9 @@
             "group": "Stateful Agents",
             "pages": [
               "core/stateful-agents",
-              "core/agent-server"
+              "core/agent-server",
+              "core/events",
+              "core/agent-rpc"
             ]
           }
         ]
@@ -120,10 +121,9 @@
             "group": "Core Patterns",
             "pages": [
               "cookbook/index",
-              "cookbook/chatbot",
+              "cookbook/stateless-generation",
               "cookbook/multimodal-chatbot",
-              "cookbook/structured-output",
-              "cookbook/without-agent-class"
+              "cookbook/structured-output"
             ]
           },
           {
@@ -131,9 +131,7 @@
             "pages": [
               "cookbook/profile-research-agent",
               "cookbook/fastapi-integration",
-              "cookbook/simple-stateful-agent",
               "cookbook/persistent-chatbot",
-              "cookbook/realtime-agent",
               "cookbook/per-user-assistant",
               "cookbook/serverless-agents"
             ]
@@ -145,8 +143,7 @@
               "cookbook/code-executor",
               "cookbook/rag-agent",
               "cookbook/multi-agent-workflow",
-              "cookbook/mcp-agent",
-              "cookbook/agent-communication"
+              "cookbook/mcp-agent"
             ]
           }
         ]
