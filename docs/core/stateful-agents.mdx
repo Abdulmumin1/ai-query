@@ -222,74 +222,15 @@ async with agent:
     )
 ```
 
-## Lifecycle Hooks
+## Deployment Options
 
-Override lifecycle methods to customize behavior:
+Once your agent is built, you can deploy it in three main ways:
 
-```python
-class MyAgent(Agent):
-    async def on_start(self):
-        print(f"Agent {self.id} started")
+1.  **Agent Server**: A standalone WebSocket/HTTP server for long-running processes.
+2.  **Serverless**: Deploy to AWS Lambda, Vercel, or Cloud Run using Adapters.
+3.  **Embedded**: Use the `Agent` class directly within your existing Python application (CLI, script, or framework).
 
-    async def on_stop(self):
-        print(f"Agent {self.id} stopped")
-
-    async def on_connect(self, connection, ctx):
-        print(f"Client connected")
-        await super().on_connect(connection, ctx)
-
-    async def on_message(self, connection, message):
-        response = await self.chat(message)
-        await connection.send(response)
-
-    async def on_close(self, connection, code, reason):
-        print(f"Client disconnected: {reason}")
-        await super().on_close(connection, code, reason)
-```
-
-## WebSocket Server
-
-Serve an agent over WebSocket, SSE, and REST:
-
-```python
-agent = Agent("assistant", model=openai("gpt-4o"))
-agent.serve(port=8080)
-```
-
-Endpoints:
-
-- `POST /chat` - Send message, get response (streams to SSE)
-- `GET /events` - SSE stream of events
-- `WS /ws` - WebSocket connection
-- `GET /state` - Get agent state
-
-<Warning>
-**Security Note**: `agent.serve()` has no authentication built-in. It's designed for local development and prototyping.
-
-For production, use `AgentServer` which supports:
-
-- Custom authentication middleware
-- CORS configuration
-- Rate limiting hooks
-
-```python
-from ai_query.agents import AgentServer
-from ai_query.agents import AgentServerConfig
-
-async def auth_check(request):
-    return request.headers.get("X-API-Key") == "secret"
-
-config = AgentServerConfig(
-    auth=auth_check,
-    allowed_origins=["https://myapp.com"]
-)
-
-AgentServer(MyAgent, config=config).serve(port=8080)
-```
-
-See [Agent Server](/core/agent-server) for production deployment.
-
-</Warning>
+See the [Deployment Guide](/core/deployment) for details.
 
 ## API Reference
 
@@ -304,7 +245,10 @@ See [Agent Server](/core/agent-server) for production deployment.
   >
     MemoryStorage, SQLiteStorage, and custom
   </Card>
-  <Card title="Abort/Cancellation" icon="circle-stop" href="/core/abort">
-    AbortController and AbortSignal
+  <Card title="Agent Server" icon="server" href="/core/agent-server">
+    Hosting agents
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/core/deployment">
+    Serverless and production guides
   </Card>
 </CardGroup>

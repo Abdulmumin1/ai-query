@@ -32,27 +32,15 @@ _MISSING = object()
 
 
 class Field:
-    """Define metadata for a tool parameter.
-
-    Similar to Pydantic's Field, this allows you to specify descriptions
-    and defaults for tool parameters in a clean, declarative way.
-
-    Example:
-        @tool(description="Search the web")
-        async def search(
-            query: str = Field(description="The search query"),
-            limit: int = Field(description="Max results", default=10)
-        ) -> str:
-            ...
-    """
+    """Define metadata for a tool parameter."""
 
     def __init__(
         self,
         description: str = "",
         default: Any = _MISSING,
-        enum: list[Any] | None = None,
-        min_value: float | None = None,
-        max_value: float | None = None,
+        enum: Union[list[Any], None] = None,
+        min_value: Union[float, None] = None,
+        max_value: Union[float, None] = None,
     ) -> None:
         self.description = description
         self.default = default
@@ -69,28 +57,22 @@ def _python_type_to_json_schema(py_type: Any) -> dict[str, Any]:
     origin = get_origin(py_type)
     args = get_args(py_type)
 
-    # Handle Optional[X] (Union[X, None])
     if origin is Union:
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
             return _python_type_to_json_schema(non_none[0])
-        # Union of multiple types - use anyOf
         return {"anyOf": [_python_type_to_json_schema(t) for t in non_none]}
 
-    # Handle List[X]
     if origin is list:
         item_schema = _python_type_to_json_schema(args[0]) if args else {}
         return {"type": "array", "items": item_schema}
 
-    # Handle Dict[K, V]
     if origin is dict:
         return {"type": "object"}
 
-    # Handle Literal["a", "b", "c"]
     if origin is Literal:
         return {"type": "string", "enum": list(args)}
 
-    # Basic type mappings
     type_map = {
         str: "string",
         int: "integer",
@@ -103,7 +85,6 @@ def _python_type_to_json_schema(py_type: Any) -> dict[str, Any]:
     if py_type in type_map:
         return {"type": type_map[py_type]}
 
-    # Default to string for unknown types
     return {"type": "string"}
 
 
@@ -114,55 +95,19 @@ def _python_type_to_json_schema(py_type: Any) -> dict[str, Any]:
 
 @dataclass
 class Tool:
-    """A tool that can be called by the AI model.
-
-    Tools allow the AI to perform actions like fetching data, calling APIs,
-    or executing code. When the AI decides to use a tool, the execute function
-    is called with the parsed arguments.
-
-    Example using decorator (recommended):
-        >>> @tool(description="Get weather for a location")
-        ... async def get_weather(
-        ...     location: str = Field(description="City name")
-        ... ) -> str:
-        ...     return f"Weather in {location}: sunny"
-
-    Example using factory function (legacy):
-        >>> weather_tool = tool(
-        ...     description="Get weather for a location",
-        ...     parameters={
-        ...         "type": "object",
-        ...         "properties": {
-        ...             "location": {"type": "string", "description": "City name"}
-        ...         },
-        ...         "required": ["location"]
-        ...     },
-        ...     execute=lambda location: {"temp": 72, "condition": "sunny"}
-        ... )
-    """
-
     description: str
-    parameters: dict[str, Any]  # JSON Schema
-    execute: Callable[..., Any] | Callable[..., Awaitable[Any]]
+    parameters: dict[str, Any]
+    execute: Union[Callable[..., Any], Callable[..., Awaitable[Any]]]
 
     async def run(self, **kwargs: Any) -> Any:
-        """Execute the tool, handling both sync and async functions."""
-        # Replace Field objects with their actual default values if they weren't provided
         sig = inspect.signature(self.execute)
         bound_args = sig.bind_partial(**kwargs)
 
-        # We need to check all parameters that have a Field default
         for name, param in sig.parameters.items():
             if name not in bound_args.arguments and isinstance(param.default, Field):
                 if param.default.default is not _MISSING:
                     kwargs[name] = param.default.default
-                else:
-                    # If it's a Field with no default, but it's not in kwargs,
-                    # Python will raise a TypeError anyway if we don't provide it,
-                    # or it will use the Field object itself as the default.
-                    # We should let the normal Python call handle the missing arg error.
-                    pass
-
+        
         result = self.execute(**kwargs)
         if inspect.isawaitable(result):
             return await result
@@ -170,103 +115,53 @@ class Tool:
 
 
 @overload
-def tool(
-    func: Callable[..., Any],
-) -> Tool: ...
-
+def tool(func: Callable[..., Any]) -> Tool: ...
 
 @overload
-def tool(
-    *,
-    description: str | None = None,
-) -> Callable[[Callable[..., Any]], Tool]: ...
-
+def tool(*, description: Union[str, None] = None) -> Callable[[Callable[..., Any]], Tool]: ...
 
 @overload
 def tool(
     *,
     description: str,
     parameters: dict[str, Any],
-    execute: Callable[..., Any] | Callable[..., Awaitable[Any]],
+    execute: Union[Callable[..., Any], Callable[..., Awaitable[Any]]],
 ) -> Tool: ...
 
 
 def tool(
-    func: Callable[..., Any] | None = None,
+    func: Union[Callable[..., Any], None] = None,
     *,
-    description: str | None = None,
-    parameters: dict[str, Any] | None = None,
-    execute: Callable[..., Any] | Callable[..., Awaitable[Any]] | None = None,
-) -> Tool | Callable[[Callable[..., Any]], Tool]:
-    """Create a tool from a function using decorator syntax or factory function.
-
-    Can be used in three ways:
-
-    1. Simple decorator (infers everything from function):
-        >>> @tool
-        ... async def search(query: str = Field(description="Search query")) -> str:
-        ...     '''Search the web for information.'''
-        ...     return "results"
-
-    2. Decorator with description:
-        >>> @tool(description="Search the web")
-        ... async def search(query: str = Field(description="Search query")) -> str:
-        ...     return "results"
-
-    3. Factory function (legacy, explicit parameters):
-        >>> search_tool = tool(
-        ...     description="Search the web",
-        ...     parameters={"type": "object", "properties": {...}},
-        ...     execute=search_fn
-        ... )
-
-    Args:
-        func: The function to wrap (when used as @tool without parentheses).
-        description: Tool description. If not provided, uses the function's docstring.
-        parameters: JSON Schema for parameters (legacy). If not provided, inferred from type hints.
-        execute: Function to execute (legacy). If not provided, uses the decorated function.
-
-    Returns:
-        A Tool instance.
-    """
-    # Legacy factory function mode: tool(description=..., parameters=..., execute=...)
+    description: Union[str, None] = None,
+    parameters: Union[dict[str, Any], None] = None,
+    execute: Union[Callable[..., Any], Callable[..., Awaitable[Any]], None] = None,
+) -> Union[Tool, Callable[[Callable[..., Any]], Tool]]:
     if execute is not None and parameters is not None and description is not None:
         return Tool(description=description, parameters=parameters, execute=execute)
 
     def _create_tool_from_function(fn: Callable[..., Any]) -> Tool:
-        """Build a Tool by inspecting the function signature and type hints."""
-        # Get description from argument or docstring
         tool_description = description or ""
         if not tool_description and fn.__doc__:
-            # Use first line of docstring
             tool_description = fn.__doc__.strip().split("\n")[0].strip()
         if not tool_description:
             tool_description = f"Execute the {fn.__name__} function"
 
-        # Get type hints
         try:
             hints = get_type_hints(fn)
         except Exception:
             hints = {}
 
         sig = inspect.signature(fn)
-
         properties: dict[str, Any] = {}
         required: list[str] = []
 
         for param_name, param in sig.parameters.items():
-            if param_name in ("self", "cls"):
+            if param_name in ("self", "cls", "return"):
                 continue
 
-            # Get type from hints, default to string
             param_type = hints.get(param_name, str)
-            # Skip return type annotation
-            if param_name == "return":
-                continue
-
             prop = _python_type_to_json_schema(param_type)
 
-            # Check if default is a Field
             if isinstance(param.default, Field):
                 field_meta = param.default
                 if field_meta.description:
@@ -277,51 +172,34 @@ def tool(
                     prop["minimum"] = field_meta.min_value
                 if field_meta.max_value is not None:
                     prop["maximum"] = field_meta.max_value
-                # Required if no default provided
                 if field_meta.default is _MISSING:
                     required.append(param_name)
             elif param.default is inspect.Parameter.empty:
-                # No default = required
                 required.append(param_name)
-
+            
             properties[param_name] = prop
 
-        schema = {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        }
-
+        schema = {"type": "object", "properties": properties, "required": required}
         return Tool(description=tool_description, parameters=schema, execute=fn)
 
-    # Decorator mode: @tool or @tool(description="...")
     if func is not None:
-        # Called as @tool without parentheses
         return _create_tool_from_function(func)
     else:
-        # Called as @tool(...) with arguments
         return _create_tool_from_function
 
-
-# Type alias for a collection of tools
 ToolSet = dict[str, Tool]
 
 
 @dataclass
 class ToolCall:
-    """A tool call made by the AI model."""
-
     id: str
     name: str
     arguments: dict[str, Any]
-    # Provider-specific metadata (e.g., Google's thought_signature)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class ToolResult:
-    """Result from executing a tool."""
-
     tool_call_id: str
     tool_name: str
     result: Any
@@ -330,18 +208,14 @@ class ToolResult:
 
 @dataclass
 class ToolCallPart:
-    """A tool call content part (for assistant messages)."""
-
     type: Literal["tool_call"] = "tool_call"
-    tool_call: ToolCall | None = None
+    tool_call: Union[ToolCall, None] = None
 
 
 @dataclass
 class ToolResultPart:
-    """A tool result content part (for tool messages)."""
-
     type: Literal["tool_result"] = "tool_result"
-    tool_result: ToolResult | None = None
+    tool_result: Union[ToolResult, None] = None
 
 
 # =============================================================================
@@ -351,64 +225,27 @@ class ToolResultPart:
 
 @dataclass
 class StepResult:
-    """Result from a single step in the generation loop."""
-
     text: str
     tool_calls: list[ToolCall]
     tool_results: list[ToolResult]
-    finish_reason: str | None = None
+    finish_reason: Union[str, None] = None
 
 
-# Type for stop condition functions
 StopCondition = Callable[[list[StepResult]], Union[bool, Awaitable[bool]]]
 
 
 def step_count_is(count: int) -> StopCondition:
-    """Stop when the step count reaches the specified number.
-
-    Args:
-        count: Number of steps after which to stop.
-
-    Returns:
-        A stop condition function.
-
-    Example:
-        >>> result = await generate_text(
-        ...     model=openai("gpt-4"),
-        ...     tools={"search": search_tool},
-        ...     stop_when=step_count_is(5),  # Max 5 iterations
-        ...     prompt="Research this topic"
-        ... )
-    """
     def condition(steps: list[StepResult]) -> bool:
         return len(steps) >= count
-
     return condition
 
 
 def has_tool_call(tool_name: str) -> StopCondition:
-    """Stop when a specific tool is called.
-
-    Args:
-        tool_name: Name of the tool that triggers the stop.
-
-    Returns:
-        A stop condition function.
-
-    Example:
-        >>> result = await generate_text(
-        ...     model=openai("gpt-4"),
-        ...     tools={"search": search_tool, "final_answer": answer_tool},
-        ...     stop_when=has_tool_call("final_answer"),
-        ...     prompt="Research and answer"
-        ... )
-    """
     def condition(steps: list[StepResult]) -> bool:
         if not steps:
             return False
         last_step = steps[-1]
         return any(tc.name == tool_name for tc in last_step.tool_calls)
-
     return condition
 
 
@@ -419,72 +256,41 @@ def has_tool_call(tool_name: str) -> StopCondition:
 
 @dataclass
 class StepStartEvent:
-    """Event passed to on_step_start callback.
-
-    Provides context about the step that's about to run, allowing inspection
-    or modification of messages before the model is called.
-
-    Attributes:
-        step_number: The 1-indexed step number (1 for first step, 2 for second, etc.).
-        messages: The current conversation history that will be sent to the model.
-            This list can be modified to alter what the model sees.
-        tools: The available tools for this step, or None if no tools.
-    """
-
     step_number: int
     messages: list["Message"]
-    tools: "ToolSet | None"
+    tools: Union[ToolSet, None]
 
 
 @dataclass
 class StepFinishEvent:
-    """Event passed to on_step_finish callback.
-
-    Provides information about the completed step and accumulated state.
-
-    Attributes:
-        step_number: The 1-indexed step number that just completed.
-        step: The StepResult for this specific step (text, tool_calls, tool_results).
-        text: Accumulated text from all steps so far.
-        usage: Accumulated token usage from all steps so far.
-        steps: List of all StepResults from steps completed so far.
-    """
-
     step_number: int
     step: StepResult
     text: str
-    usage: "Usage"
+    usage: Usage
     steps: list[StepResult]
 
 
-# Type aliases for step callback functions
 OnStepStart = Callable[[StepStartEvent], Union[None, Awaitable[None]]]
 OnStepFinish = Callable[[StepFinishEvent], Union[None, Awaitable[None]]]
 
 
 @dataclass
 class TextPart:
-    """Text content part."""
-
     type: Literal["text"] = "text"
     text: str = ""
 
 
 @dataclass
 class ImagePart:
-    """Image content part."""
-
     type: Literal["image"] = "image"
-    image: str | bytes = b""  # base64 string, bytes, or URL
-    media_type: str | None = None
+    image: Union[str, bytes] = b""
+    media_type: Union[str, None] = None
 
 
 @dataclass
 class FilePart:
-    """File content part."""
-
     type: Literal["file"] = "file"
-    data: str | bytes = b""
+    data: Union[str, bytes] = b""
     media_type: str = ""
 
 
@@ -493,22 +299,18 @@ ContentPart = Union[TextPart, ImagePart, FilePart]
 
 @dataclass
 class Message:
-    """A message in the conversation."""
-
     role: Role
-    content: str | list[ContentPart]
+    content: Union[str, list[ContentPart]]
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert message to dictionary."""
         if isinstance(self.content, str):
             return {"role": self.role, "content": self.content}
-
+        
         content_list = []
         for p in self.content:
             if isinstance(p, dict):
                 content_list.append(p)
             else:
-                # Handle ContentPart objects
                 part_dict: dict[str, Any] = {"type": p.type}
                 if isinstance(p, TextPart):
                     part_dict["text"] = p.text
@@ -520,17 +322,12 @@ class Message:
                     part_dict["data"] = p.data
                     part_dict["media_type"] = p.media_type
                 content_list.append(part_dict)
-
-        return {
-            "role": self.role,
-            "content": content_list,
-        }
+        
+        return {"role": self.role, "content": content_list}
 
 
 @dataclass
 class Usage:
-    """Token usage statistics."""
-
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
@@ -539,18 +336,15 @@ class Usage:
 
 @dataclass
 class GenerateTextResult:
-    """Result from generate_text call."""
-
     text: str
     steps: list[StepResult] = field(default_factory=list)
-    finish_reason: str | None = None
-    usage: Usage | None = None
+    finish_reason: Union[str, None] = None
+    usage: Union[Usage, None] = None
     response: dict[str, Any] = field(default_factory=dict)
     provider_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def tool_calls(self) -> list[ToolCall]:
-        """All tool calls made across all steps."""
         calls = []
         for step in self.steps:
             calls.extend(step.tool_calls)
@@ -558,7 +352,6 @@ class GenerateTextResult:
 
     @property
     def tool_results(self) -> list[ToolResult]:
-        """All tool results from all steps."""
         results = []
         for step in self.steps:
             results.extend(step.tool_results)
@@ -567,18 +360,6 @@ class GenerateTextResult:
 
 @dataclass
 class AgentEvent:
-    """A durable event emitted by an agent.
-
-    These events are persisted to the Event Log and can be replayed to clients
-    upon reconnection.
-
-    Attributes:
-        id: Monotonically increasing sequence ID.
-        type: Event type (e.g., "message", "status", "error").
-        data: Event payload.
-        created_at: Timestamp of creation.
-    """
-
     id: int
     type: str
     data: dict[str, Any]
@@ -587,61 +368,33 @@ class AgentEvent:
 
 @dataclass
 class StreamTextResult:
-    """Final result from stream_text after streaming completes."""
-
     text: str
-    finish_reason: str | None = None
-    usage: Usage | None = None
+    finish_reason: Union[str, None] = None
+    usage: Union[Usage, None] = None
 
 
 @dataclass
 class StreamChunk:
-    """A chunk from streaming - either text content or final metadata."""
-
     text: str = ""
     is_final: bool = False
-    usage: Usage | None = None
-    finish_reason: str | None = None
-    tool_calls: list[ToolCall] | None = None
+    usage: Union[Usage, None] = None
+    finish_reason: Union[str, None] = None
+    tool_calls: Union[list[ToolCall], None] = None
 
 
 class TextStreamResult:
-    """Result object from stream_text with both stream and metadata.
-
-    Similar to ai-sdk's streamText result, provides access to:
-    - text_stream: AsyncIterator yielding text chunks
-    - text: Awaitable that resolves to full text after streaming
-    - usage: Awaitable that resolves to Usage after streaming
-    - finish_reason: Awaitable that resolves to finish reason after streaming
-    - steps: Awaitable that resolves to list of StepResult after streaming
-
-    Example:
-        >>> result = stream_text(model=google("gemini-2.0-flash"), prompt="Hi")
-        >>> async for chunk in result.text_stream:
-        ...     print(chunk, end="")
-        >>> print(await result.usage)  # Usage after stream completes
-        >>> print(await result.text)   # Full accumulated text
-        >>> print(await result.steps)  # All steps with tool calls
-
-    Or iterate directly:
-        >>> async for chunk in stream_text(model=google("gemini-2.0-flash"), prompt="Hi"):
-        ...     print(chunk, end="")
-    """
-
-    def __init__(self, stream: AsyncIterator[StreamChunk], steps: list[StepResult] | None = None) -> None:
+    def __init__(self, stream: AsyncIterator[StreamChunk], steps: Union[list[StepResult], None] = None) -> None:
         self._stream = stream
         self._chunks: list[str] = []
-        self._usage: Usage | None = None
-        self._finish_reason: str | None = None
+        self._usage: Union[Usage, None] = None
+        self._finish_reason: Union[str, None] = None
         self._steps: list[StepResult] = steps or []
         self._done = False
         self._done_event = asyncio.Event()
         self._consumed = False
 
     async def _consume_stream(self) -> AsyncIterator[str]:
-        """Consume the stream, collecting chunks and yielding text."""
         if self._consumed:
-            # If already consumed, just yield from collected chunks
             for chunk in self._chunks:
                 yield chunk
             return
@@ -649,7 +402,6 @@ class TextStreamResult:
         self._consumed = True
         async for chunk in self._stream:
             if chunk.is_final:
-                # Final chunk contains metadata
                 self._usage = chunk.usage
                 self._finish_reason = chunk.finish_reason
             elif chunk.text:
@@ -661,13 +413,10 @@ class TextStreamResult:
 
     @property
     def text_stream(self) -> AsyncIterator[str]:
-        """Async iterator yielding text chunks as they arrive."""
         return self._consume_stream()
 
     async def _wait_for_completion(self) -> None:
-        """Wait for the stream to complete."""
         if not self._done:
-            # If not consumed yet, we need to consume it
             if not self._consumed:
                 async for _ in self._consume_stream():
                     pass
@@ -676,35 +425,27 @@ class TextStreamResult:
 
     @property
     async def text(self) -> str:
-        """Get the full accumulated text after streaming completes."""
         await self._wait_for_completion()
         return "".join(self._chunks)
 
     @property
-    async def usage(self) -> Usage | None:
-        """Get usage statistics after streaming completes."""
+    async def usage(self) -> Union[Usage, None]:
         await self._wait_for_completion()
         return self._usage
 
     @property
-    async def finish_reason(self) -> str | None:
-        """Get the finish reason after streaming completes."""
+    async def finish_reason(self) -> Union[str, None]:
         await self._wait_for_completion()
         return self._finish_reason
 
     @property
     async def steps(self) -> list[StepResult]:
-        """Get all steps including tool calls after streaming completes."""
         await self._wait_for_completion()
         return self._steps
 
     def __aiter__(self) -> AsyncIterator[str]:
-        """Allow direct iteration: async for chunk in stream_text(...)"""
         return self.text_stream
 
-
-# Provider options type - allows provider-specific configuration
-# Example: {"google": {"safety_settings": {...}}, "anthropic": {"top_k": 10}}
 ProviderOptions = dict[str, dict[str, Any]]
 
 
@@ -715,24 +456,11 @@ ProviderOptions = dict[str, dict[str, Any]]
 
 @dataclass
 class EmbeddingUsage:
-    """Token usage statistics for embedding operations."""
-
     tokens: int = 0
 
 
 @dataclass
 class EmbedResult:
-    """Result from embed() call for a single value.
-
-    Example:
-        >>> result = await embed(
-        ...     model=openai.embedding("text-embedding-3-small"),
-        ...     value="Hello world"
-        ... )
-        >>> print(len(result.embedding))  # e.g., 1536
-        >>> print(result.usage.tokens)
-    """
-
     value: str
     embedding: list[float]
     usage: EmbeddingUsage
@@ -741,17 +469,6 @@ class EmbedResult:
 
 @dataclass
 class EmbedManyResult:
-    """Result from embed_many() call for multiple values.
-
-    Example:
-        >>> result = await embed_many(
-        ...     model=openai.embedding("text-embedding-3-small"),
-        ...     values=["Hello", "World"]
-        ... )
-        >>> print(len(result.embeddings))  # 2
-        >>> print(len(result.embeddings[0]))  # e.g., 1536
-    """
-
     values: list[str]
     embeddings: list[list[float]]
     usage: EmbeddingUsage
@@ -759,59 +476,41 @@ class EmbedManyResult:
 
 
 # =============================================================================
-# Abort / Cancellation (inspired by JS AbortController)
+# Abort / Cancellation
 # =============================================================================
 
 
 class AbortError(Exception):
-    """Raised when an operation is aborted."""
-
-    def __init__(self, reason: str | None = None):
+    def __init__(self, reason: Union[str, None] = None):
         self.reason = reason
         super().__init__(reason or "Operation aborted")
 
 
 class AbortSignal:
-    """A signal that can be checked for abort status.
-
-    Example:
-        >>> controller = AbortController()
-        >>> signal = controller.signal
-        >>> # Pass signal to an operation
-        >>> result = await generate_text(..., signal=signal)
-        >>> # Abort from another task
-        >>> controller.abort("Timeout")
-    """
-
     def __init__(self) -> None:
         self._aborted = False
-        self._reason: str | None = None
+        self._reason: Union[str, None] = None
         self._listeners: list[Callable[[], None]] = []
         self._event = asyncio.Event()
 
     @property
     def aborted(self) -> bool:
-        """True if abort() has been called."""
         return self._aborted
 
     @property
-    def reason(self) -> str | None:
-        """The abort reason, if provided."""
+    def reason(self) -> Union[str, None]:
         return self._reason
 
     def throw_if_aborted(self) -> None:
-        """Raise AbortError if aborted."""
         if self._aborted:
             raise AbortError(self._reason)
 
     def add_listener(self, callback: Callable[[], None]) -> None:
-        """Add a callback to be called on abort."""
         self._listeners.append(callback)
         if self._aborted:
             callback()
 
-    def _abort(self, reason: str | None = None) -> None:
-        """Internal: trigger the abort."""
+    def _abort(self, reason: Union[str, None] = None) -> None:
         if self._aborted:
             return
         self._aborted = True
@@ -824,50 +523,25 @@ class AbortSignal:
                 pass
 
     async def wait(self) -> None:
-        """Wait until aborted."""
         await self._event.wait()
 
     @staticmethod
     def timeout(seconds: float) -> "AbortSignal":
-        """Create a signal that auto-aborts after timeout.
-
-        Example:
-            >>> result = await generate_text(
-            ...     ...,
-            ...     signal=AbortSignal.timeout(30)  # Auto-abort after 30s
-            ... )
-        """
         controller = AbortController()
-
         async def _timeout() -> None:
             await asyncio.sleep(seconds)
             controller.abort(f"Timeout after {seconds}s")
-
         asyncio.create_task(_timeout())
         return controller.signal
 
 
 class AbortController:
-    """Controls an AbortSignal.
-
-    Example:
-        >>> controller = AbortController()
-        >>> # Pass signal to operations
-        >>> task = asyncio.create_task(
-        ...     generate_text(..., signal=controller.signal)
-        ... )
-        >>> # Abort when needed
-        >>> controller.abort("User cancelled")
-    """
-
     def __init__(self) -> None:
         self._signal = AbortSignal()
 
     @property
     def signal(self) -> AbortSignal:
-        """The signal controlled by this controller."""
         return self._signal
 
-    def abort(self, reason: str | None = None) -> None:
-        """Abort the signal, optionally with a reason."""
+    def abort(self, reason: Union[str, None] = None) -> None:
         self._signal._abort(reason)

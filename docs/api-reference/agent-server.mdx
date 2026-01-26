@@ -1,15 +1,17 @@
 ---
 title: "AgentServer"
-description: "API reference for multi-agent server with routing"
+description: "API reference for multi-agent server with unified transport layer routing"
 ---
 
-The `AgentServer` class manages multiple agent instances on a single server, routing clients to the correct agent based on URL path.
+The `AgentServer` class manages multiple agent instances on a single server, routing clients to the correct agent based on URL path using the unified transport layer. It supports both local agent classes and remote agent transports through the `AgentRegistry`.
 
 ## Import
 
 ```python
 from ai_query.agents import AgentServer
 from ai_query.agents import AgentServerConfig
+from ai_query.agents import AgentRegistry
+from ai_query.agents.transport import HTTPTransport
 ```
 
 ## AgentServerConfig
@@ -71,15 +73,15 @@ class AgentServerConfig:
 class AgentServer:
     def __init__(
         self,
-        agent: Agent,
+        target: Agent | AgentRegistry,
         config: AgentServerConfig | None = None,
     )
 ```
 
 ### Parameters
 
-<ParamField path="agent" type="Agent" required>
-  The Agent instance to use as a template for each client. Each connected client gets their own isolated agent instance with the same configuration.
+<ParamField path="target" type="Agent | AgentRegistry" required>
+  Either a single Agent instance to use as a template for each client, or an AgentRegistry for multi-agent routing with different agent types and transports.
 </ParamField>
 
 <ParamField path="config" type="AgentServerConfig | None">

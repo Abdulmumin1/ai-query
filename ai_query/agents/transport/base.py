@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ai_query.agents.router import AgentServer
+    from ai_query.agents.server import AgentServer
 
 
 class AgentTransport(ABC):
@@ -73,19 +73,14 @@ class LocalTransport(AgentTransport):
         payload: dict[str, Any],
         timeout: float = 30.0
     ) -> dict[str, Any]:
-        """Invoke another agent in the same process.
+        """Invoke another agent, resolving via registry."""
+        target = self._server.registry.resolve(agent_id)
+        
+        if not isinstance(target, type):
+            # Target is a remote transport, delegate to it
+            return await target.invoke(agent_id, payload, timeout=timeout)
 
-        Args:
-            agent_id: The target agent's identifier.
-            payload: The request payload.
-            timeout: Maximum time to wait for response.
-
-        Returns:
-            The response from the target agent.
-
-        Raises:
-            asyncio.TimeoutError: If the agent doesn't respond within timeout.
-        """
+        # Local execution: get or create the agent
         agent = self._server.get_or_create(agent_id)
 
         # Ensure agent is started

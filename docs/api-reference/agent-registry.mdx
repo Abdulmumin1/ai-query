@@ -1,0 +1,196 @@
+---
+title: "AgentRegistry"
+description: "API reference for multi-agent registry with local and remote routing"
+---
+
+The `AgentRegistry` class maps agent IDs to their implementation or location, enabling unified routing between local agent classes and remote transports.
+
+## Import
+
+```python
+from ai_query.agents import AgentRegistry
+from ai_query.agents.transport import HTTPTransport
+```
+
+## Constructor
+
+```python
+def __init__(self) -> None
+```
+
+Creates a new empty registry.
+
+---
+
+## Methods
+
+### register
+
+```python
+def register(self, pattern: str, target: RegistryTarget) -> None
+```
+
+Register a route pattern for agent ID matching.
+
+#### Parameters
+
+<ParamField path="pattern" type="str" required>
+  Regex pattern for agent ID matching (e.g., "writer", "room-.*", "worker-[0-9]+").
+  Simple alphanumeric patterns are automatically anchored (e.g., "writer" becomes "^writer$").
+</ParamField>
+
+<ParamField path="target" type="RegistryTarget" required>
+  The target to route to:
+  - **Agent class**: Local instantiation (e.g., `WriterAgent`)
+  - **AgentTransport**: Remote communication (e.g., `HTTPTransport("...")`)
+</ParamField>
+
+#### Examples
+
+```python
+from ai_query.agents import AgentRegistry
+from ai_query.agents.transport import HTTPTransport
+from my_agents import WriterAgent, ResearchAgent
+
+registry = AgentRegistry()
+
+# 1. Exact match for specific agent
+registry.register("writer", WriterAgent)
+
+# 2. Pattern matching for multiple agents
+registry.register("researcher-.*", ResearchAgent)
+
+# 3. Remote agent via HTTP transport
+registry.register("summarizer", HTTPTransport(
+    "https://api.myapp.com/agents",
+    headers={"Authorization": "Bearer token"}
+))
+
+# 4. Pattern to remote serverless function
+registry.register("worker-.*", HTTPTransport(
+    "https://my-vercel-app.vercel.app/api/agent"
+))
+```
+
+---
+
+### resolve
+
+```python
+def resolve(self, agent_id: str) -> RegistryTarget
+```
+
+Find the target for a given agent ID by testing registered patterns in order.
+
+#### Parameters
+
+<ParamField path="agent_id" type="str" required>
+  The agent ID to resolve.
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="RegistryTarget">
+  The matched Agent class or AgentTransport.
+</ReturnsField>
+
+#### Raises
+
+- `ValueError`: If no matching route is found for the agent ID.
+
+#### Examples
+
+```python
+# Given the registry above:
+target = registry.resolve("writer")  # Returns WriterAgent class
+target = registry.resolve("researcher-1")  # Returns ResearchAgent class
+target = registry.resolve("summarizer")  # Returns HTTPTransport instance
+target = registry.resolve("worker-123")  # Returns HTTPTransport instance
+
+# Create agent instance from class
+if isinstance(target, type):
+    agent = target("my-agent-id")
+else:
+    # It's a transport for remote communication
+    transport = target
+```
+
+---
+
+## Complete Example
+
+```python
+from ai_query.agents import AgentRegistry, AgentServer, AgentServerConfig
+from ai_query.agents.transport import HTTPTransport
+from ai_query.providers import openai
+from my_agents import ChatBot, WriterAgent, ResearchAgent
+
+# Create registry with mixed local and remote agents
+registry = AgentRegistry()
+
+# Local agents
+registry.register("chatbot", ChatBot)
+registry.register("writer-.*", WriterAgent)
+registry.register("research-.*", ResearchAgent)
+
+# Remote agents (serverless)
+registry.register("summarizer", HTTPTransport(
+    "https://my-lambda-function.amazonaws.com/prod",
+    headers={"X-API-Key": "your-key"}
+))
+
+registry.register("translator", HTTPTransport(
+    "https://my-vercel-app.vercel.app/api"
+))
+
+# Configure server
+config = AgentServerConfig(
+    idle_timeout=600,
+    max_agents=100,
+    enable_list_agents=True
+)
+
+# Create and start server
+server = AgentServer(registry, config=config)
+server.serve(port=8080)
+
+# Now you can access:
+# - POST /agent/chatbot/chat
+# - POST /agent/writer-1/chat  
+# - POST /agent/research-ai/chat
+# - POST /agent/summarizer/chat (routes to AWS Lambda)
+# - POST /agent/translator/chat (routes to Vercel)
+```
+
+---
+
+## Pattern Matching
+
+The registry uses Python regex patterns with special behavior for simple names:
+
+| Pattern | Matches | Notes |
+|---------|---------|-------|
+| `"writer"` | Only "writer" | Auto-anchored to `^writer$` |
+| `"room-.*"` | "room-1", "room-abc", "room-123" | Regex pattern |
+| `"worker-[0-9]+"` | "worker-1", "worker-123" | Regex with numbers |
+| `".*"` | Any string | Catch-all pattern |
+
+Patterns are tested in registration order, so register more specific patterns first.
+
+---
+
+## Integration with AgentServer
+
+```python
+# Single agent (old behavior)
+server = AgentServer(ChatBot())
+
+# Multi-agent with registry (new unified approach)
+registry = AgentRegistry()
+registry.register(".*", ChatBot)  # Default pattern
+server = AgentServer(registry)
+
+# The registry is accessible
+registry = server.registry
+print(registry._routes)  # List of (pattern, target) tuples
+```

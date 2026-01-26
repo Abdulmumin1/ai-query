@@ -1,0 +1,471 @@
+---
+title: Complete Multi-Agent Setup
+description: End-to-end example of setting up a multi-agent system with unified transport layer
+---
+
+# Complete Multi-Agent Setup
+
+This guide walks through setting up a complete multi-agent system using the unified transport layer, including both local and remote agents with different deployment patterns.
+
+## Overview
+
+We'll build a content creation system with three agents:
+- **Coordinator Agent** (local) - Orchestrates the workflow
+- **Researcher Agent** (remote) - Handles research tasks
+- **Writer Agent** (remote) - Creates content based on research
+
+## Project Structure
+
+```
+my-multi-agent-system/
+├── agents/
+│   ├── __init__.py
+│   ├── coordinator.py
+│   ├── researcher.py
+│   └── writer.py
+├── servers/
+│   ├── local_server.py      # Runs coordinator
+│   └── remote_server.py     # Runs researcher + writer
+├── client.py               # Client application
+└── requirements.txt
+```
+
+## Step 1: Define the Agents
+
+### Researcher Agent
+
+```python
+# agents/researcher.py
+from ai_query import Agent, action
+from ai_query.providers import openai
+import os
+
+class ResearcherAgent(Agent):
+    """Handles research tasks using LLM"""
+    
+    @action
+    async def research(self, topic: str) -> str:
+        """Research a topic and return a summary"""
+        print(f"[{self.id}] Researching: {topic}")
+        
+        # Use environment variable for API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        
+        result = await generate_text(
+            model=openai("gpt-4", api_key=api_key),
+            prompt=f"Provide a comprehensive research summary on: {topic}"
+        )
+        
+        print(f"[{self.id}] Research complete")
+        return result.text
+```
+
+### Writer Agent
+
+```python
+# agents/writer.py
+from ai_query import Agent, action
+from ai_query.providers import anthropic
+import os
+
+class WriterAgent(Agent):
+    """Creates written content based on research"""
+    
+    @action
+    async def write_article(self, research_summary: str, style: str = "professional") -> str:
+        """Write an article based on research summary"""
+        print(f"[{self.id}] Writing {style} article")
+        
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        
+        result = await generate_text(
+            model=anthropic("claude-3-sonnet", api_key=api_key),
+            prompt=f"""
+            Write a {style} article based on this research:
+            
+            {research_summary}
+            
+            Make it engaging and well-structured.
+            """
+        )
+        
+        print(f"[{self.id}] Article written")
+        return result.text
+```
+
+### Coordinator Agent
+
+```python
+# agents/coordinator.py
+from ai_query import Agent, action
+
+class CoordinatorAgent(Agent):
+    """Orchestrates the content creation workflow"""
+    
+    @action
+    async def create_content(self, topic: str, style: str = "professional") -> dict:
+        """Complete content creation workflow"""
+        print(f"[{self.id}] Starting content creation for: {topic}")
+        
+        # Step 1: Research
+        research_result = await self.call("researcher").research(topic=topic)
+        
+        # Step 2: Write article
+        article = await self.call("writer").write_article(
+            research_summary=research_result,
+            style=style
+        )
+        
+        print(f"[{self.id}] Content creation complete")
+        return {
+            "topic": topic,
+            "research": research_result,
+            "article": article,
+            "style": style
+        }
+```
+
+## Step 2: Set Up Servers
+
+### Remote Server (Researcher + Writer)
+
+```python
+# servers/remote_server.py
+import os
+from ai_query import AgentRegistry, AgentServer
+from agents.researcher import ResearcherAgent
+from agents.writer import WriterAgent
+
+def main():
+    print("Starting remote agents server...")
+    
+    # Set up registry
+    registry = AgentRegistry()
+    registry.register("researcher", ResearcherAgent)
+    registry.register("writer", WriterAgent)
+    
+    # Create server
+    server = AgentServer(registry)
+    
+    # Start server
+    port = int(os.getenv("PORT", 8091))
+    server.serve(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Local Server (Coordinator)
+
+```python
+# servers/local_server.py
+import os
+from ai_query import AgentRegistry, AgentServer, HTTPTransport
+from agents.coordinator import CoordinatorAgent
+
+def main():
+    print("Starting coordinator server...")
+    
+    # Set up registry
+    registry = AgentRegistry()
+    registry.register("coordinator", CoordinatorAgent)
+    
+    # Register remote agents
+    remote_url = os.getenv("REMOTE_AGENT_URL", "http://localhost:8091/agent")
+    remote_transport = HTTPTransport(base_url=remote_url)
+    
+    registry.register("researcher", remote_transport)
+    registry.register("writer", remote_transport)
+    
+    # Create server
+    server = AgentServer(registry)
+    
+    # Start server
+    port = int(os.getenv("PORT", 8090))
+    server.serve(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    main()
+```
+
+## Step 3: Create Client
+
+```python
+# client.py
+import asyncio
+from ai_query import connect
+
+async def main():
+    # Connect to coordinator
+    coordinator = connect("http://localhost:8090/agent/coordinator")
+    
+    # Create content
+    result = await coordinator.call().create_content(
+        topic="The Future of Remote Work",
+        style="professional"
+    )
+    
+    print("=== Content Creation Complete ===")
+    print(f"Topic: {result['topic']}")
+    print(f"\nResearch Summary:\n{result['research']}")
+    print(f"\nArticle:\n{result['article']}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Step 4: Environment Configuration
+
+Create a `.env` file:
+
+```bash
+# API Keys
+OPENAI_API_KEY=your_openai_key_here
+ANTHROPIC_API_KEY=your_anthropic_key_here
+
+# Server Configuration
+PORT=8091
+REMOTE_AGENT_URL=http://localhost:8091/agent
+```
+
+## Step 5: Deployment Options
+
+### Local Development
+
+```bash
+# Terminal 1: Start remote server
+python servers/remote_server.py
+
+# Terminal 2: Start local server  
+python servers/local_server.py
+
+# Terminal 3: Run client
+python client.py
+```
+
+### Docker Deployment
+
+**Dockerfile for remote server:**
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+ENV PORT=8091
+EXPOSE 8091
+
+CMD ["python", "servers/remote_server.py"]
+```
+
+**docker-compose.yml:**
+
+```yaml
+version: '3.8'
+
+services:
+  remote-agents:
+    build: .
+    environment:
+      - PORT=8091
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    ports:
+      - "8091:8091"
+
+  coordinator:
+    build: .
+    command: python servers/local_server.py
+    environment:
+      - PORT=8090
+      - REMOTE_AGENT_URL=http://remote-agents:8091/agent
+    ports:
+      - "8090:8090"
+    depends_on:
+      - remote-agents
+```
+
+### Serverless Deployment (Vercel)
+
+**api/remote/[...agent_id].py:**
+
+```python
+import os
+from ai_query.adapters.vercel import VercelHandler
+from agents.researcher import ResearcherAgent
+from agents.writer import WriterAgent
+
+# Set up registry
+registry = AgentRegistry()
+registry.register("researcher", ResearcherAgent)
+registry.register("writer", WriterAgent)
+
+# Create handler
+handler = VercelHandler(registry)
+
+# Export for Vercel
+handler.exports()
+```
+
+**api/coordinator/[...agent_id].py:**
+
+```python
+import os
+from ai_query.adapters.vercel import VercelHandler
+from ai_query import HTTPTransport, AgentRegistry
+from agents.coordinator import CoordinatorAgent
+
+# Set up registry
+registry = AgentRegistry()
+registry.register("coordinator", CoordinatorAgent)
+
+# Register remote agents
+remote_url = os.getenv("REMOTE_AGENT_URL", "your-vercel-app-url.vercel.app/api/agent")
+remote_transport = HTTPTransport(base_url=f"https://{remote_url}")
+
+registry.register("researcher", remote_transport)
+registry.register("writer", remote_transport)
+
+# Create handler
+handler = VercelHandler(registry)
+
+# Export for Vercel
+handler.exports()
+```
+
+## Step 6: Running the Example
+
+### Local Setup
+
+1. **Install dependencies:**
+   ```bash
+   pip install ai-query aiohttp python-dotenv
+   ```
+
+2. **Set environment variables:**
+   ```bash
+   export OPENAI_API_KEY="your_key"
+   export ANTHROPIC_API_KEY="your_key"
+   ```
+
+3. **Start servers:**
+   ```bash
+   # Terminal 1
+   python servers/remote_server.py
+   
+   # Terminal 2  
+   python servers/local_server.py
+   ```
+
+4. **Run client:**
+   ```bash
+   python client.py
+   ```
+
+### Docker Setup
+
+```bash
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Run client (in new terminal)
+python client.py
+```
+
+## Step 7: Testing the System
+
+The client will output something like:
+
+```
+=== Content Creation Complete ===
+Topic: The Future of Remote Work
+
+Research Summary:
+[Research summary from the researcher agent...]
+
+Article:
+[Well-written article from the writer agent...]
+```
+
+## Advanced Features
+
+### Adding More Agents
+
+To add more agents:
+
+1. **Define new agent class**
+2. **Register in appropriate server**
+3. **Update coordinator to use new agent**
+4. **Deploy changes**
+
+### Load Balancing
+
+For multiple remote agents:
+
+```python
+# In local server
+researcher_urls = [
+    "http://remote1:8091/agent/researcher",
+    "http://remote2:8091/agent/researcher",
+]
+
+# Use round-robin or other load balancing strategy
+registry.register("researcher", HTTPTransport(base_url=researcher_urls[0]))
+```
+
+### Error Handling
+
+Add retry logic:
+
+```python
+class CoordinatorAgent(Agent):
+    @action
+    async def create_content_with_retry(self, topic: str, max_retries: int = 3) -> dict:
+        for attempt in range(max_retries):
+            try:
+                return await self.create_content(topic)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                print(f"Attempt {attempt + 1} failed, retrying...")
+                await asyncio.sleep(2 ** attempt)
+```
+
+## Monitoring and Debugging
+
+### Health Checks
+
+```python
+# Add to each server
+@server.app.route("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": time.time()}
+```
+
+### Logging
+
+```python
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Add logging to agents
+logger.info(f"Agent {self.id} starting action: research")
+```
+
+## Summary
+
+This complete example demonstrates:
+
+✅ **Multi-agent architecture** with local and remote agents  
+✅ **Unified transport layer** for seamless communication  
+✅ **Flexible deployment** options (local, Docker, serverless)  
+✅ **Error handling** and retry logic  
+✅ **Scalability** patterns for production use  
+
+The system can be extended with more agents, different deployment patterns, and advanced features based on your specific needs.

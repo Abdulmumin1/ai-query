@@ -1,0 +1,507 @@
+---
+title: "Serverless Adapters"
+description: "API reference for FastAPI, Vercel, and AWS Lambda adapters"
+---
+
+The serverless adapters enable deploying agents on various platforms while maintaining a consistent API. Each adapter handles platform-specific request/response translation to the standardized wire protocol.
+
+## Import
+
+```python
+# FastAPI adapter
+from ai_query.adapters.fastapi import AgentRouter
+
+# Vercel adapter
+from ai_query.adapters.vercel import handle_vercel
+
+# AWS Lambda adapter
+from ai_query.adapters.aws import handle_lambda
+
+# For type hints
+from ai_query.agents import Agent, AgentRegistry
+```
+
+---
+
+## FastAPI Adapter (AgentRouter)
+
+The `AgentRouter` class provides a FastAPI router that serves agents or agent registries with REST endpoints.
+
+### Constructor
+
+```python
+def __init__(
+    self,
+    target: Agent | AgentRegistry,
+    **kwargs: Any
+) -> None
+```
+
+#### Parameters
+
+<ParamField path="target" type="Agent | AgentRegistry" required>
+  Either a single Agent instance or an AgentRegistry for multi-agent routing.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments passed to FastAPI's `APIRouter`.
+</ParamField>
+
+#### Raises
+
+- `ImportError`: If FastAPI is not installed.
+
+### Endpoints
+
+#### Single Agent Routes
+- `POST /chat` - Chat with the agent
+- `POST /invoke` - RPC method calls
+- `GET /state` - Get agent state
+- `POST /` - Generic request handler
+
+#### Registry Routes (with agent_id parameter)
+- `POST /{agent_id}/chat` - Chat with specific agent
+- `POST /{agent_id}/invoke` - RPC calls to specific agent
+- `GET /{agent_id}/state` - Get state of specific agent
+- `POST /{agent_id}` - Generic request to specific agent
+
+### Examples
+
+#### Single Agent FastAPI App
+
+```python
+from fastapi import FastAPI
+from ai_query.agents import Agent
+from ai_query.adapters.fastapi import AgentRouter
+from ai_query.providers import openai, MemoryStorage
+
+# Create agent
+agent = Agent(
+    "chatbot",
+    model=openai("gpt-4o"),
+    system="You are a helpful assistant.",
+    storage=MemoryStorage()
+)
+
+# Create FastAPI app
+app = FastAPI(title="Agent API")
+
+# Add agent router
+app.include_router(AgentRouter(agent), prefix="/agent")
+
+# Health check
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+```
+
+#### Multi-Agent Registry FastAPI App
+
+```python
+from fastapi import FastAPI
+from ai_query.agents import AgentRegistry, AgentRouter
+from ai_query.agents.transport import HTTPTransport
+from my_agents import ChatBot, WriterAgent, ResearchAgent
+
+# Create registry with mixed local and remote agents
+registry = AgentRegistry()
+registry.register("chatbot", ChatBot)
+registry.register("writer-.*", WriterAgent)
+registry.register("research-.*", ResearchAgent)
+
+# Add remote serverless agent
+registry.register("summarizer", HTTPTransport(
+    "https://lambda.execute-api.amazonaws.com/prod/summarizer"
+))
+
+# Create FastAPI app
+app = FastAPI(title="Multi-Agent API")
+
+# Add registry router
+app.include_router(AgentRouter(registry), prefix="/agents")
+
+# Available endpoints:
+# POST /agents/chatbot/chat
+# POST /agents/writer-1/chat
+# POST /agents/research-ai/chat
+# POST /agents/summarizer/chat (routes to Lambda)
+```
+
+#### With Custom Prefix and Tags
+
+```python
+from fastapi import FastAPI
+from ai_query.adapters.fastapi import AgentRouter
+
+app = FastAPI()
+
+# Custom routing
+agent_router = AgentRouter(
+    my_agent,
+    prefix="/v1/bot",
+    tags=["chatbot"],
+    responses={404: {"description": "Not found"}}
+)
+app.include_router(agent_router)
+```
+
+#### Streaming Support
+
+```python
+# The router automatically supports streaming via query parameter
+# POST /agent/chat?stream=true
+# Returns: text/event-stream with Server-Sent Events
+
+import httpx
+
+async def stream_from_fastapi():
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            "http://localhost:8000/agent/chat?stream=true",
+            json={"message": "Tell me a story"},
+            headers={"Accept": "text/event-stream"}
+        ) as response:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    chunk = line[6:]
+                    print(chunk, end="", flush=True)
+```
+
+---
+
+## Vercel Adapter (handle_vercel)
+
+The `handle_vercel` function bridges Vercel's HTTP handler to the agent system.
+
+### Function Signature
+
+```python
+def handle_vercel(agent: Agent, handler: BaseHTTPRequestHandler) -> None
+```
+
+#### Parameters
+
+<ParamField path="agent" type="Agent" required>
+  The agent instance to handle requests.
+</ParamField>
+
+<ParamField path="handler" type="BaseHTTPRequestHandler" required>
+  Vercel's HTTP handler instance.
+</ParamField>
+
+### Usage Example
+
+#### Basic Vercel API Route
+
+```python
+# api/index.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+# Create agent
+agent = Agent(
+    "vercel-bot",
+    model=openai("gpt-4o"),
+    system="You are a Vercel-hosted assistant."
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+    
+    def do_GET(self):
+        handle_vercel(agent, self)
+```
+
+#### Multiple Endpoints
+
+```python
+# api/chat.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+chat_agent = Agent("chat-agent", model=openai("gpt-4o"))
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(chat_agent, self)
+
+# api/research.py
+research_agent = Agent("research-agent", model=openai("gpt-4o"))
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(research_agent, self)
+```
+
+#### With Environment Variables
+
+```python
+import os
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+agent = Agent(
+    "vercel-agent",
+    model=openai(os.getenv("OPENAI_MODEL", "gpt-4o")),
+    system=os.getenv("SYSTEM_PROMPT", "You are helpful.")
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+```
+
+---
+
+## AWS Lambda Adapter (handle_lambda)
+
+The `handle_lambda` function bridges AWS Lambda events to the agent system, supporting API Gateway v1 and v2.
+
+### Function Signature
+
+```python
+def handle_lambda(
+    agent: Agent,
+    event: dict[str, Any],
+    context: Any
+) -> dict[str, Any]
+```
+
+#### Parameters
+
+<ParamField path="agent" type="Agent" required>
+  The agent instance to handle requests.
+</ParamField>
+
+<ParamField path="event" type="dict[str, Any]" required>
+  AWS Lambda event object from API Gateway.
+</ParamField>
+
+<ParamField path="context" type="Any" required>
+  AWS Lambda context object.
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="dict[str, Any]">
+  API Gateway response object with statusCode, headers, and body.
+</ReturnsField>
+
+### Usage Examples
+
+#### Basic Lambda Function
+
+```python
+# lambda_function.py
+from ai_query.agents import Agent
+from ai_query.adapters.aws import handle_lambda
+from ai_query.providers import openai
+
+# Create agent
+agent = Agent(
+    "lambda-agent",
+    model=openai("gpt-4o"),
+    system="You are an AWS Lambda-powered assistant."
+)
+
+def lambda_handler(event, context):
+    return handle_lambda(agent, event, context)
+```
+
+#### Multi-Agent Lambda Router
+
+```python
+# lambda_function.py
+import json
+from ai_query.agents import AgentRegistry, Agent
+from ai_query.adapters.aws import handle_lambda
+from ai_query.providers import openai
+
+# Create agent registry
+registry = AgentRegistry()
+registry.register("chatbot", lambda id: Agent(id, model=openai("gpt-4o")))
+registry.register("assistant", lambda id: Agent(id, model=openai("gpt-4o"), system="You are an assistant."))
+
+# Router function
+def lambda_handler(event, context):
+    # Extract agent type from path or headers
+    agent_type = event.get("pathParameters", {}).get("type", "chatbot")
+    
+    # Create appropriate agent
+    target_class = registry.resolve(agent_type)
+    agent = target_class(f"lambda-{agent_type}")
+    
+    return handle_lambda(agent, event, context)
+```
+
+#### With Environment Configuration
+
+```python
+import os
+from ai_query.agents import Agent
+from ai_query.adapters.aws import handle_lambda
+from ai_query.providers import openai, anthropic
+
+# Configure agent based on environment
+model_provider = os.getenv("MODEL_PROVIDER", "openai")
+model_name = os.getenv("MODEL_NAME", "gpt-4o")
+
+if model_provider == "openai":
+    model = openai(model_name)
+elif model_provider == "anthropic":
+    model = anthropic(model_name)
+else:
+    raise ValueError(f"Unsupported provider: {model_provider}")
+
+agent = Agent(
+    "lambda-agent",
+    model=model,
+    system=os.getenv("SYSTEM_PROMPT", "You are helpful."),
+    max_tokens=int(os.getenv("MAX_TOKENS", "1000"))
+)
+
+def lambda_handler(event, context):
+    return handle_lambda(agent, event, context)
+```
+
+---
+
+## Deployment Examples
+
+### Complete FastAPI Application
+
+```python
+# main.py
+from fastapi import FastAPI
+from ai_query.agents import AgentRegistry, AgentRouter
+from ai_query.agents.transport import HTTPTransport
+from my_agents import ChatAgent, DataAgent, CreativeAgent
+from ai_query.providers import openai
+
+# Create app
+app = FastAPI(
+    title="Multi-Agent API Service",
+    description="FastAPI service with ai-query agents",
+    version="1.0.0"
+)
+
+# Configure agents
+registry = AgentRegistry()
+registry.register("chat", ChatAgent)
+registry.register("data", DataAgent)
+registry.register("creative", CreativeAgent)
+
+# Add remote agents
+registry.register("summarizer", HTTPTransport(
+    "https://lambda.execute-api.amazonaws.com/prod/summarizer"
+))
+
+# Include router
+app.include_router(
+    AgentRouter(registry),
+    prefix="/api/v1/agents",
+    tags=["agents"]
+)
+
+# Documentation endpoints
+@app.get("/")
+async def root():
+    return {
+        "message": "Multi-Agent API Service",
+        "agents": ["chat", "data", "creative", "summarizer"],
+        "endpoints": {
+            "chat": "POST /api/v1/agents/chat/chat",
+            "data": "POST /api/v1/agents/data/invoke",
+            "creative": "POST /api/v1/agents/creative/chat",
+            "summarizer": "POST /api/v1/agents/summarizer/chat"
+        }
+    }
+```
+
+### Vercel Project Structure
+
+```
+my-vercel-app/
+├── api/
+│   ├── index.py          # Main agent
+│   ├── chat.py           # Chat agent
+│   └── research.py       # Research agent
+├── agents/
+│   ├── __init__.py
+│   ├── chat_agent.py
+│   └── research_agent.py
+├── package.json
+└── vercel.json
+```
+
+```python
+# api/index.py
+from http.server import BaseHTTPRequestHandler
+from agents.chat_agent import create_chat_agent
+from ai_query.adapters.vercel import handle_vercel
+
+agent = create_chat_agent()
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+    def do_GET(self):
+        handle_vercel(agent, self)
+```
+
+### AWS Lambda with Layers
+
+```python
+# lambda_function.py
+import os
+import sys
+
+# Add ai-query from Lambda layer
+sys.path.insert(0, os.path.join(os.getcwd(), "opt", "python"))
+
+from ai_query.agents import Agent
+from ai_query.adapters.aws import handle_lambda
+from ai_query.providers import openai
+
+# Initialize agent outside handler for reuse
+agent = Agent(
+    "production-agent",
+    model=openai(os.getenv("OPENAI_API_KEY")),
+    system="You are a production assistant."
+)
+
+def lambda_handler(event, context):
+    """Handle Lambda requests with agent."""
+    return handle_lambda(agent, event, context)
+```
+
+---
+
+## Error Handling
+
+All adapters automatically handle errors and return appropriate HTTP responses:
+
+```python
+# FastAPI returns JSON with error details
+{"error": "Invalid JSON body"}
+
+# Vercel returns plain text error response
+"Invalid JSON body"
+
+# AWS Lambda returns JSON error response
+{
+    "statusCode": 400,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"error\": \"Invalid JSON body\"}"
+}
+```
+
+For custom error handling, wrap the agent or use middleware in your framework of choice.

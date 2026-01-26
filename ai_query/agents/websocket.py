@@ -1,7 +1,7 @@
 """WebSocket types for agent connections."""
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable, Union
 
 
 @runtime_checkable
@@ -13,7 +13,7 @@ class Connection(Protocol):
     """
     state: dict[str, Any]
     
-    async def send(self, message: str | bytes) -> None:
+    async def send(self, message: Union[str, bytes]) -> None:
         """Send a message to the client."""
         ...
     

@@ -2,7 +2,7 @@
 
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from aiohttp import web
 from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig
 
@@ -18,7 +18,9 @@ class TestAgentServerBasics:
                 super().__init__(agent_id, storage=MemoryStorage())
 
         server = AgentServer(TestAgent)
-        assert server._agent_cls is TestAgent
+        # Check that registry has the default route
+        # We can resolve any ID to TestAgent
+        assert server.registry.resolve("any-id") is TestAgent
 
     def test_initialization_with_config(self):
         """AgentServer should accept configuration."""
@@ -141,11 +143,9 @@ class TestAgentServerEndpoints:
     @pytest.mark.asyncio
     async def test_get_state_endpoint(self, aiohttp_client, agent_class):
         """GET /agent/{id}/state should return agent state."""
-        server = AgentServer(agent_class)
         config = AgentServerConfig(enable_rest_api=True)
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 
@@ -160,12 +160,9 @@ class TestAgentServerEndpoints:
     @pytest.mark.asyncio
     async def test_put_state_endpoint(self, aiohttp_client, agent_class):
         """PUT /agent/{id}/state should update agent state."""
-        server = AgentServer(agent_class)
         config = AgentServerConfig(enable_rest_api=True)
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
-        app.router.add_put(f"{base}/{{agent_id}}/state", server._handle_put_state)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 
@@ -185,11 +182,9 @@ class TestAgentServerEndpoints:
     @pytest.mark.asyncio
     async def test_invoke_endpoint(self, aiohttp_client, agent_class):
         """POST /agent/{id}/invoke should call handle_invoke."""
-        server = AgentServer(agent_class)
-        config = AgentServerConfig()
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_post(f"{base}/{{agent_id}}/invoke", server._handle_invoke)
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 
@@ -205,11 +200,9 @@ class TestAgentServerEndpoints:
     @pytest.mark.asyncio
     async def test_delete_agent_endpoint(self, aiohttp_client, agent_class):
         """DELETE /agent/{id} should evict the agent."""
-        server = AgentServer(agent_class)
         config = AgentServerConfig(enable_rest_api=True)
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_delete(f"{base}/{{agent_id}}", server._handle_delete_agent)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 
@@ -225,7 +218,9 @@ class TestAgentServerEndpoints:
     @pytest.mark.asyncio
     async def test_chat_endpoint_non_streaming(self, aiohttp_client, agent_class):
         """POST /agent/{id}/chat should return JSON response."""
-        server = AgentServer(agent_class)
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
 
         async def mock_text_stream():
             yield "Hello"
@@ -235,11 +230,6 @@ class TestAgentServerEndpoints:
         mock_result.text_stream = mock_text_stream()
 
         with patch("ai_query.stream_text", return_value=mock_result):
-            config = AgentServerConfig()
-            app = web.Application()
-            base = config.base_path.rstrip("/")
-            app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
-
             client = await aiohttp_client(app)
 
             resp = await client.post(
@@ -253,11 +243,9 @@ class TestAgentServerEndpoints:
     @pytest.mark.asyncio
     async def test_agent_not_found(self, aiohttp_client, agent_class):
         """Endpoints should return 404 for non-existent agents (when required)."""
-        server = AgentServer(agent_class)
         config = AgentServerConfig(enable_rest_api=True)
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_get(f"{base}/{{agent_id}}/state", server._handle_get_state)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 
@@ -300,13 +288,13 @@ class TestAgentServerStreaming:
         """POST /agent/{id}/chat?stream=true should return SSE stream."""
         server = AgentServer(streaming_agent_class)
 
-        bot = streaming_agent_class("test-stream")
-        server.get_or_create = MagicMock(return_value=bot)
+        # Mock get_or_create to return our specific instance or let logic handle it
+        # Since we use registry, server will create new instance of streaming_agent_class
+        # That works fine.
 
-        config = AgentServerConfig()
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_post(f"{base}/{{agent_id}}/chat", server._handle_chat)
+        config = AgentServerConfig(enable_rest_api=True)
+        server._config = config
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 

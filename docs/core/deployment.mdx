@@ -1,0 +1,102 @@
+---
+title: "Deployment & Adapters"
+description: "Deploy agents to serverless platforms using built-in adapters"
+---
+
+The `ai-query` library is designed for "Write Once, Run Anywhere". You can deploy the exact same agent code to a long-running server, a CLI tool, or a serverless function.
+
+## Serverless Adapters
+
+Serverless platforms (like AWS Lambda, Vercel, Cloud Run) are stateless. Each request spins up a fresh environment. The `Agent` class handles this lifecycle automatically via `handle_request()`.
+
+To avoid boilerplate, we provide **Adapters** that bridge platform-specific request objects to the agent.
+
+### FastAPI (`AgentRouter`)
+
+The `AgentRouter` allows you to mount agents directly into a FastAPI application. It supports both single agents and multi-agent registries.
+
+**Single Agent:**
+```python
+from fastapi import FastAPI
+from ai_query.adapters.fastapi import AgentRouter
+from my_agent import MyAgent
+
+app = FastAPI()
+agent = MyAgent("bot")
+
+# Mounts /chat, /invoke, /state at root
+app.include_router(AgentRouter(agent))
+```
+
+**Multi-Agent Registry:**
+```python
+from ai_query import AgentRegistry
+from ai_query.adapters.fastapi import AgentRouter
+
+registry = AgentRegistry()
+registry.register("worker-.*", WorkerAgent)
+
+# Mounts /{agent_id}/chat, /{agent_id}/invoke
+app.include_router(AgentRouter(registry), prefix="/agents")
+```
+
+### Vercel / Next.js (`handle_vercel`)
+
+For Vercel's standard Python runtime (which uses `http.server.BaseHTTPRequestHandler`), use the `handle_vercel` helper.
+
+```python
+# api/index.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.adapters.vercel import handle_vercel
+from my_agent import MyAgent
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(MyAgent("bot"), self)
+```
+
+### AWS Lambda (`handle_lambda`)
+
+For AWS Lambda functions triggered by API Gateway (v1 or v2), use `handle_lambda`.
+
+```python
+from ai_query.adapters.aws import handle_lambda
+from my_agent import MyAgent
+
+def lambda_handler(event, context):
+    return handle_lambda(MyAgent("bot"), event, context)
+```
+
+## Lifecycle Management
+
+In serverless environments, the lifecycle is:
+
+1.  **Initialize**: Agent is instantiated (cheap).
+2.  **Load State**: `handle_request` loads state from `Storage`.
+3.  **Execute**: Agent processes the message.
+4.  **Save State**: `handle_request` saves state to `Storage`.
+5.  **Respond**: Response is returned to the client.
+
+Because of this, you **must** use a persistent storage backend (Redis, DynamoDB, Postgres) instead of `MemoryStorage` for serverless deployments.
+
+## Agent Registry
+
+The `AgentRegistry` allows you to route requests to different agent implementations based on the Agent ID. This is useful for:
+
+1.  **Multi-Agent Systems**: Serving different types of agents from one endpoint.
+2.  **Hybrid Deployments**: Routing some IDs to local agents and others to remote URLs.
+
+```python
+from ai_query import AgentRegistry, HTTPTransport
+
+registry = AgentRegistry()
+
+# 1. Route specific ID to a class
+registry.register("admin", AdminAgent)
+
+# 2. Route pattern to a class
+registry.register("user-.*", UserAgent)
+
+# 3. Route to another server
+registry.register("legacy-.*", HTTPTransport("https://legacy-api.com/agents"))
+```

@@ -1,0 +1,433 @@
+---
+title: "RemoteAgent & connect()"
+description: "API reference for remote agent client proxy and connection function"
+---
+
+The `RemoteAgent` class provides a client-side proxy that mimics the local `Agent` interface while communicating with remote agents via HTTP. The `connect()` function creates these proxies easily.
+
+## Import
+
+```python
+from ai_query.agents.remote import RemoteAgent, connect
+from ai_query.agents.transport import HTTPTransport
+```
+
+## connect() Function
+
+```python
+def connect(
+    url: str,
+    headers: dict[str, str] | None = None
+) -> RemoteAgent
+```
+
+Create a connection to a remote agent, returning a `RemoteAgent` proxy.
+
+### Parameters
+
+<ParamField path="url" type="str" required>
+  Full URL to the agent endpoint. The last part of the path is extracted as the
+  agent_id. Examples: - "https://api.myapp.com/agents/researcher" -
+  "https://lambda.execute-api.amazonaws.com/prod/worker"
+</ParamField>
+
+<ParamField path="headers" type="dict[str, str] | None" default="None">
+  Optional HTTP headers for authentication or other purposes.
+</ParamField>
+
+### Returns
+
+<ReturnsField type="RemoteAgent">
+  A RemoteAgent proxy that behaves like a local Agent instance.
+</ReturnsField>
+
+### Examples
+
+```python
+from ai_query.agents.remote import connect
+
+# Basic connection
+agent = connect("https://api.myapp.com/agents/chatbot")
+response = await agent.chat("Hello!")
+
+# With authentication
+agent = connect(
+    "https://api.myapp.com/agents/researcher",
+    headers={"Authorization": "Bearer token123"}
+)
+
+# Different deployment targets
+lambda_agent = connect("https://lambda.execute-api.amazonaws.com/prod/worker")
+vercel_agent = connect("https://my-app.vercel.app/api/assistant")
+fastapi_agent = connect("https://api.myservice.com/v1/agents/analyzer")
+```
+
+---
+
+## RemoteAgent Class
+
+### Constructor
+
+```python
+def __init__(self, transport: HTTPTransport, agent_id: str) -> None
+```
+
+Direct constructor (usually you'll use `connect()` instead).
+
+#### Parameters
+
+<ParamField path="transport" type="HTTPTransport" required>
+  HTTP transport instance for communication.
+</ParamField>
+
+<ParamField path="agent_id" type="str" required>
+  Agent ID to communicate with.
+</ParamField>
+
+### Properties
+
+#### id
+
+```python
+@property
+def id(self) -> str
+```
+
+Returns the agent ID.
+
+```python
+agent = connect("https://api.myapp.com/agents/researcher")
+print(agent.id)  # "researcher"
+```
+
+---
+
+## Methods
+
+### chat
+
+```python
+async def chat(
+    self,
+    message: str,
+    *,
+    signal: AbortSignal | None = None
+) -> str
+```
+
+Send a chat message to the remote agent.
+
+#### Parameters
+
+<ParamField path="message" type="str" required>
+  Chat message to send.
+</ParamField>
+
+<ParamField path="signal" type="AbortSignal | None" default="None">
+  Optional abort signal to cancel the request (not yet implemented).
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="str">The agent's text response.</ReturnsField>
+
+#### Examples
+
+```python
+agent = connect("https://api.myapp.com/agents/chatbot")
+
+# Simple chat
+response = await agent.chat("What's the weather like?")
+print(response)
+
+# Multi-turn conversation
+response1 = await agent.chat("Tell me about Python")
+response2 = await agent.chat("Can you give me an example?")
+```
+
+---
+
+### stream
+
+```python
+async def stream(
+    self,
+    message: str,
+    *,
+    signal: AbortSignal | None = None
+) -> AsyncIterator[str]
+```
+
+Stream a response from the remote agent, yielding chunks as they're generated.
+
+#### Parameters
+
+<ParamField path="message" type="str" required>
+  Chat message to send.
+</ParamField>
+
+<ParamField path="signal" type="AbortSignal | None" default="None">
+  Optional abort signal (not yet implemented).
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="AsyncIterator[str]">
+  Async iterator yielding response chunks.
+</ReturnsField>
+
+#### Examples
+
+```python
+agent = connect("https://api.myapp.com/agents/writer")
+
+# Stream and print in real-time
+print("Agent: ", end="", flush=True)
+async for chunk in agent.stream("Write a short story about AI"):
+    print(chunk, end="", flush=True)
+print()  # New line
+
+# Collect full response
+full_response = ""
+async for chunk in agent.stream("Summarize quantum computing"):
+    full_response += chunk
+print(f"Full response: {full_response}")
+```
+
+---
+
+### call
+
+```python
+def call(self, *, agent_cls: type[T] | None = None) -> AgentCallProxy[T]
+```
+
+Returns a type-safe proxy for making fluent RPC calls to the remote agent.
+
+#### Parameters
+
+<ParamField path="agent_cls" type="type[T] | None" default="None">
+  Optional agent class for type hints. If provided, enables IDE autocomplete for
+  that agent's methods.
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="AgentCallProxy[T]">
+  A fluent proxy for method calls.
+</ReturnsField>
+
+#### Examples
+
+```python
+agent = connect("https://api.myapp.com/agents/data-analyzer")
+
+# Untyped method calls
+result = await agent.call().analyze_data(
+    data=[1, 2, 3, 4, 5],
+    method="mean"
+)
+
+# With type hints (assuming DataAnalyzer class exists)
+from my_agents import DataAnalyzer
+
+result = await agent.call(agent_cls=DataAnalyzer).analyze_data(
+    data=[1, 2, 3, 4, 5],
+    method="mean",
+    precision=2
+)
+
+# Chained calls
+result = await agent.call().process().step1().step2()
+```
+
+---
+
+### close
+
+```python
+async def close(self) -> None
+```
+
+Close the underlying transport and clean up resources.
+
+#### Examples
+
+```python
+agent = connect("https://api.myapp.com/agents/worker")
+try:
+    await agent.chat("Hello")
+    await agent.stream("Generate a story")
+finally:
+    await agent.close()  # Cleanup
+```
+
+---
+
+## Complete Examples
+
+### Basic Client Usage
+
+```python
+from ai_query.agents.remote import connect
+
+async def chat_with_agents():
+    # Connect to different specialized agents
+    researcher = connect("https://api.myapp.com/agents/researcher")
+    writer = connect("https://api.myapp.com/agents/writer")
+    summarizer = connect(
+        "https://lambda.execute-api.amazonaws.com/prod/summarizer",
+        headers={"X-API-Key": "aws-key"}
+    )
+
+    try:
+        # Research phase
+        research = await researcher.chat("What are the latest trends in AI?")
+        print(f"Research: {research}")
+
+        # Writing phase
+        article = await writer.chat(f"Write an article based on: {research}")
+        print(f"Article: {article[:100]}...")
+
+        # Summary phase (streaming)
+        print("Summary: ", end="", flush=True)
+        async for chunk in summarizer.stream(f"Summarize: {article}"):
+            print(chunk, end="", flush=True)
+        print()
+
+    finally:
+        # Cleanup connections
+        await researcher.close()
+        await writer.close()
+        await summarizer.close()
+```
+
+### RPC Method Calls
+
+```python
+from ai_query.agents.remote import connect
+from my_agents import DataProcessor, ImageAnalyzer
+
+async def rpc_examples():
+    # Data processing agent
+    data_agent = connect("https://api.myapp.com/agents/data-processor")
+
+    # Type-safe calls
+    result = await data_agent.call(agent_cls=DataProcessor).analyze_dataset(
+        data=[1, 2, 3, 4, 5],
+        method="statistical",
+        confidence_level=0.95
+    )
+    print(f"Analysis result: {result}")
+
+    # Image analysis agent
+    image_agent = connect("https://api.myapp.com/agents/image-analyzer")
+
+    analysis = await image_agent.call(agent_cls=ImageAnalyzer).detect_objects(
+        image_url="https://example.com/image.jpg",
+        confidence_threshold=0.8
+    )
+    print(f"Objects detected: {analysis['objects']}")
+```
+
+### Error Handling and Timeouts
+
+```python
+import asyncio
+from ai_query.agents.remote import connect
+
+async def robust_agent_calls():
+    agent = connect("https://api.myapp.com/agents/unreliable")
+
+    try:
+        # Add timeout
+        response = await asyncio.wait_for(
+            agent.chat("Complex task"),
+            timeout=10.0
+        )
+        print(response)
+
+    except asyncio.TimeoutError:
+        print("Agent took too long to respond")
+
+    except Exception as e:
+        print(f"Agent communication failed: {e}")
+
+    finally:
+        await agent.close()
+
+async def retry_on_failure():
+    agent = connect("https://api.myapp.com/agents/flaky")
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = await agent.chat("Important task")
+            return response
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            print(f"Attempt {attempt + 1} failed, retrying...")
+            await asyncio.sleep(1)  # Backoff
+
+    await agent.close()
+```
+
+### Serverless Integration Examples
+
+```python
+# AWS Lambda
+lambda_agent = connect(
+    "https://lambda123.execute-api.us-east-1.amazonaws.com/prod/text-processor",
+    headers={"X-API-Key": "your-lambda-key"}
+)
+
+# Vercel
+vercel_agent = connect("https://my-app.vercel.app/api/agent")
+
+# FastAPI service
+fastapi_agent = connect(
+    "https://api.myservice.com/v1/agents/chatbot",
+    headers={"Authorization": "Bearer your-jwt-token"}
+)
+
+# Railway/Render
+railway_agent = connect("https://my-app.up.railway.app/agent")
+
+async def multi_platform_workflow():
+    # Use different serverless agents interchangeably
+    text = await lambda_agent.chat("Process this text")
+    analysis = await vercel_agent.call().analyze(text)
+    final_result = await fastapi_agent.chat(f"Finalize: {analysis}")
+
+    return final_result
+```
+
+### Streaming Example with Progress
+
+```python
+from ai_query.agents.remote import connect
+import time
+
+async def streaming_with_progress():
+    agent = connect("https://api.myapp.com/agents/long-writer")
+
+    message = "Write a comprehensive guide to machine learning"
+    chunk_count = 0
+    start_time = time.time()
+
+    print("Generating response...")
+    async for chunk in agent.stream(message):
+        chunk_count += 1
+        print(chunk, end="", flush=True)
+
+        # Optional: Show progress every 10 chunks
+        if chunk_count % 10 == 0:
+            elapsed = time.time() - start_time
+            print(f"\n[Progress: {chunk_count} chunks, {elapsed:.1f}s]", end="", flush=True)
+
+    total_time = time.time() - start_time
+    print(f"\n\nDone! {chunk_count} chunks in {total_time:.1f} seconds")
+
+    await agent.close()
+```

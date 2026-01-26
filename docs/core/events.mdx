@@ -57,40 +57,47 @@ When enabled:
 
 1.  Every emitted event is saved to the agent's storage.
 2.  Events are assigned a strictly increasing ID (1, 2, 3...).
-3.  Clients can connect with a `Last-Event-ID` header (standard SSE mechanism).
-4.  The server automatically sends all events with `ID > Last-Event-ID` before sending new ones.
+3.  Clients can connect with a `last_event_id` parameter.
+4.  The server automatically sends all events with `ID > last_event_id` before sending new ones.
 
 This guarantees exactly-once delivery semantics for your UI, even on flaky networks.
 
-## Durability & Safety
-
-When building production agents, durability is non-negotiable. **ai-query** ensures that:
-
-1.  **State is Atomic**: Changes to `self.state` are committed to storage before the next message is processed.
-2.  **Events are Ordered**: Every event is assigned a monotonic ID, ensuring clients always receive them in the correct sequence.
-3.  **Logs are Immutable**: Once an event is emitted and persisted, it becomes part of the permanent record for that agent instance.
-
 ## Consuming Events
 
-The `Agent.serve()` method automatically exposes endpoints for consuming events.
+The way you consume events depends on the transport.
 
 ### Server-Sent Events (SSE)
 
-The recommended way to consume events is via the specialized event stream endpoint:
+The recommended way to consume events is via an SSE stream.
 
-`GET /agent/{agent_id}/events`
+<Note>
+- **`AgentServer`**: Exposes a long-running SSE stream at `GET /agent/{id}/events`.
+- **Serverless/Adapters**: Chat streaming is done via `POST /agent/{id}/chat?stream=true`. Emitted events are injected into this response stream.
+</Note>
 
-This endpoint streams events in standard text/event-stream format.
-
+**JavaScript Client:**
 ```javascript
-const eventSource = new EventSource("/agent/my-agent/events");
+// For AgentServer
+const eventSource = new EventSource("/agent/my-agent/events?last_event_id=100");
 
 eventSource.addEventListener("status", (e) => {
   const data = JSON.parse(e.data);
   console.log("Status:", data.text);
 });
 
-// Automatic Replay: Browser EventSource handles Last-Event-ID automatically!
+// Browser EventSource handles Last-Event-ID automatically!
+```
+
+**Python Client (`connect`)**
+The `connect()` client handles SSE transparently for streaming.
+
+```python
+from ai_query import connect
+
+agent = connect("http://api.myapp.com/agent/my-agent")
+
+async for chunk in agent.stream("Tell me a story"):
+    print(chunk, end="")
 ```
 
 ### WebSocket
@@ -105,9 +112,9 @@ If you connect via WebSocket (`/agent/{agent_id}/ws`), events are sent as JSON m
 }
 ```
 
-## Custom Transports
+### Custom Transports
 
-If you use `FastAPI` or another framework instead of `Agent.serve()`, you can inject a custom handler to deliver events however you like (e.g., to a message queue or a custom socket).
+If you use `FastAPI` or another framework without our adapters, you can inject a custom handler to deliver events however you like (e.g., to a message queue or a custom socket).
 
 ```python
 # Function to handle emitted events
@@ -118,5 +125,3 @@ async def my_handler(event: str, data: dict, event_id: int):
 # Inject the handler
 agent._emit_handler = my_handler
 ```
-
-See the [FastAPI Integration](/cookbook/fastapi-integration) cookbook for a full example.

@@ -7,6 +7,8 @@ ai-query is a unified Python SDK that transforms AI models into stateful Actors.
 ## Key Features
 
 - **Actor Model**: Sequential message processing to prevent race conditions.
+- **Serverless Ready**: Adapters for FastAPI, Vercel, and AWS Lambda.
+- **Location Transparency**: Call agents locally or remotely using the same API.
 - **Durable Identity**: Native support for SQLite, Redis, and Memory storage.
 - **Durable Event Log**: Persist every event and replay automatically on reconnection.
 - **Type-Safe RPC**: Call other agents fluently with full IDE autocompletion.
@@ -67,6 +69,48 @@ class UserAssistant(Agent):
 
 # Start server - routes to /agent/{id}/ws and /agent/{id}/chat automatically
 AgentServer(UserAssistant).serve(port=8080)
+```
+
+## Serverless & Distributed
+
+Run your agents anywhere using the built-in Registry and Adapters.
+
+**1. Deploy to Serverless (FastAPI/Vercel/Lambda)**
+
+```python
+from fastapi import FastAPI
+from ai_query.adapters.fastapi import AgentRouter
+from my_agent import MyAgent
+
+app = FastAPI()
+# Mounts /agent/bot/{chat, invoke, state}
+app.include_router(AgentRouter(MyAgent("bot")), prefix="/agent/bot")
+```
+
+**2. Consume Remotely**
+
+```python
+from ai_query import connect
+
+# Connect to the remote agent - looks exactly like a local object
+agent = connect("https://api.myapp.com/agent/bot")
+
+response = await agent.chat("Hello!")
+```
+
+**3. Compose Local & Remote**
+
+Mix and match agents in your workflow without changing your business logic.
+
+```python
+from ai_query import AgentRegistry, AgentServer, HTTPTransport
+
+registry = AgentRegistry()
+registry.register("writer", WriterAgent) # Local
+registry.register("researcher", HTTPTransport("https://lambda...")) # Remote
+
+# The server handles routing automatically
+AgentServer(registry).serve()
 ```
 
 ## Type-Safe RPC

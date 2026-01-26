@@ -1,0 +1,449 @@
+---
+title: "Transport Base Classes"
+description: "API reference for AgentTransport and LocalTransport base classes"
+---
+
+The transport layer provides the foundation for agent-to-agent communication. Base classes can be extended to create custom transports for different communication protocols.
+
+## Import
+
+```python
+from ai_query.agents.transport import AgentTransport, LocalTransport
+from ai_query.agents.server import AgentServer
+```
+
+---
+
+## AgentTransport (Abstract Base Class)
+
+Abstract base class for all agent transport implementations. Defines the contract for agent communication.
+
+### Abstract Methods
+
+#### invoke
+
+```python
+@abstractmethod
+async def invoke(
+    self,
+    agent_id: str,
+    payload: dict[str, Any],
+    timeout: float = 30.0
+) -> dict[str, Any]
+```
+
+Send a request to another agent and wait for response.
+
+##### Parameters
+
+<ParamField path="agent_id" type="str" required>
+  Target agent's identifier.
+</ParamField>
+
+<ParamField path="payload" type="dict[str, Any]" required>
+  Request payload to send.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="30.0">
+  Maximum time to wait for response in seconds.
+</ParamField>
+
+##### Returns
+
+<ReturnsField type="dict[str, Any]">
+  Response from the target agent.
+</ReturnsField>
+
+##### Raises
+
+- `TimeoutError`: If the agent doesn't respond within timeout.
+- `RuntimeError`: If the agent cannot be reached.
+
+---
+
+## LocalTransport
+
+In-process transport that communicates with agents running in the same process via the `AgentServer`.
+
+### Constructor
+
+```python
+def __init__(self, server: AgentServer) -> None
+```
+
+#### Parameters
+
+<ParamField path="server" type="AgentServer" required>
+  The AgentServer instance managing the local agents.
+</ParamField>
+
+### Methods
+
+#### invoke
+
+```python
+async def invoke(
+    self,
+    agent_id: str,
+    payload: dict[str, Any],
+    timeout: float = 30.0
+) -> dict[str, Any]
+```
+
+Implementation that resolves agents via the server's registry and executes them locally.
+
+#### Behavior
+
+1. **Resolve Target**: Uses `server.registry.resolve(agent_id)` to find the target
+2. **Route to Transport**: If target is a transport, delegates to it
+3. **Local Execution**: If target is a class, instantiates and executes locally
+4. **Queue Processing**: Enqueues request and waits for response with timeout
+
+---
+
+## Custom Transport Examples
+
+### Redis Transport
+
+```python
+import json
+import asyncio
+from typing import Any
+import redis.asyncio as redis
+from ai_query.agents.transport import AgentTransport
+
+class RedisTransport(AgentTransport):
+    """Redis-based transport for distributed agent communication."""
+    
+    def __init__(self, redis_url: str, prefix: str = "agent:"):
+        self.redis = redis.from_url(redis_url)
+        self.prefix = prefix
+        
+    async def invoke(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        # Generate unique request ID
+        request_id = f"req:{agent_id}:{asyncio.get_event_loop().time()}"
+        
+        # Prepare request
+        request = {
+            "id": request_id,
+            "agent_id": agent_id,
+            "payload": payload
+        }
+        
+        # Publish to agent's channel
+        channel = f"{self.prefix}{agent_id}:requests"
+        await self.redis.publish(channel, json.dumps(request))
+        
+        # Wait for response
+        response_channel = f"{self.prefix}{agent_id}:responses"
+        pubsub = self.redis.pubsub()
+        await pubsub.subscribe(response_channel)
+        
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    response = json.loads(message["data"])
+                    if response.get("request_id") == request_id:
+                        return response.get("result", {"error": "No result"})
+        finally:
+            await pubsub.close()
+            
+        raise TimeoutError(f"Agent {agent_id} did not respond within {timeout}s")
+```
+
+### WebSocket Transport
+
+```python
+import json
+import asyncio
+from typing import Any, Dict
+import websockets
+from ai_query.agents.transport import AgentTransport
+
+class WebSocketTransport(AgentTransport):
+    """WebSocket-based transport for real-time agent communication."""
+    
+    def __init__(self, server_url: str, headers: Dict[str, str] | None = None):
+        self.server_url = server_url
+        self.headers = headers or {}
+        self._connection = None
+        
+    async def _get_connection(self):
+        if self._connection is None or self._connection.closed:
+            self._connection = await websockets.connect(
+                self.server_url,
+                extra_headers=self.headers
+            )
+        return self._connection
+        
+    async def invoke(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        conn = await self._get_connection()
+        
+        # Send request
+        request = {
+            "type": "invoke",
+            "agent_id": agent_id,
+            "payload": payload
+        }
+        await conn.send(json.dumps(request))
+        
+        # Wait for response with timeout
+        try:
+            response = await asyncio.wait_for(
+                conn.recv(),
+                timeout=timeout
+            )
+            return json.loads(response)
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"WebSocket timeout for agent {agent_id}")
+            
+    async def close(self):
+        if self._connection:
+            await self._connection.close()
+```
+
+### gRPC Transport
+
+```python
+import asyncio
+from typing import Any
+import grpc
+from ai_query.agents.transport import AgentTransport
+
+# Generated gRPC classes (would be in separate files)
+import agent_pb2
+import agent_pb2_grpc
+
+class GrpcTransport(AgentTransport):
+    """gRPC transport for high-performance agent communication."""
+    
+    def __init__(self, server_address: str):
+        self.server_address = server_address
+        self._channel = None
+        self._stub = None
+        
+    async def _get_stub(self):
+        if self._stub is None:
+            self._channel = grpc.aio.insecure_channel(self.server_address)
+            self._stub = agent_pb2_grpc.AgentServiceStub(self._channel)
+        return self._stub
+        
+    async def invoke(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        stub = await self._get_stub()
+        
+        # Create gRPC request
+        request = agent_pb2.InvokeRequest(
+            agent_id=agent_id,
+            payload=json.dumps(payload)
+        )
+        
+        try:
+            response = await stub.Invoke(request, timeout=timeout)
+            return json.loads(response.result)
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                raise TimeoutError(f"gRPC timeout for agent {agent_id}")
+            raise RuntimeError(f"gRPC error: {e.details()}")
+            
+    async def close(self):
+        if self._channel:
+            await self._channel.close()
+```
+
+---
+
+## Integration Examples
+
+### Multi-Transport Registry
+
+```python
+from ai_query.agents import AgentRegistry, AgentServer
+from ai_query.agents.transport import HTTPTransport
+
+# Create custom transports
+redis_transport = RedisTransport("redis://localhost:6379")
+ws_transport = WebSocketTransport("ws://localhost:9000")
+grpc_transport = GrpcTransport("localhost:50051")
+
+# Registry with mixed transports
+registry = AgentRegistry()
+
+# Local agents
+registry.register("local-.*", MyLocalAgent)
+
+# Remote agents via different transports
+registry.register("redis-worker-.*", redis_transport)
+registry.register("ws-agent-.*", ws_transport)
+registry.register("grpc-service-.*", grpc_transport)
+
+# HTTP transport (built-in)
+registry.register("http-api", HTTPTransport("https://api.myapp.com/agents"))
+
+server = AgentServer(registry)
+server.serve()
+```
+
+### Transport Selection Strategy
+
+```python
+class SmartTransport(AgentTransport):
+    """Transport that automatically selects the best communication method."""
+    
+    def __init__(self):
+        self.http_transport = HTTPTransport()
+        self.redis_transport = RedisTransport("redis://localhost:6379")
+        self.ws_transport = WebSocketTransport("ws://localhost:9000")
+        
+    async def invoke(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        # Choose transport based on agent_id prefix or payload
+        if agent_id.startswith("http-"):
+            return await self.http_transport.invoke(agent_id, payload, timeout)
+        elif agent_id.startswith("redis-"):
+            return await self.redis_transport.invoke(agent_id, payload, timeout)
+        elif agent_id.startswith("ws-"):
+            return await self.ws_transport.invoke(agent_id, payload, timeout)
+        else:
+            # Default to HTTP for unknown agents
+            return await self.http_transport.invoke(agent_id, payload, timeout)
+```
+
+### Transport with Retry Logic
+
+```python
+import asyncio
+from typing import Any
+from ai_query.agents.transport import AgentTransport, HTTPTransport
+
+class RetryTransport(AgentTransport):
+    """Transport wrapper with automatic retry logic."""
+    
+    def __init__(
+        self,
+        base_transport: AgentTransport,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+        backoff_factor: float = 2.0
+    ):
+        self.base_transport = base_transport
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.backoff_factor = backoff_factor
+        
+    async def invoke(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        timeout: float = 30.0
+    ) -> dict[str, Any]:
+        last_exception = None
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await self.base_transport.invoke(
+                    agent_id, payload, timeout
+                )
+            except (TimeoutError, RuntimeError) as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    delay = self.base_delay * (self.backoff_factor ** attempt)
+                    await asyncio.sleep(delay)
+                    
+        raise last_exception
+```
+
+---
+
+## Performance Considerations
+
+### Connection Pooling
+
+```python
+class PooledHTTPTransport(AgentTransport):
+    """HTTP transport with connection pooling for better performance."""
+    
+    def __init__(self, base_url: str, pool_size: int = 10):
+        self.base_url = base_url
+        self._pool = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=pool_size)
+        )
+        
+    async def invoke(self, agent_id: str, payload: dict[str, Any], timeout: float = 30.0):
+        url = f"{self.base_url}/{agent_id}"
+        response = await self._pool.post(
+            url,
+            json={"action": "invoke", "payload": payload},
+            timeout=timeout
+        )
+        return response.json()
+        
+    async def close(self):
+        await self._pool.aclose()
+```
+
+### Batching Transport
+
+```python
+class BatchingTransport(AgentTransport):
+    """Transport that batches requests for efficiency."""
+    
+    def __init__(self, base_transport: AgentTransport, batch_size: int = 10):
+        self.base_transport = base_transport
+        self.batch_size = batch_size
+        self._pending_requests = []
+        self._batch_task = None
+        
+    async def invoke(self, agent_id: str, payload: dict[str, Any], timeout: float = 30.0):
+        # Add to batch queue
+        future = asyncio.get_event_loop().create_future()
+        self._pending_requests.append({
+            "agent_id": agent_id,
+            "payload": payload,
+            "future": future
+        })
+        
+        # Start batch processing if needed
+        if self._batch_task is None:
+            self._batch_task = asyncio.create_task(self._process_batch())
+            
+        return await future
+        
+    async def _process_batch(self):
+        while self._pending_requests:
+            # Collect batch
+            batch = self._pending_requests[:self.batch_size]
+            self._pending_requests = self._pending_requests[self.batch_size:]
+            
+            # Process batch
+            for request in batch:
+                try:
+                    result = await self.base_transport.invoke(
+                        request["agent_id"],
+                        request["payload"],
+                        timeout=5.0
+                    )
+                    request["future"].set_result(result)
+                except Exception as e:
+                    request["future"].set_exception(e)
+```
+
+Custom transports enable you to optimize for specific use cases, integrate with existing infrastructure, and implement advanced communication patterns while maintaining the unified agent interface.

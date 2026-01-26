@@ -25,12 +25,29 @@ from ai_query.core import (
     embed_many,
 )
 
+from ai_query.agents.agent import Agent, Event, action
+from ai_query.agents.registry import AgentRegistry
+from ai_query.agents.remote import connect
+from ai_query.agents.server import AgentServer, AgentServerConfig
+from ai_query.agents.transport.http import HTTPTransport
+from ai_query.agents.transport import LocalTransport
+
 __all__ = [
     # Main functions
     "generate_text",
     "stream_text",
     "embed",
     "embed_many",
+    # Agents
+    "Agent",
+    "Event",
+    "action",
+    "AgentRegistry",
+    "AgentServer",
+    "AgentServerConfig",
+    "connect",
+    "HTTPTransport",
+    "LocalTransport",
     # Tool decorators
     "tool",
     "Field",

@@ -70,6 +70,7 @@ class TestSSEReplay:
         """SSE replay should work through the router."""
         server = AgentServer(event_agent_class)
 
+        # Pre-create agent to emit events
         agent = server.get_or_create("test-replay")
         await agent.start()
 
@@ -77,15 +78,15 @@ class TestSSEReplay:
         await agent.emit("ai_chunk", {"content": "hello"})
 
         config = AgentServerConfig()
-        app = web.Application()
-        base = config.base_path.rstrip("/")
-        app.router.add_get(f"{base}/{{agent_id}}/events", server._handle_sse)
+        server._config = config
+        app = server.create_app()
 
         client = await aiohttp_client(app)
 
         async with client.get("/agent/test-replay/events?last_event_id=0") as resp:
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "text/event-stream"
+            # We don't read the whole stream as it's infinite, just verify connection
 
 
 class TestSSEEventFormatting:

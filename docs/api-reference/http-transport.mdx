@@ -1,0 +1,397 @@
+---
+title: "HTTPTransport"
+description: "API reference for HTTP transport between agents"
+---
+
+The `HTTPTransport` class enables agents to communicate with remote agents via HTTP/REST, following the standardized wire protocol. This is the primary way to connect agents deployed across different servers, serverless functions, or microservices.
+
+## Import
+
+```python
+from ai_query.agents.transport import HTTPTransport
+import httpx
+```
+
+## Constructor
+
+```python
+def __init__(
+    self,
+    base_url: str = "",
+    headers: dict[str, str] | None = None,
+    client: httpx.AsyncClient | None = None
+) -> None
+```
+
+### Parameters
+
+<ParamField path="base_url" type="str" default="">
+  Base URL for agent endpoints. If provided, agent IDs are appended to form full URLs.
+  If empty, agent_id is treated as a full URL.
+</ParamField>
+
+<ParamField path="headers" type="dict[str, str] | None" default="None">
+  Default HTTP headers sent with all requests (e.g., Authorization, User-Agent).
+</ParamField>
+
+<ParamField path="client" type="httpx.AsyncClient | None" default="None">
+  Optional existing httpx client to reuse. If not provided, creates a new client.
+</ParamField>
+
+### Examples
+
+```python
+# Basic usage with base URL
+transport = HTTPTransport("https://api.myapp.com/agents")
+
+# With authentication headers
+transport = HTTPTransport(
+    "https://api.myapp.com/agents",
+    headers={"Authorization": "Bearer token123"}
+)
+
+# With custom client
+import httpx
+client = httpx.AsyncClient(
+    base_url="https://api.myapp.com",
+    headers={"X-API-Key": "key"},
+    timeout=30.0
+)
+transport = HTTPTransport(client=client)
+
+# For direct URLs (no base URL)
+transport = HTTPTransport()
+```
+
+---
+
+## Methods
+
+### invoke
+
+```python
+async def invoke(
+    self,
+    agent_id: str,
+    payload: dict[str, Any],
+    timeout: float = 30.0
+) -> dict[str, Any]
+```
+
+Send a structured invoke request to a remote agent.
+
+#### Parameters
+
+<ParamField path="agent_id" type="str" required>
+  Target agent ID. Combined with base_url to form the endpoint URL.
+</ParamField>
+
+<ParamField path="payload" type="dict[str, Any]" required>
+  Request payload to send to the agent.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="30.0">
+  Request timeout in seconds.
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="dict[str, Any]">
+  Response from the agent. Follows wire protocol format with either `result` or `error` keys.
+</ReturnsField>
+
+#### Example
+
+```python
+transport = HTTPTransport("https://api.myapp.com/agents")
+
+# Simple method call
+result = await transport.invoke("researcher", {
+    "method": "search",
+    "query": "AI trends 2024"
+})
+# Returns: {"result": {...}}
+
+# Complex payload
+result = await transport.invoke("data-analyzer", {
+    "action": "analyze",
+    "data": [1, 2, 3, 4, 5],
+    "options": {"method": "mean"}
+})
+
+# Handle errors
+response = await transport.invoke("worker", {"task": "impossible"})
+if "error" in response:
+    print(f"Agent error: {response['error']}")
+```
+
+#### Wire Protocol
+
+Sends: `POST {base_url}/{agent_id}`
+```json
+{
+  "action": "invoke",
+  "payload": {...}
+}
+```
+
+Receives:
+```json
+{"result": {...}}  // Success
+{"error": "message"}  // Error
+```
+
+---
+
+### chat
+
+```python
+async def chat(
+    self,
+    agent_id: str,
+    message: str,
+    timeout: float = 30.0
+) -> str
+```
+
+Send a chat message to a remote agent.
+
+#### Parameters
+
+<ParamField path="agent_id" type="str" required>
+  Target agent ID.
+</ParamField>
+
+<ParamField path="message" type="str" required>
+  Chat message to send.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="30.0">
+  Request timeout in seconds.
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="str">
+  The agent's text response.
+</ReturnsField>
+
+#### Example
+
+```python
+transport = HTTPTransport("https://api.myapp.com/agents")
+
+response = await transport.chat("chatbot", "Hello, how are you?")
+print(response)  # "I'm doing well, thank you!"
+
+# With authentication
+auth_transport = HTTPTransport(
+    "https://api.myapp.com/agents",
+    headers={"Authorization": "Bearer token"}
+)
+response = await auth_transport.chat("assistant", "Help me write Python code")
+```
+
+#### Wire Protocol
+
+Sends: `POST {base_url}/{agent_id}/chat`
+```json
+{
+  "action": "chat",
+  "message": "Hello, how are you?"
+}
+```
+
+Receives:
+```json
+{
+  "response": "I'm doing well, thank you!"
+}
+```
+
+---
+
+### stream
+
+```python
+async def stream(
+    self,
+    agent_id: str,
+    message: str,
+    timeout: float = 30.0
+) -> AsyncIterator[str]
+```
+
+Stream a chat response from a remote agent via Server-Sent Events.
+
+#### Parameters
+
+<ParamField path="agent_id" type="str" required>
+  Target agent ID.
+</ParamField>
+
+<ParamField path="message" type="str" required>
+  Chat message to send.
+</ParamField>
+
+<ParamField path="timeout" type="float" default="30.0">
+  Request timeout in seconds.
+</ParamField>
+
+#### Returns
+
+<ReturnsField type="AsyncIterator[str]">
+  Async iterator yielding response chunks as they're generated.
+</ReturnsField>
+
+#### Example
+
+```python
+transport = HTTPTransport("https://api.myapp.com/agents")
+
+async for chunk in transport.stream("writer", "Write a story about dragons"):
+    print(chunk, end="", flush=True)
+
+# Collect full response
+full_response = ""
+async for chunk in transport.stream("summarizer", "Summarize this long document"):
+    full_response += chunk
+print(full_response)
+```
+
+#### Wire Protocol
+
+Sends: `POST {base_url}/{agent_id}/chat` with streaming flag
+```json
+{
+  "action": "chat",
+  "message": "Write a story",
+  "stream": true
+}
+```
+
+Receives: `text/event-stream` with `data: {...}` chunks
+```
+data: Once upon a time
+
+data: , in a land far away
+
+data: , there lived a dragon...
+```
+
+---
+
+### close
+
+```python
+async def close(self) -> None
+```
+
+Close the underlying HTTP client if this transport owns it.
+
+#### Example
+
+```python
+transport = HTTPTransport("https://api.myapp.com/agents")
+try:
+    await transport.invoke("worker", {"task": "process"})
+finally:
+    await transport.close()  # Cleanup resources
+```
+
+---
+
+## Complete Examples
+
+### Serverless Agent Integration
+
+```python
+from ai_query.agents.transport import HTTPTransport
+
+# Connect to different serverless platforms
+aws_transport = HTTPTransport(
+    "https://lambda123.execute-api.us-east-1.amazonaws.com/prod",
+    headers={"X-API-Key": "aws-key"}
+)
+
+vercel_transport = HTTPTransport(
+    "https://my-app.vercel.app/api"
+)
+
+fastapi_transport = HTTPTransport(
+    "https://api.myservice.com/v1/agents",
+    headers={"Authorization": "Bearer fastapi-token"}
+)
+
+# Use them interchangeably
+async def process_task(task_type: str, data: dict):
+    if task_type == "aws":
+        return await aws_transport.invoke("processor", data)
+    elif task_type == "vercel":
+        return await vercel_transport.invoke("handler", data)
+    else:
+        return await fastapi_transport.invoke("worker", data)
+```
+
+### Multi-Agent Communication
+
+```python
+from ai_query.agents.transport import HTTPTransport
+
+# Central transport hub
+hub_transport = HTTPTransport("https://agent-hub.myapp.com")
+
+async def distributed_workflow():
+    # Step 1: Research
+    research_result = await hub_transport.invoke("researcher", {
+        "topic": "quantum computing",
+        "depth": "comprehensive"
+    })
+    
+    # Step 2: Analysis  
+    analysis = await hub_transport.invoke("analyzer", {
+        "data": research_result["result"],
+        "method": "statistical"
+    })
+    
+    # Step 3: Summary
+    summary = await hub_transport.chat("summarizer", 
+        f"Analyze this: {analysis['result']}")
+    
+    return summary
+```
+
+### Error Handling and Timeouts
+
+```python
+import asyncio
+from ai_query.agents.transport import HTTPTransport
+
+async def robust_agent_call(agent_id: str, payload: dict):
+    transport = HTTPTransport(
+        "https://api.myapp.com/agents",
+        headers={"Authorization": "Bearer token"}
+    )
+    
+    try:
+        # Short timeout for quick operations
+        result = await asyncio.wait_for(
+            transport.invoke(agent_id, payload),
+            timeout=10.0
+        )
+        
+        if "error" in result:
+            raise AgentError(result["error"])
+            
+        return result["result"]
+        
+    except asyncio.TimeoutError:
+        raise AgentError(f"Agent {agent_id} timed out")
+    except Exception as e:
+        raise AgentError(f"Communication failed: {e}")
+    finally:
+        await transport.close()
+
+class AgentError(Exception):
+    pass
+```
