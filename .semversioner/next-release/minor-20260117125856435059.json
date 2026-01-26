@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "feat: add embeddings support with embed() and embed_many() functions for text vectorization"
-}

@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Experimental MCP support, with stdio, sse and streamable http transport",
+      "type": "minor"
+    }
+  ],
+  "created_at": "2026-01-08T12:40:17+00:00",
+  "version": "1.2.0"
+}

@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Refactored agent communication to a fluent, type-safe RPC API and fixed event broadcasting to WebSocket/SSE clients in AgentServer."
-}

@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "feat(agents): unify agents around the v2 architecture and reorganize the import structure for better modularity."
-}

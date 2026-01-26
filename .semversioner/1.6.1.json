@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "feat(transport): implemented a safer transport transport mechanism",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-13T10:10:54+00:00",
+  "version": "1.6.1"
+}

@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "Added xai, groq, deepseek and openrouter as openai compat endpoints"
-}

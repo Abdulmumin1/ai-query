@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Complete unified transport layer implementation\n    \n    - Implement AgentRegistry for multi-agent routing\n    - Add HTTPTransport for remote agent communication\n    - Create RemoteAgent client proxy for seamless remote calls\n    - Add serverless adapters (FastAPI, Vercel, AWS Lambda)\n    - Refactor AgentServer to use registry-based routing\n    - Add comprehensive battle test demonstrating distributed workflow\n    - Fix Python 3.9 compatibility issues",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-26T16:49:26+00:00",
+  "version": "1.7.3"
+}

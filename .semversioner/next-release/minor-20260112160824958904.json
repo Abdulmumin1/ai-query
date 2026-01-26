@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "refactor(agents): implement mailbox pattern and expand server endpoints"
-}
