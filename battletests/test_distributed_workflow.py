@@ -6,9 +6,9 @@ from ai_query import Agent, action, AgentRegistry, AgentServer, HTTPTransport, c
 from ai_query.providers import google
 
 # Get API key from environment
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY:
-    raise ValueError("Please set GOOGLE_API_KEY environment variable")
+# GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# if not GOOGLE_API_KEY:
+#     raise ValueError("Please set GOOGLE_API_KEY environment variable")
 
 # --- Agent Definitions ---
 
@@ -118,15 +118,15 @@ async def run_test_client():
         os._exit(0)
 
 
-if __name__ == "__main__":
-    import multiprocessing
+# if __name__ == "__main__":
+#     import multiprocessing
     
-    # Run servers in separate processes
-    p_remote = multiprocessing.Process(target=run_remote_server)
-    p_main = multiprocessing.Process(target=run_main_server)
+#     # Run servers in separate processes
+#     p_remote = multiprocessing.Process(target=run_remote_server)
+#     p_main = multiprocessing.Process(target=run_main_server)
     
-    p_remote.start()
-    p_main.start()
+#     p_remote.start()
+#     p_main.start()
     
-    # Run client
-    asyncio.run(run_test_client())
+#     # Run client
+#     asyncio.run(run_test_client())
