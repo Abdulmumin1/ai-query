@@ -9,7 +9,6 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
-    { name = "mcp" },
 ]
 
 [package.optional-dependencies]
@@ -38,8 +37,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34.0" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.100.0" },
-    { name = "mcp", specifier = ">=1.25.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.25.0" },
     { name = "uvicorn", marker = "extra == 'fastapi'", specifier = ">=0.20.0" },
 ]
 provides-extras = ["mcp", "bedrock", "fastapi"]
