@@ -1,6 +1,18 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.3
+
+- patch: Complete unified transport layer implementation
+    
+    - Implement AgentRegistry for multi-agent routing
+    - Add HTTPTransport for remote agent communication
+    - Create RemoteAgent client proxy for seamless remote calls
+    - Add serverless adapters (FastAPI, Vercel, AWS Lambda)
+    - Refactor AgentServer to use registry-based routing
+    - Add comprehensive battle test demonstrating distributed workflow
+    - Fix Python 3.9 compatibility issues
+
 ## 1.7.2
 
 - patch: Refactored agent communication to a fluent, type-safe RPC API and fixed event broadcasting to WebSocket/SSE clients in AgentServer.
