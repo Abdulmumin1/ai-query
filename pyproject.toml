@@ -1,9 +1,9 @@
 [project]
 name = "ai-query"
-version = "0.0.1"
+version = "0.0.2"
 description = "A unified Python SDK for querying AI models from multiple providers"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.9.0",
     "aiosqlite>=0.20.0",
@@ -14,6 +14,7 @@ license = { file = "LICENSE" }
 [project.optional-dependencies]
 mcp = ["mcp>=1.0.0"]
 bedrock = ["boto3>=1.34.0"]
+fastapi = ["fastapi>=0.100.0", "uvicorn>=0.20.0"]
 
 [project.urls]
 Homepage = "https://github.com/Abdulmumin1/ai-query"

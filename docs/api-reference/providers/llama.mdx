@@ -1,0 +1,23 @@
+---
+title: "Llama (Groq/Together/etc.)"
+description: "API Reference for Llama models via OpenAI-compatible providers"
+---
+
+## Usage
+
+```python
+from ai_query.providers import llama
+
+model = llama("llama-3.1-70b-versatile")
+```
+
+## Configuration
+
+The `llama` provider is a shortcut for OpenAI-compatible endpoints that host Llama models (like Groq, Together AI, or local Ollama instances).
+
+### Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `LLAMA_API_KEY` | Your API key for the chosen provider |
+| `LLAMA_BASE_URL` | The base URL of the API (defaults to Groq) |

@@ -1,0 +1,117 @@
+---
+title: 'Cloudflare Durable Objects'
+description: 'Run stateful Agents on Cloudflare Workers with Durable Objects'
+---
+
+# Cloudflare Durable Objects
+
+ai-query provides first-class support for **Cloudflare Durable Objects**, allowing you to deploy stateful, long-running Agents to the edge using [Python in Workers](https://developers.cloudflare.com/workers/languages/python/).
+
+## Why Durable Objects?
+
+Durable Objects (DO) provide a unique capability in the serverless landscape: **State**.
+Unlike standard serverless functions (lambdas) that are stateless and ephemeral, a Durable Object is a single instance of a class that persists data and stays alive while connections are active.
+
+This maps perfectly to the **Agent** model:
+- **State**: The Agent's memory (chat history, custom state) is persisted automatically.
+- **Identity**: You can address an Agent by ID (e.g., `user-123`, `game-lobby-a`).
+- **Real-time**: DOs support WebSockets natively, enabling instant streaming responses and events.
+
+## Installation
+
+You need to install the package with standard dependencies. Since Cloudflare Workers use Pyodide (WASM), no special system dependencies are needed, but you must bundle your code correctly.
+
+```bash
+uv pip install ai-query
+```
+
+## Quick Start
+
+The integration is handled by two main components:
+1. `AgentDO`: A base class for your Durable Object that wraps your Agent.
+2. `CloudflareRegistry`: A helper to route requests to the correct DO binding.
+
+### 1. Define your Agent
+
+Write your Agent as usual. Use `self.state` for persistence.
+
+```python
+from ai_query import Agent, action
+
+class CounterAgent(Agent):
+    @action
+    async def increment(self):
+        count = self.state.get("count", 0) + 1
+        self.state["count"] = count  # Saved automatically to DO storage
+        await self.emit("updated", {"count": count})
+        return count
+```
+
+### 2. Create the Worker Script
+
+Wrap your Agent in `AgentDO` and set up the fetch handler.
+
+```python
+from ai_query.adapters.cloudflare import AgentDO, CloudflareRegistry
+
+# wrap your agent
+class CounterDO(AgentDO):
+    agent_class = CounterAgent
+
+# main fetch handler
+async def fetch(request, env):
+    registry = CloudflareRegistry(env)
+    # Register the binding name (defined in wrangler.toml)
+    registry.register("counter-.*", env.COUNTER)
+    return await registry.handle_request(request)
+```
+
+### 3. Configure `wrangler.toml`
+
+You must define the Durable Object binding and class name.
+
+```toml
+name = "my-agent-worker"
+main = "worker.py"
+compatibility_date = "2024-04-03"
+
+[durable_objects]
+bindings = [
+  { name = "COUNTER", class_name = "CounterDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["CounterDO"]
+```
+
+## Deployment
+
+Use `wrangler` to deploy:
+
+```bash
+wrangler deploy
+```
+
+## Client Usage
+
+You can connect to your Agent via HTTP or WebSocket.
+
+**HTTP Action:**
+```bash
+curl -X POST https://my-agent-worker.workers.dev/agent/counter-123 \
+  -H "Content-Type: application/json" \
+  -d '{"action": "increment"}'
+```
+
+**WebSocket:**
+```javascript
+const ws = new WebSocket("wss://my-agent-worker.workers.dev/agent/counter-123");
+ws.onmessage = (msg) => console.log(JSON.parse(msg.data));
+```
+
+## Resources
+
+- [Official Cloudflare Python Documentation](https://developers.cloudflare.com/workers/languages/python/)
+- [Durable Objects: WebSockets & Hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
+- [Example: Counter Agent](https://github.com/Abdulmumin1/ai-query/tree/main/examples/cloudflare-counter)

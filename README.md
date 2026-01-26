@@ -87,7 +87,23 @@ app = FastAPI()
 app.include_router(AgentRouter(MyAgent("bot")), prefix="/agent/bot")
 ```
 
-**2. Consume Remotely**
+**2. Cloudflare Durable Objects**
+
+Deploy stateful agents to the edge with native WebSocket support.
+
+```python
+from ai_query.adapters.cloudflare import AgentDO, CloudflareRegistry
+
+class CounterDO(AgentDO):
+    agent_class = CounterAgent
+
+async def fetch(request, env):
+    registry = CloudflareRegistry(env)
+    registry.register("counter-.*", env.COUNTER)
+    return await registry.handle_request(request)
+```
+
+**3. Consume Remotely**
 
 ```python
 from ai_query import connect

@@ -1,0 +1,139 @@
+---
+title: "Durable Objects"
+description: "Deploy stateful, persistent, and serverless agents using Cloudflare Durable Objects"
+---
+
+Cloudflare Workers with **Durable Objects** provide a unique serverless environment where state is local, persistent, and transactional. This makes it an ideal platform for running "Stateful Agents" that remember conversation history and can perform long-running background tasks.
+
+`ai-query` abstracts away the complexity of Durable Objects via the `AgentDO` adapter, letting you write standard Python agent logic that automatically inherits distributed durability.
+
+**Note**: `AgentDO` inherits from `workers.DurableObject` (from the `cloudflare:workers` runtime). This ensures full compatibility with the Cloudflare Python runtime.
+
+## Architecture
+
+When you deploy an `ai-query` agent to a Durable Object:
+
+1.  **State is Local**: `self.state` and `self.messages` are backed by the DO's transactional storage.
+2.  **Access is Serial**: Each agent runs in a single-threaded environment (Actor Model), preventing race conditions.
+3.  **Communication is Internal**: Agents can call other agents using `self.call()`, which routes traffic internally within Cloudflare's network (zero latency, high security).
+
+## Quick Start
+
+### 1. Define your Agent
+
+Write your agent as usual. No Cloudflare-specific code is needed here.
+
+```python
+# agents.py
+from ai_query import Agent, action
+
+class ResearcherAgent(Agent):
+    @action
+    async def research(self, topic: str):
+        # This state is automatically persisted!
+        self.state["current_topic"] = topic
+
+        await self.emit("status", {"text": f"Researching {topic}..."})
+        return f"Results for {topic}"
+```
+
+### 2. Create the Adapter
+
+Create a `worker.py` file. This connects your Agent to the Durable Object lifecycle.
+
+```python
+# worker.py
+from ai_query.adapters.cloudflare import AgentDO, CloudflareRegistry
+from agents import ResearcherAgent
+from workers import Response, WorkerEntrypoint
+
+# 1. Define the Durable Object Class
+class ResearcherDO(AgentDO):
+    agent_class = ResearcherAgent
+
+
+# 2. Define the Main Worker Handler
+class Default(WorkerEntrypoint):
+    async def fetch(request, env):
+        registry = CloudflareRegistry(env)
+
+        # Map URI patterns to your Durable Object bindings
+        # This expects a URL like: https://worker.dev/agent/researcher-123/chat
+        registry.register("researcher-.*", env.RESEARCHER)
+
+        return await registry.handle_request(request)
+```
+
+### 3. Configure `wrangler.toml`
+
+You need to tell Cloudflare about your Durable Object class.
+
+```toml
+name = "my-agent-worker"
+main = "worker.py"
+compatibility_date = "2024-04-03"
+
+[durable_objects]
+bindings = [
+  # 'name' matches 'env.RESEARCHER' in your code
+  # 'class_name' matches the Python class name
+  { name = "RESEARCHER", class_name = "ResearcherDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ResearcherDO"]
+```
+
+## Advanced Features
+
+### Inter-Agent Communication (`call`)
+
+Agents running in different Durable Objects can communicate directly. `ai-query` detects it is running on Cloudflare and uses `stub.fetch()` for efficient internal routing.
+
+**Important**: Your agent logic (`ManagerAgent` below) still inherits from the standard `Agent` class. The `AgentDO` adapter (see Quick Start) handles the Cloudflare-specific transport injection at runtime.
+
+```python
+class ManagerAgent(Agent):
+    @action
+    async def coordinate(self):
+        # Calls the 'ResearcherAgent' hosted in a different DO
+        # No HTTP overhead, secure internal routing
+        result = await self.call("researcher-123").research("Quantum Physics")
+```
+
+### Hibernation & Alarms
+
+Cloudflare DOs are aggressive about saving costs by "sleeping" (hibernating) when idle.
+
+`ai-query` handles this automatically:
+
+- When you enqueue a task, `AgentDO` sets a Cloudflare Alarm.
+- If the DO sleeps, the Alarm wakes it up to finish processing the mailbox.
+- You don't need to manually manage alarms or strict timeouts.
+
+### WebSocket Support
+
+Real-time streaming is supported out of the box.
+
+```javascript
+// client.js
+const ws = new WebSocket("wss://my-worker.workers.dev/agent/researcher-1/chat");
+ws.onmessage = (event) => console.log(event.data);
+```
+
+The `AgentDO` adapter automatically upgrades the connection and bridges events to your agent's `on_connect` and `on_message` handlers.
+
+## Troubleshooting
+
+### "Class not found"
+
+Ensure your `wrangler.toml`'s `new_classes` list matches the class name exported in `worker.py`.
+
+### "No binding found"
+
+The registry string `registry.register("researcher-.*", env.RESEARCHER)` must reference a binding defined in `[durable_objects.bindings]`.
+
+### "State not saving"
+
+Ensure you are `await`ing operations if you override `handle_request` manually. Inheriting from `AgentDO` handles this for you.

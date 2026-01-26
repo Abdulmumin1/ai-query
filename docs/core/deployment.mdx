@@ -15,7 +15,12 @@ To avoid boilerplate, we provide **Adapters** that bridge platform-specific requ
 
 The `AgentRouter` allows you to mount agents directly into a FastAPI application. It supports both single agents and multi-agent registries.
 
+> [!NOTE]
+> To use this adapter, install the optional dependencies:
+> `pip install "ai-query[fastapi]"`
+
 **Single Agent:**
+
 ```python
 from fastapi import FastAPI
 from ai_query.adapters.fastapi import AgentRouter
@@ -29,6 +34,7 @@ app.include_router(AgentRouter(agent))
 ```
 
 **Multi-Agent Registry:**
+
 ```python
 from ai_query import AgentRegistry
 from ai_query.adapters.fastapi import AgentRouter

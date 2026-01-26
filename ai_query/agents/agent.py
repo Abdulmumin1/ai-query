@@ -178,6 +178,7 @@ class Agent:
         self._mailbox: asyncio.Queue[_Envelope] = asyncio.Queue()
         self._processor_task: Union[asyncio.Task, None] = None
         self._running = False
+        self._start_lock = asyncio.Lock()
 
         # Current context (only valid during message processing)
         self.context = Context()
@@ -379,36 +380,48 @@ class Agent:
     # ─── Lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start the agent, loading state from storage."""
-        # Load state
-        state = await self._storage.get(f"{self._id}:state")
-        self._state = state if state is not None else self._initial_state
+        """Start the agent, loading state from storage.
+        
+        This method is idempotent and concurrency-safe.
+        """
+        # Hot State Optimization: Check if already started
+        if self._state is not None:
+             return
 
-        # Load messages
-        messages_data = await self._storage.get(f"{self._id}:messages")
-        if messages_data:
-            self._messages = [
-                Message(role=m["role"], content=m["content"]) for m in messages_data
-            ]
+        async with self._start_lock:
+             # Double-check inside lock
+             if self._state is not None:
+                 return
 
-        # Load event log if persistence is enabled
-        if self.enable_event_log:
-            event_log_data = await self._storage.get(f"{self._id}:event_log")
-            if event_log_data:
-                self._event_log = event_log_data
-                self._event_counter = max(
-                    (e.get("id", 0) for e in self._event_log), default=0
-                )
+             # Load state
+             state = await self._storage.get(f"{self._id}:state")
+             self._state = state if state is not None else self._initial_state
 
-        # Build action map
-        for name in dir(self):
-            attr = getattr(self, name)
-            if hasattr(attr, "__is_action__"):
-                self._action_map[name] = attr
+             # Load messages
+             messages_data = await self._storage.get(f"{self._id}:messages")
+             if messages_data:
+                 self._messages = [
+                     Message(role=m["role"], content=m["content"]) for m in messages_data
+                 ]
 
-        self._running = True
-        self._processor_task = asyncio.create_task(self._process_mailbox())
-        await self.on_start()
+             # Load event log if persistence is enabled
+             if self.enable_event_log:
+                 event_log_data = await self._storage.get(f"{self._id}:event_log")
+                 if event_log_data:
+                     self._event_log = event_log_data
+                     self._event_counter = max(
+                         (e.get("id", 0) for e in self._event_log), default=0
+                     )
+
+             # Build action map
+             for name in dir(self):
+                 attr = getattr(self, name)
+                 if hasattr(attr, "__is_action__"):
+                     self._action_map[name] = attr
+
+             self._running = True
+             self._processor_task = asyncio.create_task(self._process_mailbox())
+             await self.on_start()
 
     async def stop(self) -> None:
         """Stop the agent."""
