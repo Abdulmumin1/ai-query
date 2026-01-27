@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Union, TYPE_CHECKING
 
 import httpx
 
 from .base import AgentTransport
 
+if TYPE_CHECKING:
+    from ai_query.types import AbortSignal
+
 
 class HTTPTransport(AgentTransport):
     """Transport that communicates with agents via HTTP/REST.
-    
+
     This transport allows calling agents hosted on remote servers or serverless
     functions. It implements the standard Wire Protocol defined in the
     Transport Plan.
-    
+
     Example:
         transport = HTTPTransport(
             base_url="https://api.myapp.com/agents",
@@ -27,10 +31,10 @@ class HTTPTransport(AgentTransport):
     """
 
     def __init__(
-        self, 
-        base_url: str = "", 
+        self,
+        base_url: str = "",
         headers: dict[str, str] | None = None,
-        client: httpx.AsyncClient | None = None
+        client: httpx.AsyncClient | None = None,
     ):
         """Initialize the HTTP transport.
 
@@ -62,10 +66,11 @@ class HTTPTransport(AgentTransport):
         self,
         agent_id: str,
         payload: dict[str, Any],
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        signal: Union["AbortSignal", None] = None,
     ) -> dict[str, Any]:
         """Invoke a remote agent via HTTP POST.
-        
+
         This sends a standardized request:
         POST {url}
         {
@@ -77,33 +82,39 @@ class HTTPTransport(AgentTransport):
         url = self._get_url(agent_id)
 
         # Wire Protocol: Wrap the payload in an 'invoke' action
-        request_body = {
-            "action": "invoke",
-            "payload": payload
-        }
+        request_body = {"action": "invoke", "payload": payload}
+
+        # If signal is provided, set up cancellation
+        # We wrap the request in a task so we can cancel it
+        async def _make_request():
+            response = await client.post(url, json=request_body, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+
+        request_task = asyncio.create_task(_make_request())
+
+        if signal:
+            signal.add_listener(lambda: request_task.cancel())
 
         try:
-            response = await client.post(
-                url, 
-                json=request_body, 
-                timeout=timeout
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            
+            data = await request_task
+
             # Unpack result from Wire Protocol response
             if "error" in data:
                 # The agent returned a logic error
                 return {"error": data["error"]}
-            
+
             if "result" in data:
                 # Success
                 return {"result": data["result"]}
-                
+
             # Fallback for unexpected formats
             return data
 
+        except asyncio.CancelledError:
+            if signal and signal.aborted:
+                raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")
+            raise
         except httpx.HTTPStatusError as e:
             # Try to read error message from body
             try:
@@ -119,65 +130,84 @@ class HTTPTransport(AgentTransport):
         self,
         agent_id: str,
         message: str,
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        signal: Union["AbortSignal", None] = None,
     ) -> str:
         """Send a chat message to a remote agent."""
         client = await self._get_client()
         url = self._get_url(agent_id)
-        
-        request_body = {
-            "action": "chat",
-            "message": message
-        }
-        
-        response = await client.post(url, json=request_body, timeout=timeout)
-        response.raise_for_status()
-        
-        data = response.json()
-        return data.get("response", "")
+
+        request_body = {"action": "chat", "message": message}
+
+        async def _make_request():
+            response = await client.post(url, json=request_body, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+
+        request_task = asyncio.create_task(_make_request())
+
+        if signal:
+            signal.add_listener(lambda: request_task.cancel())
+
+        try:
+            data = await request_task
+            return data.get("response", "")
+        except asyncio.CancelledError:
+            if signal and signal.aborted:
+                raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")
+            raise
 
     async def stream(
         self,
         agent_id: str,
         message: str,
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        signal: Union["AbortSignal", None] = None,
     ) -> AsyncIterator[str]:
         """Stream a chat response from a remote agent via SSE (POST)."""
         client = await self._get_client()
         url = self._get_url(agent_id)
-        
+
         # Wire Protocol: Streaming Request via POST
-        request_body = {
-            "action": "chat",
-            "message": message,
-            "stream": True
-        }
-        
-        async with client.stream(
-            "POST", 
-            url, 
-            json=request_body,
-            headers={"Accept": "text/event-stream"},
-            timeout=timeout
-        ) as response:
-            response.raise_for_status()
-            
-            async for line in response.aiter_lines():
-                if not line.strip():
-                    continue
-                    
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    try:
-                        # Decode JSON data
-                        chunk = json.loads(data_str)
-                        if isinstance(chunk, str):
-                            yield chunk
-                    except json.JSONDecodeError:
-                        pass
-                elif line.startswith("event: error"):
-                     # We need to read the next line for data
-                     pass # Simplified handling for now
+        request_body = {"action": "chat", "message": message, "stream": True}
+
+        try:
+            async with client.stream(
+                "POST",
+                url,
+                json=request_body,
+                headers={"Accept": "text/event-stream"},
+                timeout=timeout,
+            ) as response:
+                response.raise_for_status()
+
+                # Setup signal listener to close response if aborted
+                if signal:
+                    signal.add_listener(lambda: asyncio.create_task(response.aclose()))
+
+                async for line in response.aiter_lines():
+                    if signal:
+                        signal.throw_if_aborted()
+
+                    if not line.strip():
+                        continue
+
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        try:
+                            # Decode JSON data
+                            chunk = json.loads(data_str)
+                            if isinstance(chunk, str):
+                                yield chunk
+                        except json.JSONDecodeError:
+                            pass
+                    elif line.startswith("event: error"):
+                        # We need to read the next line for data
+                        pass  # Simplified handling for now
+        except asyncio.CancelledError:
+            if signal and signal.aborted:
+                raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")
+            raise
 
     async def close(self) -> None:
         """Close the underlying client if we own it."""

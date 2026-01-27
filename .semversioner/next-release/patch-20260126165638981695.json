@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Add Cloudflare Durable Objects support for stateful agents"
+}

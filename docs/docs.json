@@ -44,7 +44,8 @@
               "core/transports",
               "core/events",
               "core/agent-rpc",
-              "core/deployment"
+              "core/deployment",
+              "guides/cloudflare-durable-objects"
             ]
           }
         ]
@@ -160,7 +161,8 @@
               "cookbook/fastapi-integration",
               "cookbook/persistent-chatbot",
               "cookbook/per-user-assistant",
-              "cookbook/serverless-agents"
+              "cookbook/serverless-agents",
+              "guides/cloudflare-durable-objects"
             ]
           },
           {

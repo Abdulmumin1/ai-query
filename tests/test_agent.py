@@ -10,7 +10,8 @@ from ai_query.agents import (
     Connection,
     ConnectionContext,
 )
-from ai_query.types import Message
+from ai_query.types import Message, tool
+from ai_query.model import LanguageModel
 
 
 class TestAgentInitialization:
@@ -31,10 +32,7 @@ class TestAgentInitialization:
 
     def test_initialization_with_initial_state(self):
         """Agent should accept initial_state parameter."""
-        agent = Agent(
-            "test-agent",
-            initial_state={"counter": 0, "name": "test"}
-        )
+        agent = Agent("test-agent", initial_state={"counter": 0, "name": "test"})
         assert agent._initial_state == {"counter": 0, "name": "test"}
 
     def test_initialization_with_system_prompt(self):
@@ -44,9 +42,11 @@ class TestAgentInitialization:
 
     def test_initialization_with_tools(self):
         """Agent should accept tools parameter."""
+
         def my_tool():
             return "result"
-        agent = Agent("test-agent", tools={"my_tool": my_tool})
+
+        agent = Agent("test-agent", tools={"my_tool": tool(my_tool)})
         assert "my_tool" in agent.tools
 
 
@@ -61,11 +61,7 @@ class TestAgentState:
     @pytest.mark.asyncio
     async def test_initial_state_used_when_no_stored_state(self, storage):
         """Agent should use initial_state when storage is empty."""
-        agent = Agent(
-            "test-agent",
-            storage=storage,
-            initial_state={"counter": 0}
-        )
+        agent = Agent("test-agent", storage=storage, initial_state={"counter": 0})
         await agent.start()
         assert agent.state == {"counter": 0}
         await agent.stop()
@@ -75,11 +71,7 @@ class TestAgentState:
         """Agent should load stored state instead of initial_state."""
         await storage.set("test-agent:state", {"counter": 100})
 
-        agent = Agent(
-            "test-agent",
-            storage=storage,
-            initial_state={"counter": 0}
-        )
+        agent = Agent("test-agent", storage=storage, initial_state={"counter": 0})
         await agent.start()
         assert agent.state == {"counter": 100}
         await agent.stop()
@@ -98,11 +90,7 @@ class TestAgentState:
     @pytest.mark.asyncio
     async def test_update_state_merges(self, storage):
         """update_state() should merge with existing state."""
-        agent = Agent(
-            "test-agent",
-            storage=storage,
-            initial_state={"a": 1, "b": 2}
-        )
+        agent = Agent("test-agent", storage=storage, initial_state={"a": 1, "b": 2})
         await agent.start()
         await agent.update_state(b=20, c=3)
 
@@ -149,7 +137,9 @@ class TestAgentMessages:
         await agent1.start()
         agent1._messages.append(Message(role="user", content="Hello"))
         agent1._messages.append(Message(role="assistant", content="Hi there!"))
-        await storage.set("test-agent:messages", [m.to_dict() for m in agent1._messages])
+        await storage.set(
+            "test-agent:messages", [m.to_dict() for m in agent1._messages]
+        )
         await agent1.stop()
 
         agent2 = Agent("test-agent", storage=storage)
@@ -238,8 +228,17 @@ class TestAgentChat:
     """Tests for Agent chat functionality."""
 
     @pytest.fixture
+    def mock_model(self):
+        """Create a mock LanguageModel."""
+        model = MagicMock(spec=LanguageModel)
+        model.provider = MagicMock()
+        model.model_id = "test-model"
+        return model
+
+    @pytest.fixture
     def mock_stream_text(self):
         """Create a mock stream_text function."""
+
         async def mock_text_stream():
             yield "Hello "
             yield "World!"
@@ -251,9 +250,9 @@ class TestAgentChat:
             yield mock
 
     @pytest.mark.asyncio
-    async def test_chat_adds_user_message(self, mock_stream_text):
+    async def test_chat_adds_user_message(self, mock_stream_text, mock_model):
         """chat() should add user message to history."""
-        agent = Agent("test", storage=MemoryStorage())
+        agent = Agent("test", storage=MemoryStorage(), model=mock_model)
         await agent.start()
 
         await agent.chat("Hello")
@@ -264,9 +263,9 @@ class TestAgentChat:
         await agent.stop()
 
     @pytest.mark.asyncio
-    async def test_chat_adds_assistant_response(self, mock_stream_text):
+    async def test_chat_adds_assistant_response(self, mock_stream_text, mock_model):
         """chat() should add assistant response to history."""
-        agent = Agent("test", storage=MemoryStorage())
+        agent = Agent("test", storage=MemoryStorage(), model=mock_model)
         await agent.start()
 
         await agent.chat("Hello")
@@ -277,10 +276,10 @@ class TestAgentChat:
         await agent.stop()
 
     @pytest.mark.asyncio
-    async def test_chat_persists_messages(self, mock_stream_text):
+    async def test_chat_persists_messages(self, mock_stream_text, mock_model):
         """chat() should persist messages to storage."""
         storage = MemoryStorage()
-        agent = Agent("test", storage=storage)
+        agent = Agent("test", storage=storage, model=mock_model)
         await agent.start()
 
         await agent.chat("Hello")
@@ -295,8 +294,17 @@ class TestAgentStream:
     """Tests for Agent streaming functionality."""
 
     @pytest.fixture
+    def mock_model(self):
+        """Create a mock LanguageModel."""
+        model = MagicMock(spec=LanguageModel)
+        model.provider = MagicMock()
+        model.model_id = "test-model"
+        return model
+
+    @pytest.fixture
     def mock_stream_text(self):
         """Create a mock stream_text function."""
+
         async def mock_text_stream():
             yield "Hello "
             yield "World!"
@@ -308,9 +316,9 @@ class TestAgentStream:
             yield mock
 
     @pytest.mark.asyncio
-    async def test_stream_yields_chunks(self, mock_stream_text):
+    async def test_stream_yields_chunks(self, mock_stream_text, mock_model):
         """stream() should yield response chunks."""
-        agent = Agent("test", storage=MemoryStorage())
+        agent = Agent("test", storage=MemoryStorage(), model=mock_model)
         await agent.start()
 
         chunks = []
@@ -321,9 +329,9 @@ class TestAgentStream:
         await agent.stop()
 
     @pytest.mark.asyncio
-    async def test_stream_adds_messages(self, mock_stream_text):
+    async def test_stream_adds_messages(self, mock_stream_text, mock_model):
         """stream() should add messages to history."""
-        agent = Agent("test", storage=MemoryStorage())
+        agent = Agent("test", storage=MemoryStorage(), model=mock_model)
         await agent.start()
 
         async for _ in agent.stream("Hello"):
@@ -339,12 +347,11 @@ class TestAgentSubclassing:
     @pytest.mark.asyncio
     async def test_subclass_with_defaults(self):
         """Subclass can set default model and system prompt."""
+
         class MyBot(Agent):
             def __init__(self, agent_id: str):
                 super().__init__(
-                    agent_id,
-                    system="I am a custom bot.",
-                    storage=MemoryStorage()
+                    agent_id, system="I am a custom bot.", storage=MemoryStorage()
                 )
 
         agent = MyBot("test")
@@ -371,15 +378,14 @@ class TestAgentSubclassing:
     @pytest.mark.asyncio
     async def test_subclass_with_tools(self):
         """Subclass can define tools."""
+
         def search(query: str) -> str:
             return f"Results for: {query}"
 
         class SearchBot(Agent):
             def __init__(self, agent_id: str):
                 super().__init__(
-                    agent_id,
-                    tools={"search": search},
-                    storage=MemoryStorage()
+                    agent_id, tools={"search": tool(search)}, storage=MemoryStorage()
                 )
 
         agent = SearchBot("test")
@@ -601,10 +607,13 @@ class TestAgentEventLogPersistence:
     async def test_event_log_loaded_on_start(self):
         """Event log should be loaded from storage on start."""
         storage = MemoryStorage()
-        await storage.set("test:event_log", [
-            {"id": 1, "type": "a", "data": {}},
-            {"id": 2, "type": "b", "data": {}},
-        ])
+        await storage.set(
+            "test:event_log",
+            [
+                {"id": 1, "type": "a", "data": {}},
+                {"id": 2, "type": "b", "data": {}},
+            ],
+        )
 
         class DurableAgent(Agent):
             enable_event_log = True
@@ -620,10 +629,13 @@ class TestAgentEventLogPersistence:
     async def test_event_counter_continues_from_log(self):
         """Event counter should continue from max ID in log."""
         storage = MemoryStorage()
-        await storage.set("test:event_log", [
-            {"id": 5, "type": "a", "data": {}},
-            {"id": 10, "type": "b", "data": {}},
-        ])
+        await storage.set(
+            "test:event_log",
+            [
+                {"id": 5, "type": "a", "data": {}},
+                {"id": 10, "type": "b", "data": {}},
+            ],
+        )
 
         class DurableAgent(Agent):
             enable_event_log = True

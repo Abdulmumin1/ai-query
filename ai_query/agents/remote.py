@@ -36,8 +36,7 @@ class RemoteAgent:
         signal: Union[AbortSignal, None] = None,
     ) -> str:
         """Send a chat message to the remote agent."""
-        # TODO: Pass abort signal to transport
-        return await self._transport.chat(self._agent_id, message)
+        return await self._transport.chat(self._agent_id, message, signal=signal)
 
     async def stream(
         self,
@@ -46,8 +45,9 @@ class RemoteAgent:
         signal: Union[AbortSignal, None] = None,
     ) -> AsyncIterator[str]:
         """Stream a response chunk by chunk."""
-        # TODO: Pass abort signal to transport
-        async for chunk in self._transport.stream(self._agent_id, message):
+        async for chunk in self._transport.stream(
+            self._agent_id, message, signal=signal
+        ):
             yield chunk
 
     def call(self, *, agent_cls: Union[type[T], None] = None) -> AgentCallProxy[T]:
@@ -56,18 +56,18 @@ class RemoteAgent:
         # But AgentCallProxy only needs `_transport` and `_target_id` (conceptually).
         # However, the current AgentCallProxy implementation takes an `agent` instance
         # and accesses `agent._transport`.
-        
+
         # We can create a lightweight wrapper to satisfy AgentCallProxy's contract.
-        
+
         class _TransportWrapper:
             def __init__(self, transport):
                 self._transport = transport
-        
-        # This is a bit of a hack to reuse AgentCallProxy. 
+
+        # This is a bit of a hack to reuse AgentCallProxy.
         # Ideally AgentCallProxy should take a Transport directly.
         # But for now:
         wrapper = _TransportWrapper(self._transport)
-        return AgentCallProxy(wrapper, self._agent_id) # type: ignore
+        return AgentCallProxy(wrapper, self._agent_id)  # type: ignore
 
     async def close(self) -> None:
         """Close the underlying transport."""
@@ -88,17 +88,17 @@ def connect(url: str, headers: Union[dict[str, str], None] = None) -> RemoteAgen
     # Parse URL to separate base_url and agent_id
     # We assume the last part of the path is the agent_id
     # e.g. .../agents/my-agent -> base=.../agents, id=my-agent
-    
+
     if url.endswith("/"):
         url = url[:-1]
-        
+
     parts = url.rsplit("/", 1)
     if len(parts) == 2:
         base_url, agent_id = parts
     else:
         # Fallback for weird URLs
         base_url = url
-        agent_id = "default" 
+        agent_id = "default"
 
     transport = HTTPTransport(base_url=base_url, headers=headers)
     return RemoteAgent(transport, agent_id)

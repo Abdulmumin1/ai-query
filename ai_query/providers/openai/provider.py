@@ -149,11 +149,19 @@ class OpenAIProvider(BaseProvider):
             **kwargs: Additional configuration (base_url, organization, etc.).
         """
         super().__init__(api_key, **kwargs)
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        env_var = f"{self.name.upper()}_API_KEY"
+        self.api_key = api_key or os.environ.get(env_var)
+        if not self.api_key:
+            raise ValueError(
+                f"Error: {self.name.upper()} API key is missing. Pass it using the 'api_key' parameter "
+                f"or the {env_var} environment variable."
+            )
         self.base_url = kwargs.get("base_url", "https://api.openai.com/v1")
         self.organization = kwargs.get("organization")
 
-    async def _convert_messages(self, messages: list[Message], session: aiohttp.ClientSession) -> list[dict[str, Any]]:
+    async def _convert_messages(
+        self, messages: list[Message], session: aiohttp.ClientSession
+    ) -> list[dict[str, Any]]:
         """Convert Message objects to OpenAI format."""
         result = []
         for msg in messages:
@@ -168,20 +176,24 @@ class OpenAIProvider(BaseProvider):
                     if hasattr(part, "type") and part.type == "tool_result":
                         tr = part.tool_result
                         if tr:
-                            result.append({
-                                "role": "tool",
-                                "tool_call_id": tr.tool_call_id,
-                                "content": str(tr.result), # Ensure string content
-                            })
+                            result.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tr.tool_call_id,
+                                    "content": str(tr.result),  # Ensure string content
+                                }
+                            )
                     elif isinstance(part, dict) and part.get("type") == "tool_result":
-                         # Handle dict format if passed directly
-                         tr = part.get("tool_result")
-                         if tr:
-                             result.append({
-                                "role": "tool",
-                                "tool_call_id": tr.tool_call_id,
-                                "content": str(tr.result),
-                             })
+                        # Handle dict format if passed directly
+                        tr = part.get("tool_result")
+                        if tr:
+                            result.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tr.tool_call_id,
+                                    "content": str(tr.result),
+                                }
+                            )
                 continue
 
             # Special handling for assistant messages with tool calls
@@ -193,28 +205,32 @@ class OpenAIProvider(BaseProvider):
                     if isinstance(part, ToolCallPart):
                         tc = part.tool_call
                         if tc:
-                            tool_calls.append({
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": json.dumps(tc.arguments),
+                            tool_calls.append(
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name,
+                                        "arguments": json.dumps(tc.arguments),
+                                    },
                                 }
-                            })
+                            )
                     elif isinstance(part, TextPart):
                         content_text += part.text
                     elif isinstance(part, dict):
                         if part.get("type") == "tool_call":
                             tc = part.get("tool_call")
                             if tc:
-                                tool_calls.append({
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc.name,
-                                        "arguments": json.dumps(tc.arguments),
+                                tool_calls.append(
+                                    {
+                                        "id": tc.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc.name,
+                                            "arguments": json.dumps(tc.arguments),
+                                        },
                                     }
-                                })
+                                )
                         elif part.get("type") == "text":
                             content_text += part.get("text", "")
 
@@ -236,42 +252,59 @@ class OpenAIProvider(BaseProvider):
                 # Handle dict-style parts (from user input)
                 if isinstance(part, dict):
                     if part.get("type") == "text":
-                        content_parts.append({"type": "text", "text": part.get("text", "")})
+                        content_parts.append(
+                            {"type": "text", "text": part.get("text", "")}
+                        )
                     elif part.get("type") == "image":
                         image_data = part.get("image")
                         media_type = part.get("media_type", "image/png")
 
                         # Handle URL
-                        if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
-                            image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                        if isinstance(image_data, str) and image_data.startswith(
+                            ("http://", "https://")
+                        ):
+                            (
+                                image_data,
+                                media_type,
+                            ) = await self._fetch_resource_as_base64(
+                                image_data, session
+                            )
                             image_data = f"data:{media_type};base64,{image_data}"
                         elif isinstance(image_data, bytes):
                             image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
-                        elif isinstance(image_data, str) and not image_data.startswith("data:"):
+                        elif isinstance(image_data, str) and not image_data.startswith(
+                            "data:"
+                        ):
                             # Assume it's base64 data
                             image_data = f"data:{media_type};base64,{image_data}"
 
-                        content_parts.append({
-                            "type": "image_url",
-                            "image_url": {"url": image_data},
-                        })
+                        content_parts.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_data},
+                            }
+                        )
                     elif part.get("type") == "file":
                         file_data = part.get("data")
                         media_type = part.get("media_type")
 
                         # Handle URL
-                        if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
-                            file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                        if isinstance(file_data, str) and file_data.startswith(
+                            ("http://", "https://")
+                        ):
+                            (
+                                file_data,
+                                fetched_type,
+                            ) = await self._fetch_resource_as_base64(file_data, session)
                             if not media_type:
                                 media_type = fetched_type
                             file_data = f"data:{media_type};base64,{file_data}"
                         elif isinstance(file_data, bytes):
                             file_data = f"data:{media_type};base64,{base64.b64encode(file_data).decode()}"
 
-                        content_parts.append({
-                            "type": "image_url",
-                            "image_url": {"url": file_data}
-                        })
+                        content_parts.append(
+                            {"type": "image_url", "image_url": {"url": file_data}}
+                        )
 
                 # Handle dataclass-style parts
                 elif isinstance(part, TextPart):
@@ -280,32 +313,44 @@ class OpenAIProvider(BaseProvider):
                     image_data = part.image
                     media_type = getattr(part, "media_type", "image/png")
 
-                    if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
-                        image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                    if isinstance(image_data, str) and image_data.startswith(
+                        ("http://", "https://")
+                    ):
+                        image_data, media_type = await self._fetch_resource_as_base64(
+                            image_data, session
+                        )
                         image_data = f"data:{media_type};base64,{image_data}"
                     elif isinstance(image_data, bytes):
                         image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
 
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": image_data},
-                    })
+                    content_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_data},
+                        }
+                    )
                 elif isinstance(part, FilePart):
                     file_data = part.data
                     media_type = getattr(part, "media_type", None)
 
-                    if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
-                        file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                    if isinstance(file_data, str) and file_data.startswith(
+                        ("http://", "https://")
+                    ):
+                        file_data, fetched_type = await self._fetch_resource_as_base64(
+                            file_data, session
+                        )
                         if not media_type:
                             media_type = fetched_type
                         file_data = f"data:{media_type};base64,{file_data}"
                     elif isinstance(file_data, bytes):
                         file_data = f"data:{media_type};base64,{base64.b64encode(file_data).decode()}"
 
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": file_data},
-                    })
+                    content_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": file_data},
+                        }
+                    )
 
             result.append({"role": msg.role, "content": content_parts})
         return result
@@ -314,14 +359,16 @@ class OpenAIProvider(BaseProvider):
         """Convert ToolSet to OpenAI function calling format."""
         result = []
         for name, tool in tools.items():
-            result.append({
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                },
-            })
+            result.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+            )
         return result
 
     async def generate(
@@ -385,7 +432,9 @@ class OpenAIProvider(BaseProvider):
             usage = Usage(
                 input_tokens=usage_data.get("prompt_tokens", 0),
                 output_tokens=usage_data.get("completion_tokens", 0),
-                cached_tokens=usage_data.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+                cached_tokens=usage_data.get("prompt_tokens_details", {}).get(
+                    "cached_tokens", 0
+                ),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
@@ -393,11 +442,13 @@ class OpenAIProvider(BaseProvider):
         tool_calls: list[ToolCall] = []
         if "tool_calls" in choice["message"] and choice["message"]["tool_calls"]:
             for tc in choice["message"]["tool_calls"]:
-                tool_calls.append(ToolCall(
-                    id=tc["id"],
-                    name=tc["function"]["name"],
-                    arguments=json.loads(tc["function"]["arguments"]),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc["id"],
+                        name=tc["function"]["name"],
+                        arguments=json.loads(tc["function"]["arguments"]),
+                    )
+                )
 
         # Build response dict with tool_calls for the execution loop
         response_with_tools = dict(response)
@@ -408,7 +459,10 @@ class OpenAIProvider(BaseProvider):
             finish_reason=choice.get("finish_reason"),
             usage=usage,
             response=response_with_tools,
-            provider_metadata={"model": response.get("model"), "id": response.get("id")},
+            provider_metadata={
+                "model": response.get("model"),
+                "id": response.get("id"),
+            },
         )
 
     async def stream(
@@ -483,7 +537,9 @@ class OpenAIProvider(BaseProvider):
                         usage = Usage(
                             input_tokens=usage_data.get("prompt_tokens", 0),
                             output_tokens=usage_data.get("completion_tokens", 0),
-                            cached_tokens=usage_data.get("prompt_tokens_details", {}).get("cached_tokens", 0),
+                            cached_tokens=usage_data.get(
+                                "prompt_tokens_details", {}
+                            ).get("cached_tokens", 0),
                             total_tokens=usage_data.get("total_tokens", 0),
                         )
 
@@ -507,7 +563,7 @@ class OpenAIProvider(BaseProvider):
                                     current_tool_calls[idx] = {
                                         "id": "",
                                         "name": "",
-                                        "arguments": ""
+                                        "arguments": "",
                                     }
 
                                 if "id" in tc:
@@ -518,7 +574,9 @@ class OpenAIProvider(BaseProvider):
                                     if "name" in fn:
                                         current_tool_calls[idx]["name"] += fn["name"]
                                     if "arguments" in fn:
-                                        current_tool_calls[idx]["arguments"] += fn["arguments"]
+                                        current_tool_calls[idx]["arguments"] += fn[
+                                            "arguments"
+                                        ]
 
         # Process accumulated tool calls
         final_tool_calls = []
@@ -528,11 +586,13 @@ class OpenAIProvider(BaseProvider):
             for _, call_data in sorted_calls:
                 try:
                     arguments = json.loads(call_data["arguments"])
-                    final_tool_calls.append(ToolCall(
-                        id=call_data["id"],
-                        name=call_data["name"],
-                        arguments=arguments
-                    ))
+                    final_tool_calls.append(
+                        ToolCall(
+                            id=call_data["id"],
+                            name=call_data["name"],
+                            arguments=arguments,
+                        )
+                    )
                 except json.JSONDecodeError:
                     # Incomplete JSON or other error
                     pass
@@ -542,7 +602,7 @@ class OpenAIProvider(BaseProvider):
             is_final=True,
             usage=usage,
             finish_reason=finish_reason,
-            tool_calls=final_tool_calls if final_tool_calls else None
+            tool_calls=final_tool_calls if final_tool_calls else None,
         )
 
     async def embed(
@@ -591,9 +651,7 @@ class OpenAIProvider(BaseProvider):
 
         # Extract result
         embedding = response["data"][0]["embedding"]
-        usage = EmbeddingUsage(
-            tokens=response.get("usage", {}).get("prompt_tokens", 0)
-        )
+        usage = EmbeddingUsage(tokens=response.get("usage", {}).get("prompt_tokens", 0))
 
         return EmbedResult(
             value=value,
@@ -653,9 +711,7 @@ class OpenAIProvider(BaseProvider):
         data = sorted(response["data"], key=lambda x: x["index"])
         embeddings = [item["embedding"] for item in data]
 
-        usage = EmbeddingUsage(
-            tokens=response.get("usage", {}).get("prompt_tokens", 0)
-        )
+        usage = EmbeddingUsage(tokens=response.get("usage", {}).get("prompt_tokens", 0))
 
         return EmbedManyResult(
             values=values,

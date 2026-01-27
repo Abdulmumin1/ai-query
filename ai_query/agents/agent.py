@@ -17,6 +17,7 @@ from typing import (
     Set,
     List,
     Dict,
+    Type,
 )
 
 from ai_query.agents.storage import MemoryStorage, Storage
@@ -28,12 +29,16 @@ if TYPE_CHECKING:
     from ai_query.agents.events import EventBus
     from ai_query.agents.transport import AgentTransport
     from ai_query.types import ProviderOptions, StopCondition, ToolSet
+    from pydantic import BaseModel
 
 
 Content = Union[str, List[Any]]
 
 # Type alias for emit handler callback
 EmitHandler = Callable[[str, Dict[str, Any], int], Awaitable[None]]
+
+# Generic TypeVar for the Agent's state. Defaults to Dict[str, Any].
+StateT = TypeVar("StateT", bound=Union[Dict[str, Any], "BaseModel"])
 
 # Generic TypeVar for type-safe agent proxies. T can be any subclass of Agent.
 T = TypeVar("T", bound="Agent")
@@ -107,7 +112,7 @@ class AgentCallProxy(Generic[T]):
         return method_proxy
 
 
-class Agent:
+class Agent(Generic[StateT]):
     """A transport-agnostic AI agent with event emission and optional persistence.
 
     The Agent emits events during its work. How those events are delivered to
@@ -115,20 +120,43 @@ class Agent:
 
     Example:
         class ResearchBot(Agent):
-            enable_event_log = True  # Enable replay on reconnect
+            state = {"status": "idle", "results": []} # Blueprint
 
             async def research(self, query: str):
-                await self.emit("status", {"text": "Searching..."})
+                await self.update_state(status="searching")
                 results = await self.search(query)
-                await self.emit("results", {"count": len(results)})
-
-        # Start server - handles WS, SSE, HTTP automatically
-        bot = ResearchBot("assistant", storage=SQLiteStorage("bot.db"))
-        bot.serve(port=8080)
+                await self.update_state(status="done", results=results)
     """
 
     # Class-level flag to enable event persistence for replay
     enable_event_log: bool = False
+
+    # Internal blueprint for state (don't set this directly, use 'state = ...')
+    _state_blueprint: Any = None
+    state_model: Any = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Magic: Sniff the 'state' attribute in the class body
+        if "state" in cls.__dict__:
+            blueprint = cls.__dict__["state"]
+            # Check if it's a Pydantic model class
+            if isinstance(blueprint, type) and (
+                hasattr(blueprint, "model_validate") or hasattr(blueprint, "validate")
+            ):
+                cls.state_model = blueprint
+                cls._state_blueprint = None
+            else:
+                # Treat as a dictionary/initial value blueprint
+                cls._state_blueprint = blueprint
+                cls.state_model = None
+
+            # Remove it from class dict so the 'state' @property works
+            # (Otherwise it shadows the property)
+            try:
+                delattr(cls, "state")
+            except (AttributeError, KeyError):
+                pass
 
     def __init__(
         self,
@@ -138,7 +166,7 @@ class Agent:
         system: str = "You are a helpful assistant.",
         tools: Union[ToolSet, None] = None,
         storage: Union[Storage, None] = None,
-        initial_state: Union[Dict[str, Any], None] = None,
+        initial_state: Union[StateT, None] = None,
         stop_when: Union[StopCondition, List[StopCondition], None] = None,
         provider_options: Union[ProviderOptions, None] = None,
         transport: Union[AgentTransport, None] = None,
@@ -146,7 +174,15 @@ class Agent:
     ) -> None:
         self._id = id
         self._storage = storage or MemoryStorage()
-        self._initial_state = initial_state or {}
+
+        # Combine class-level blueprint with instance-level initial_state
+        if initial_state is not None:
+            self._initial_state = initial_state
+        else:
+            # Fallback to blueprint if it's a dict
+            self._initial_state = (
+                self._state_blueprint if self._state_blueprint is not None else {}
+            )
 
         self.model = model
         self.system = system
@@ -155,7 +191,7 @@ class Agent:
         self.provider_options = provider_options
 
         # Agent state
-        self._state: Union[Dict[str, Any], None] = None
+        self._state: Union[StateT, None] = None
         self._messages: List[Message] = []
 
         # Event log for durability & replay
@@ -178,6 +214,7 @@ class Agent:
         self._mailbox: asyncio.Queue[_Envelope] = asyncio.Queue()
         self._processor_task: Union[asyncio.Task, None] = None
         self._running = False
+        self._start_lock = asyncio.Lock()
 
         # Current context (only valid during message processing)
         self.context = Context()
@@ -196,7 +233,7 @@ class Agent:
         return self._storage
 
     @property
-    def state(self) -> Dict[str, Any]:
+    def state(self) -> StateT:
         if self._state is None:
             raise RuntimeError(
                 "Agent not started. Call 'await agent.start()' or use "
@@ -249,17 +286,45 @@ class Agent:
 
     # ─── State Management ──────────────────────────────────────────────────
 
-    async def set_state(self, state: Dict[str, Any]) -> None:
+    async def set_state(self, state: StateT) -> None:
         """Set the agent's state and persist to storage."""
         self._state = state
-        await self._storage.set(f"{self._id}:state", state)
+        await self.save_state()
         # Emit state change event
-        await self.emit("state", {"state": state})
+        payload = self._get_state_dict()
+        await self.emit("state", {"state": payload})
 
     async def update_state(self, **kwargs: Any) -> None:
         """Merge updates into the agent's state."""
-        new_state = {**self.state, **kwargs}
-        await self.set_state(new_state)
+        if hasattr(self.state, "model_copy"):
+            # Pydantic v2
+            new_state = self.state.model_copy(update=kwargs)  # type: ignore
+        elif hasattr(self.state, "copy"):
+            # Dict or Pydantic v1
+            if isinstance(self.state, dict):
+                new_state = {**self.state, **kwargs}  # type: ignore
+            else:
+                # Pydantic v1
+                new_state = self.state.copy(update=kwargs)  # type: ignore
+        else:
+            raise TypeError(f"Unsupported state type: {type(self.state)}")
+
+        await self.set_state(new_state)  # type: ignore
+
+    async def save_state(self) -> None:
+        """Persist the current state to storage."""
+        payload = self._get_state_dict()
+        await self._storage.set(f"{self._id}:state", payload)
+
+    def _get_state_dict(self) -> Dict[str, Any]:
+        """Convert state to a dictionary for storage or transit."""
+        if self._state is None:
+            return {}
+        if hasattr(self._state, "model_dump"):
+            return self._state.model_dump()  # type: ignore
+        if hasattr(self._state, "dict"):
+            return self._state.dict()  # type: ignore
+        return self._state  # type: ignore
 
     async def clear(self) -> None:
         """Clear message history."""
@@ -279,9 +344,10 @@ class Agent:
             signal.throw_if_aborted()
 
         if self.model is None:
-            from ai_query.providers.google import google
-
-            self.model = google("gemini-2.0-flash")
+            raise ValueError(
+                "No model provided for Agent. Please pass a model to the Agent constructor "
+                "or set agent.model before calling chat()."
+            )
 
         msg_content = message if isinstance(message, str) else message
         self._messages.append(Message(role="user", content=msg_content))
@@ -308,12 +374,13 @@ class Agent:
 
     async def _do_chat(self) -> str:
         from ai_query import stream_text
-        from ai_query.providers.google import google
 
-        model = self.model or google("gemini-2.0-flash")
+        # Ensure model is set (should have been checked by caller)
+        if self.model is None:
+            raise ValueError("Agent model is not configured")
 
         result = stream_text(
-            model=model,
+            model=self.model,
             system=self.system,
             messages=self._messages,
             tools=self.tools if self.tools else None,
@@ -342,9 +409,10 @@ class Agent:
             signal.throw_if_aborted()
 
         if self.model is None:
-            from ai_query.providers.google import google
-
-            self.model = google("gemini-2.0-flash")
+            raise ValueError(
+                "No model provided for Agent. Please pass a model to the Agent constructor "
+                "or set agent.model before calling chat()."
+            )
 
         # Ensure model is set for type checker
         assert self.model is not None
@@ -379,36 +447,67 @@ class Agent:
     # ─── Lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Start the agent, loading state from storage."""
-        # Load state
-        state = await self._storage.get(f"{self._id}:state")
-        self._state = state if state is not None else self._initial_state
+        """Start the agent, loading state from storage.
 
-        # Load messages
-        messages_data = await self._storage.get(f"{self._id}:messages")
-        if messages_data:
-            self._messages = [
-                Message(role=m["role"], content=m["content"]) for m in messages_data
-            ]
+        This method is idempotent and concurrency-safe.
+        """
+        # Hot State Optimization: Check if already started
+        if self._state is not None:
+            return
 
-        # Load event log if persistence is enabled
-        if self.enable_event_log:
-            event_log_data = await self._storage.get(f"{self._id}:event_log")
-            if event_log_data:
-                self._event_log = event_log_data
-                self._event_counter = max(
-                    (e.get("id", 0) for e in self._event_log), default=0
-                )
+        async with self._start_lock:
+            # Double-check inside lock
+            if self._state is not None:
+                return
 
-        # Build action map
-        for name in dir(self):
-            attr = getattr(self, name)
-            if hasattr(attr, "__is_action__"):
-                self._action_map[name] = attr
+            # Load state
+            state_data = await self._storage.get(f"{self._id}:state")
 
-        self._running = True
-        self._processor_task = asyncio.create_task(self._process_mailbox())
-        await self.on_start()
+            if state_data is not None:
+                if self.state_model:
+                    # Use Pydantic to parse
+                    if hasattr(self.state_model, "model_validate"):
+                        self._state = self.state_model.model_validate(state_data)  # type: ignore
+                    else:
+                        self._state = self.state_model(**state_data)  # type: ignore
+                else:
+                    self._state = state_data  # type: ignore
+            else:
+                # Use initial state
+                initial = self._initial_state if self._initial_state is not None else {}
+                if self.state_model and isinstance(initial, dict):
+                    if hasattr(self.state_model, "model_validate"):
+                        self._state = self.state_model.model_validate(initial)  # type: ignore
+                    else:
+                        self._state = self.state_model(**initial)  # type: ignore
+                else:
+                    self._state = initial  # type: ignore
+
+            # Load messages
+            messages_data = await self._storage.get(f"{self._id}:messages")
+            if messages_data:
+                self._messages = [
+                    Message(role=m["role"], content=m["content"]) for m in messages_data
+                ]
+
+            # Load event log if persistence is enabled
+            if self.enable_event_log:
+                event_log_data = await self._storage.get(f"{self._id}:event_log")
+                if event_log_data:
+                    self._event_log = event_log_data
+                    self._event_counter = max(
+                        (e.get("id", 0) for e in self._event_log), default=0
+                    )
+
+            # Build action map
+            for name in dir(self):
+                attr = getattr(self, name)
+                if hasattr(attr, "__is_action__"):
+                    self._action_map[name] = attr
+
+            self._running = True
+            self._processor_task = asyncio.create_task(self._process_mailbox())
+            await self.on_start()
 
     async def stop(self) -> None:
         """Stop the agent."""
@@ -443,7 +542,9 @@ class Agent:
         """Called when a client connects. Override for custom logic."""
         self._connections.add(connection)
 
-    async def on_message(self, connection: Connection, message: Union[str, bytes]) -> None:
+    async def on_message(
+        self, connection: Connection, message: Union[str, bytes]
+    ) -> None:
         """Called when a message is received. Override to handle messages."""
         pass
 
@@ -580,7 +681,7 @@ class Agent:
             return {"agent_id": self.id, "result": result}
 
         elif action == "state":
-            return {"agent_id": self.id, "state": self.state}
+            return {"agent_id": self.id, "state": self._get_state_dict()}
 
         return {"error": f"Unknown action: {action}"}
 
@@ -601,7 +702,9 @@ class Agent:
             try:
                 # Enqueue to ensure sequential execution
                 future = asyncio.get_running_loop().create_future()
-                self.enqueue("action", {"name": method, "params": params}, future=future)
+                self.enqueue(
+                    "action", {"name": method, "params": params}, future=future
+                )
                 result = await future
                 return {"result": result}
             except Exception as e:
