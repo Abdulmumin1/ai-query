@@ -23,8 +23,6 @@ from ai_query.types import (
 )
 from ai_query.model import LanguageModel
 
-import aiohttp
-
 
 # Cached provider instance
 _default_provider: AnthropicProvider | None = None
@@ -88,7 +86,7 @@ class AnthropicProvider(BaseProvider):
         self.base_url = kwargs.get("base_url", "https://api.anthropic.com")
 
     async def _convert_messages(
-        self, messages: list[Message], session: aiohttp.ClientSession
+        self, messages: list[Message]
     ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Message objects to Anthropic format.
 
@@ -218,7 +216,7 @@ class AnthropicProvider(BaseProvider):
                                 image_data,
                                 media_type,
                             ) = await self._fetch_resource_as_base64(
-                                image_data, session
+                                image_data
                             )
                         elif isinstance(image_data, bytes):
                             import base64
@@ -246,7 +244,7 @@ class AnthropicProvider(BaseProvider):
                             (
                                 file_data,
                                 fetched_type,
-                            ) = await self._fetch_resource_as_base64(file_data, session)
+                            ) = await self._fetch_resource_as_base64(file_data)
                             if not media_type:
                                 media_type = fetched_type
                         elif isinstance(file_data, bytes):
@@ -326,43 +324,34 @@ class AnthropicProvider(BaseProvider):
         """
         anthropic_options = self.get_provider_options(provider_options)
 
-        async with self.create_session() as session:
-            # Convert messages and extract system prompt
-            system_prompt, converted_messages = await self._convert_messages(
-                messages, session
-            )
+        # Convert messages and extract system prompt
+        system_prompt, converted_messages = await self._convert_messages(messages)
 
-            # Build request body
-            request_body: dict[str, Any] = {
-                "model": model,
-                "messages": converted_messages,
-                "max_tokens": kwargs.pop("max_tokens", 4096),
-                **kwargs,
-                **anthropic_options,
-            }
+        # Build request body
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": converted_messages,
+            "max_tokens": kwargs.pop("max_tokens", 4096),
+            **kwargs,
+            **anthropic_options,
+        }
 
-            if system_prompt:
-                request_body["system"] = system_prompt
+        if system_prompt:
+            request_body["system"] = system_prompt
 
-            # Add tools if provided
-            if tools:
-                request_body["tools"] = self._convert_tools(tools)
+        # Add tools if provided
+        if tools:
+            request_body["tools"] = self._convert_tools(tools)
 
-            headers = {
-                "x-api-key": self.api_key,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-            }
+        headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
 
-            url = f"{self.base_url}/v1/messages"
+        url = f"{self.base_url}/v1/messages"
 
-            async with session.post(url, headers=headers, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(
-                        f"Anthropic API error ({resp.status}): {error_text}"
-                    )
-                response = await resp.json()
+        response = await self.transport.post(url, json=request_body, headers=headers)
 
         # Extract text and tool calls from response
         text = ""
@@ -429,137 +418,131 @@ class AnthropicProvider(BaseProvider):
         """
         anthropic_options = self.get_provider_options(provider_options)
 
-        async with self.create_session() as session:
-            # Convert messages and extract system prompt
-            system_prompt, converted_messages = await self._convert_messages(
-                messages, session
-            )
+        # Convert messages and extract system prompt
+        system_prompt, converted_messages = await self._convert_messages(messages)
 
-            # Build request body with streaming enabled
-            request_body: dict[str, Any] = {
-                "model": model,
-                "messages": converted_messages,
-                "max_tokens": kwargs.pop("max_tokens", 4096),
-                "stream": True,
-                **kwargs,
-                **anthropic_options,
-            }
+        # Build request body with streaming enabled
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": converted_messages,
+            "max_tokens": kwargs.pop("max_tokens", 4096),
+            "stream": True,
+            **kwargs,
+            **anthropic_options,
+        }
 
-            if system_prompt:
-                request_body["system"] = system_prompt
+        if system_prompt:
+            request_body["system"] = system_prompt
 
-            # Add tools if provided
-            if tools:
-                request_body["tools"] = self._convert_tools(tools)
+        # Add tools if provided
+        if tools:
+            request_body["tools"] = self._convert_tools(tools)
 
-            headers = {
-                "x-api-key": self.api_key,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-            }
+        headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
 
-            url = f"{self.base_url}/v1/messages"
+        url = f"{self.base_url}/v1/messages"
 
-            finish_reason = None
-            usage = None
-            tool_calls: list[ToolCall] = []
-            current_tool_call: dict[str, Any] | None = None
+        finish_reason = None
+        usage = None
+        tool_calls: list[ToolCall] = []
+        current_tool_call: dict[str, Any] | None = None
 
-            async with session.post(url, headers=headers, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(
-                        f"Anthropic API error ({resp.status}): {error_text}"
-                    )
+        # Process SSE stream using transport with buffer for line handling
+        buffer = b""
+        async for chunk_bytes in self.transport.stream(url, json=request_body, headers=headers):
+            buffer += chunk_bytes
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                # Anthropic uses "event:" and "data:" lines
+                chunk = self._parse_sse_json(line)
+                if chunk is None:
+                    continue
 
-                # Process SSE stream
-                async for line in resp.content:
-                    # Anthropic uses "event:" and "data:" lines
-                    chunk = self._parse_sse_json(line)
-                    if chunk is None:
-                        continue
+                event_type = chunk.get("type")
 
-                    event_type = chunk.get("type")
+                # content_block_start: start of a block (text or tool_use)
+                if event_type == "content_block_start":
+                    index = chunk.get("index")
+                    content_block = chunk.get("content_block", {})
+                    if content_block.get("type") == "tool_use":
+                        current_tool_call = {
+                            "index": index,
+                            "id": content_block.get("id"),
+                            "name": content_block.get("name"),
+                            "arguments_json": "",
+                        }
 
-                    # content_block_start: start of a block (text or tool_use)
-                    if event_type == "content_block_start":
-                        index = chunk.get("index")
-                        content_block = chunk.get("content_block", {})
-                        if content_block.get("type") == "tool_use":
-                            current_tool_call = {
-                                "index": index,
-                                "id": content_block.get("id"),
-                                "name": content_block.get("name"),
-                                "arguments_json": "",
-                            }
+                # content_block_delta contains the text chunks or json fragments
+                elif event_type == "content_block_delta":
+                    index = chunk.get("index")
+                    delta = chunk.get("delta", {})
 
-                    # content_block_delta contains the text chunks or json fragments
-                    elif event_type == "content_block_delta":
-                        index = chunk.get("index")
-                        delta = chunk.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        if text:
+                            yield StreamChunk(text=text)
 
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text", "")
-                            if text:
-                                yield StreamChunk(text=text)
-
-                        elif delta.get("type") == "input_json_delta":
-                            if (
-                                current_tool_call
-                                and current_tool_call["index"] == index
-                            ):
-                                current_tool_call["arguments_json"] += delta.get(
-                                    "partial_json", ""
-                                )
-
-                    # content_block_stop: end of a block
-                    elif event_type == "content_block_stop":
-                        index = chunk.get("index")
-                        if current_tool_call and current_tool_call["index"] == index:
-                            # Parse collected JSON and add to tool_calls
-                            try:
-                                arguments = json.loads(
-                                    current_tool_call["arguments_json"]
-                                )
-                                tool_calls.append(
-                                    ToolCall(
-                                        id=current_tool_call["id"],
-                                        name=current_tool_call["name"],
-                                        arguments=arguments,
-                                    )
-                                )
-                            except json.JSONDecodeError:
-                                # Handle parsing error gracefully
-                                pass
-                            current_tool_call = None
-
-                    # message_delta contains stop_reason
-                    elif event_type == "message_delta":
-                        delta = chunk.get("delta", {})
-                        if delta.get("stop_reason"):
-                            finish_reason = delta["stop_reason"]
-                        # Usage is in the message_delta
-                        usage_data = chunk.get("usage", {})
-                        if usage_data:
-                            output_tokens = usage_data.get("output_tokens", 0)
-                            # We need input tokens from message_start
-                            if usage:
-                                usage.output_tokens = output_tokens
-                                usage.total_tokens = usage.input_tokens + output_tokens
-
-                    # message_start contains input token count
-                    elif event_type == "message_start":
-                        message = chunk.get("message", {})
-                        usage_data = message.get("usage", {})
-                        if usage_data:
-                            usage = Usage(
-                                input_tokens=usage_data.get("input_tokens", 0),
-                                output_tokens=0,
-                                cached_tokens=usage_data.get(
-                                    "cache_read_input_tokens", 0
-                                ),
-                                total_tokens=usage_data.get("input_tokens", 0),
+                    elif delta.get("type") == "input_json_delta":
+                        if (
+                            current_tool_call
+                            and current_tool_call["index"] == index
+                        ):
+                            current_tool_call["arguments_json"] += delta.get(
+                                "partial_json", ""
                             )
+
+                # content_block_stop: end of a block
+                elif event_type == "content_block_stop":
+                    index = chunk.get("index")
+                    if current_tool_call and current_tool_call["index"] == index:
+                        # Parse collected JSON and add to tool_calls
+                        try:
+                            arguments = json.loads(
+                                current_tool_call["arguments_json"]
+                            )
+                            tool_calls.append(
+                                ToolCall(
+                                    id=current_tool_call["id"],
+                                    name=current_tool_call["name"],
+                                    arguments=arguments,
+                                )
+                            )
+                        except json.JSONDecodeError:
+                            # Handle parsing error gracefully
+                            pass
+                        current_tool_call = None
+
+                # message_delta contains stop_reason
+                elif event_type == "message_delta":
+                    delta = chunk.get("delta", {})
+                    if delta.get("stop_reason"):
+                        finish_reason = delta["stop_reason"]
+                    # Usage is in the message_delta
+                    usage_data = chunk.get("usage", {})
+                    if usage_data:
+                        output_tokens = usage_data.get("output_tokens", 0)
+                        # We need input tokens from message_start
+                        if usage:
+                            usage.output_tokens = output_tokens
+                            usage.total_tokens = usage.input_tokens + output_tokens
+
+                # message_start contains input token count
+                elif event_type == "message_start":
+                    message = chunk.get("message", {})
+                    usage_data = message.get("usage", {})
+                    if usage_data:
+                        usage = Usage(
+                            input_tokens=usage_data.get("input_tokens", 0),
+                            output_tokens=0,
+                            cached_tokens=usage_data.get(
+                                "cache_read_input_tokens", 0
+                            ),
+                            total_tokens=usage_data.get("input_tokens", 0),
+                        )
 
         # Yield final chunk with metadata
         yield StreamChunk(

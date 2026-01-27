@@ -198,8 +198,7 @@ class TestOpenAIProvider:
             Message(role="user", content="Hello!"),
         ]
 
-        async with aiohttp.ClientSession() as session:
-            converted = await provider._convert_messages(messages, session)
+        converted = await provider._convert_messages(messages)
 
         assert len(converted) == 2
         assert converted[0] == {"role": "system", "content": "You are helpful."}

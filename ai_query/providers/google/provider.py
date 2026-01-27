@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import base64
+import os
 from typing import Any, AsyncIterator
-import json
-
-import aiohttp
 
 from ai_query.providers.base import BaseProvider
 from ai_query.types import (
@@ -121,6 +118,7 @@ class GoogleProvider(BaseProvider):
             api_key
             or os.environ.get("GOOGLE_API_KEY")
             or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")
+            or os.environ.get("GEMINI_API_KEY")
         )
         if not self.api_key:
             raise ValueError(
@@ -130,7 +128,7 @@ class GoogleProvider(BaseProvider):
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     async def _convert_messages(
-        self, messages: list[Message], session: aiohttp.ClientSession
+        self, messages: list[Message]
     ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Message objects to Google format.
 
@@ -174,12 +172,8 @@ class GoogleProvider(BaseProvider):
                                 (
                                     image_data,
                                     media_type,
-                                ) = await self._fetch_resource_as_base64(
-                                    image_data, session
-                                )
+                                ) = await self._fetch_resource_as_base64(image_data)
                             elif isinstance(image_data, bytes):
-                                import base64
-
                                 image_data = base64.b64encode(image_data).decode()
 
                             parts.append(
@@ -201,14 +195,10 @@ class GoogleProvider(BaseProvider):
                                 (
                                     file_data,
                                     fetched_type,
-                                ) = await self._fetch_resource_as_base64(
-                                    file_data, session
-                                )
+                                ) = await self._fetch_resource_as_base64(file_data)
                                 if not media_type:
                                     media_type = fetched_type
                             elif isinstance(file_data, bytes):
-                                import base64
-
                                 file_data = base64.b64encode(file_data).decode()
 
                             parts.append(
@@ -264,12 +254,8 @@ class GoogleProvider(BaseProvider):
                             (
                                 image_data,
                                 media_type,
-                            ) = await self._fetch_resource_as_base64(
-                                image_data, session
-                            )
+                            ) = await self._fetch_resource_as_base64(image_data)
                         elif isinstance(image_data, bytes):
-                            import base64
-
                             image_data = base64.b64encode(image_data).decode()
 
                         parts.append(
@@ -291,12 +277,10 @@ class GoogleProvider(BaseProvider):
                             (
                                 file_data,
                                 fetched_type,
-                            ) = await self._fetch_resource_as_base64(file_data, session)
+                            ) = await self._fetch_resource_as_base64(file_data)
                             if not media_type:
                                 media_type = fetched_type
                         elif isinstance(file_data, bytes):
-                            import base64
-
                             file_data = base64.b64encode(file_data).decode()
 
                         parts.append(
@@ -324,184 +308,6 @@ class GoogleProvider(BaseProvider):
                 }
             )
         return [{"functionDeclarations": function_declarations}]
-
-    async def generate(
-        self,
-        *,
-        model: str,
-        messages: list[Message],
-        tools: ToolSet | None = None,
-        provider_options: ProviderOptions | None = None,
-        **kwargs: Any,
-    ) -> GenerateTextResult:
-        """Generate text using Google Gemini API.
-
-        Args:
-            model: Model name (e.g., "gemini-2.0-flash", "gemini-1.5-pro").
-            messages: Conversation messages.
-            provider_options: Google-specific options under "google" key.
-                Supports: safety_settings, generation_config, etc.
-            **kwargs: Additional params (max_tokens, temperature, etc.).
-
-        Returns:
-            GenerateTextResult with generated text and metadata.
-        """
-        import aiohttp
-
-        google_options = self.get_provider_options(provider_options)
-
-        async with self.create_session() as session:
-            # Convert messages
-            system_instruction, contents = await self._convert_messages(
-                messages, session
-            )
-
-            # Build generation config from kwargs (common params)
-            generation_config: dict[str, Any] = {}
-            if "max_tokens" in kwargs:
-                generation_config["maxOutputTokens"] = kwargs.pop("max_tokens")
-            if "temperature" in kwargs:
-                generation_config["temperature"] = kwargs.pop("temperature")
-            if "top_p" in kwargs:
-                generation_config["topP"] = kwargs.pop("top_p")
-            if "top_k" in kwargs:
-                generation_config["topK"] = kwargs.pop("top_k")
-            if "stop_sequences" in kwargs:
-                generation_config["stopSequences"] = kwargs.pop("stop_sequences")
-            if "presence_penalty" in kwargs:
-                generation_config["presencePenalty"] = kwargs.pop("presence_penalty")
-            if "frequency_penalty" in kwargs:
-                generation_config["frequencyPenalty"] = kwargs.pop("frequency_penalty")
-            if "seed" in kwargs:
-                generation_config["seed"] = kwargs.pop("seed")
-
-            # Key mapping for snake_case to camelCase conversion
-            key_mapping = {
-                "max_output_tokens": "maxOutputTokens",
-                "top_p": "topP",
-                "top_k": "topK",
-                "stop_sequences": "stopSequences",
-                "candidate_count": "candidateCount",
-                "presence_penalty": "presencePenalty",
-                "frequency_penalty": "frequencyPenalty",
-                "response_mime_type": "responseMimeType",
-                "response_schema": "responseSchema",
-                "thinking_config": "thinkingConfig",
-                "speech_config": "speechConfig",
-            }
-
-            # Extract generation config options directly from google_options
-            # (users can pass them flat, without nesting in "generation_config")
-            for snake_key, camel_key in key_mapping.items():
-                if snake_key in google_options:
-                    generation_config[camel_key] = google_options.pop(snake_key)
-                elif camel_key in google_options:
-                    generation_config[camel_key] = google_options.pop(camel_key)
-
-            # Also check for direct camelCase keys that aren't in the mapping
-            direct_keys = ["temperature", "seed"]
-            for key in direct_keys:
-                if key in google_options:
-                    generation_config[key] = google_options.pop(key)
-
-            # Handle nested thinking_config conversion
-            if "thinkingConfig" in generation_config:
-                tc = generation_config["thinkingConfig"]
-                if isinstance(tc, dict):
-                    if "include_thoughts" in tc:
-                        tc["includeThoughts"] = tc.pop("include_thoughts")
-                    if "thinking_budget" in tc:
-                        tc["thinkingBudget"] = tc.pop("thinking_budget")
-
-            # Build request body
-            request_body: dict[str, Any] = {
-                "contents": contents,
-            }
-
-            if system_instruction:
-                request_body["systemInstruction"] = {
-                    "parts": [{"text": system_instruction}]
-                }
-
-            if generation_config:
-                request_body["generationConfig"] = generation_config
-
-            # Add safety_settings if provided
-            if "safety_settings" in google_options:
-                safety_settings = google_options.pop("safety_settings")
-                if isinstance(safety_settings, dict):
-                    # Convert dict format {category: threshold} to list format
-                    request_body["safetySettings"] = [
-                        {"category": k, "threshold": v}
-                        for k, v in safety_settings.items()
-                    ]
-                elif isinstance(safety_settings, list):
-                    # Already in list format, use as-is
-                    request_body["safetySettings"] = safety_settings
-
-            # Add tools if provided
-            if tools:
-                request_body["tools"] = self._convert_tools(tools)
-
-            url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
-
-            async with session.post(url, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Google API error ({resp.status}): {error_text}")
-                response = await resp.json()
-
-        # Extract text and function calls from response
-        text = ""
-        tool_calls: list[ToolCall] = []
-        candidates = response.get("candidates", [])
-        if candidates:
-            content = candidates[0].get("content", {})
-            for i, part in enumerate(content.get("parts", [])):
-                if "text" in part:
-                    text += part["text"]
-                elif "functionCall" in part:
-                    fc = part["functionCall"]
-                    # Capture thoughtSignature for Gemini 3 models
-                    metadata = {}
-                    if "thoughtSignature" in part:
-                        metadata["thought_signature"] = part["thoughtSignature"]
-                    tool_calls.append(
-                        ToolCall(
-                            id=f"call_{i}",  # Google doesn't provide IDs, generate one
-                            name=fc.get("name"),
-                            arguments=fc.get("args", {}),
-                            metadata=metadata,
-                        )
-                    )
-
-        # Build usage info if available
-        usage = None
-        usage_metadata = response.get("usageMetadata", {})
-        if usage_metadata:
-            usage = Usage(
-                input_tokens=usage_metadata.get("promptTokenCount", 0),
-                output_tokens=usage_metadata.get("candidatesTokenCount", 0),
-                cached_tokens=usage_metadata.get("cachedContentTokenCount", 0),
-                total_tokens=usage_metadata.get("totalTokenCount", 0),
-            )
-
-        # Determine finish reason
-        finish_reason = None
-        if candidates:
-            finish_reason = candidates[0].get("finishReason")
-
-        # Build response dict with tool_calls for the execution loop
-        response_with_tools = dict(response)
-        response_with_tools["tool_calls"] = tool_calls
-
-        return GenerateTextResult(
-            text=text,
-            finish_reason=finish_reason,
-            usage=usage,
-            response=response_with_tools,
-            provider_metadata={"model": model},
-        )
 
     def _build_request_body(
         self,
@@ -575,9 +381,7 @@ class GoogleProvider(BaseProvider):
         }
 
         if system_instruction:
-            request_body["systemInstruction"] = {
-                "parts": [{"text": system_instruction}]
-            }
+            request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
         if generation_config:
             request_body["generationConfig"] = generation_config
@@ -600,6 +404,94 @@ class GoogleProvider(BaseProvider):
 
         return request_body
 
+    async def generate(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        tools: ToolSet | None = None,
+        provider_options: ProviderOptions | None = None,
+        **kwargs: Any,
+    ) -> GenerateTextResult:
+        """Generate text using Google Gemini API.
+
+        Args:
+            model: Model name (e.g., "gemini-2.0-flash", "gemini-1.5-pro").
+            messages: Conversation messages.
+            provider_options: Google-specific options under "google" key.
+                Supports: safety_settings, generation_config, etc.
+            **kwargs: Additional params (max_tokens, temperature, etc.).
+
+        Returns:
+            GenerateTextResult with generated text and metadata.
+        """
+        google_options = self.get_provider_options(provider_options)
+
+        # Convert messages
+        system_instruction, contents = await self._convert_messages(messages)
+
+        # Build request body
+        request_body = self._build_request_body(
+            contents, system_instruction, google_options, tools=tools, **kwargs
+        )
+
+        url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
+
+        # Use transport for HTTP request
+        response = await self.transport.post(url, request_body)
+
+        # Extract text and function calls from response
+        text = ""
+        tool_calls: list[ToolCall] = []
+        candidates = response.get("candidates", [])
+        if candidates:
+            content = candidates[0].get("content", {})
+            for i, part in enumerate(content.get("parts", [])):
+                if "text" in part:
+                    text += part["text"]
+                elif "functionCall" in part:
+                    fc = part["functionCall"]
+                    # Capture thoughtSignature for Gemini 3 models
+                    metadata = {}
+                    if "thoughtSignature" in part:
+                        metadata["thought_signature"] = part["thoughtSignature"]
+                    tool_calls.append(
+                        ToolCall(
+                            id=f"call_{i}",  # Google doesn't provide IDs, generate one
+                            name=fc.get("name"),
+                            arguments=fc.get("args", {}),
+                            metadata=metadata,
+                        )
+                    )
+
+        # Build usage info if available
+        usage = None
+        usage_metadata = response.get("usageMetadata", {})
+        if usage_metadata:
+            usage = Usage(
+                input_tokens=usage_metadata.get("promptTokenCount", 0),
+                output_tokens=usage_metadata.get("candidatesTokenCount", 0),
+                cached_tokens=usage_metadata.get("cachedContentTokenCount", 0),
+                total_tokens=usage_metadata.get("totalTokenCount", 0),
+            )
+
+        # Determine finish reason
+        finish_reason = None
+        if candidates:
+            finish_reason = candidates[0].get("finishReason")
+
+        # Build response dict with tool_calls for the execution loop
+        response_with_tools = dict(response)
+        response_with_tools["tool_calls"] = tool_calls
+
+        return GenerateTextResult(
+            text=text,
+            finish_reason=finish_reason,
+            usage=usage,
+            response=response_with_tools,
+            provider_metadata={"model": model},
+        )
+
     async def stream(
         self,
         *,
@@ -621,78 +513,72 @@ class GoogleProvider(BaseProvider):
         Yields:
             StreamChunk objects with text and final metadata.
         """
-        import aiohttp
-
         google_options = self.get_provider_options(provider_options)
 
-        async with self.create_session() as session:
-            # Convert messages
-            system_instruction, contents = await self._convert_messages(
-                messages, session
-            )
+        # Convert messages
+        system_instruction, contents = await self._convert_messages(messages)
 
-            # Build request body
-            request_body = self._build_request_body(
-                contents, system_instruction, google_options, tools=tools, **kwargs
-            )
+        # Build request body
+        request_body = self._build_request_body(
+            contents, system_instruction, google_options, tools=tools, **kwargs
+        )
 
-            # Use streamGenerateContent endpoint
-            url = f"{self.base_url}/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
+        # Use streamGenerateContent endpoint
+        url = f"{self.base_url}/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
 
-            finish_reason = None
-            usage = None
-            tool_calls: list[ToolCall] = []
+        finish_reason = None
+        usage = None
+        tool_calls: list[ToolCall] = []
 
-            async with session.post(url, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Google API error ({resp.status}): {error_text}")
+        # Buffer for accumulating partial SSE data
+        buffer = b""
 
-                # Process SSE stream
-                async for line in resp.content:
-                    chunk = self._parse_sse_json(line)
-                    if chunk is None:
-                        continue
+        # Use transport for streaming
+        async for chunk in self.transport.stream(url, request_body):
+            buffer += chunk
 
-                    # Check for usage metadata
-                    usage_metadata = chunk.get("usageMetadata", {})
-                    if usage_metadata:
-                        usage = Usage(
-                            input_tokens=usage_metadata.get("promptTokenCount", 0),
-                            output_tokens=usage_metadata.get("candidatesTokenCount", 0),
-                            cached_tokens=usage_metadata.get(
-                                "cachedContentTokenCount", 0
-                            ),
-                            total_tokens=usage_metadata.get("totalTokenCount", 0),
-                        )
+            # Process complete lines
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                parsed = self._parse_sse_json(line)
+                if parsed is None:
+                    continue
 
-                    candidates = chunk.get("candidates", [])
-                    if candidates:
-                        candidate = candidates[0]
-                        # Check for finish reason
-                        if candidate.get("finishReason"):
-                            finish_reason = candidate["finishReason"]
+                # Check for usage metadata
+                usage_metadata = parsed.get("usageMetadata", {})
+                if usage_metadata:
+                    usage = Usage(
+                        input_tokens=usage_metadata.get("promptTokenCount", 0),
+                        output_tokens=usage_metadata.get("candidatesTokenCount", 0),
+                        cached_tokens=usage_metadata.get("cachedContentTokenCount", 0),
+                        total_tokens=usage_metadata.get("totalTokenCount", 0),
+                    )
 
-                        content = candidate.get("content", {})
-                        for part in content.get("parts", []):
-                            if "text" in part:
-                                yield StreamChunk(text=part["text"])
-                            elif "functionCall" in part:
-                                fc = part["functionCall"]
-                                # Capture thoughtSignature for Gemini 3 models
-                                metadata = {}
-                                if "thoughtSignature" in part:
-                                    metadata["thought_signature"] = part[
-                                        "thoughtSignature"
-                                    ]
-                                tool_calls.append(
-                                    ToolCall(
-                                        id=f"call_{len(tool_calls)}",  # Google doesn't provide IDs
-                                        name=fc.get("name"),
-                                        arguments=fc.get("args", {}),
-                                        metadata=metadata,
-                                    )
+                candidates = parsed.get("candidates", [])
+                if candidates:
+                    candidate = candidates[0]
+                    # Check for finish reason
+                    if candidate.get("finishReason"):
+                        finish_reason = candidate["finishReason"]
+
+                    content = candidate.get("content", {})
+                    for part in content.get("parts", []):
+                        if "text" in part:
+                            yield StreamChunk(text=part["text"])
+                        elif "functionCall" in part:
+                            fc = part["functionCall"]
+                            # Capture thoughtSignature for Gemini 3 models
+                            metadata = {}
+                            if "thoughtSignature" in part:
+                                metadata["thought_signature"] = part["thoughtSignature"]
+                            tool_calls.append(
+                                ToolCall(
+                                    id=f"call_{len(tool_calls)}",  # Google doesn't provide IDs
+                                    name=fc.get("name"),
+                                    arguments=fc.get("args", {}),
+                                    metadata=metadata,
                                 )
+                            )
 
         # Yield final chunk with metadata
         yield StreamChunk(
@@ -725,19 +611,15 @@ class GoogleProvider(BaseProvider):
 
         url = f"{self.base_url}/models/{model}:embedContent?key={self.api_key}"
 
-        async with self.create_session() as session:
-            request_body: dict[str, Any] = {
-                "model": f"models/{model}",
-                "content": {"parts": [{"text": value}]},
-                **kwargs,
-                **google_options,
-            }
+        request_body: dict[str, Any] = {
+            "model": f"models/{model}",
+            "content": {"parts": [{"text": value}]},
+            **kwargs,
+            **google_options,
+        }
 
-            async with session.post(url, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Google API error ({resp.status}): {error_text}")
-                response = await resp.json()
+        # Use transport for HTTP request
+        response = await self.transport.post(url, request_body)
 
         # Extract result
         embedding = response["embedding"]["values"]
@@ -778,25 +660,21 @@ class GoogleProvider(BaseProvider):
 
         url = f"{self.base_url}/models/{model}:batchEmbedContents?key={self.api_key}"
 
-        async with self.create_session() as session:
-            # Build batch request
-            requests = []
-            for value in values:
-                req = {
-                    "model": f"models/{model}",
-                    "content": {"parts": [{"text": value}]},
-                    **kwargs,
-                    **google_options,
-                }
-                requests.append(req)
+        # Build batch request
+        requests = []
+        for value in values:
+            req = {
+                "model": f"models/{model}",
+                "content": {"parts": [{"text": value}]},
+                **kwargs,
+                **google_options,
+            }
+            requests.append(req)
 
-            request_body = {"requests": requests}
+        request_body = {"requests": requests}
 
-            async with session.post(url, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Google API error ({resp.status}): {error_text}")
-                response = await resp.json()
+        # Use transport for HTTP request
+        response = await self.transport.post(url, request_body)
 
         # Extract embeddings
         embeddings = [item["embedding"]["values"] for item in response["embeddings"]]

@@ -166,8 +166,6 @@ class AgentDO(DurableObject):
         url = js.URL.new(request.url)
         path = url.pathname
 
-        # Handle Headers
-        # In Cloudflare Python Workers, request.headers is an http.client.HTTPMessage object
         headers = {}
         if hasattr(request.headers, "items"):
             headers = dict(request.headers.items())
@@ -178,8 +176,6 @@ class AgentDO(DurableObject):
             except Exception:
                 pass
 
-        # Handle Query Params
-        # url.searchParams is a JS URLSearchParams object
         query_params = js.Object.fromEntries(url.searchParams).to_py()
 
         ctx = ConnectionContext(
@@ -199,9 +195,8 @@ class AgentDO(DurableObject):
             js.Object.fromEntries(to_js({"status": 101, "webSocket": client})),
         )
 
-    # --- WebSocket Hibernation Events ---
-    # These methods are called by the runtime when events occur on accepted WebSockets.
-
+    # --- WebSocket Events ---
+  
     async def webSocketMessage(self, ws: Any, message: Any) -> None:
         """Called when a message is received from a WebSocket."""
         if not self.agent._running:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, TYPE_CHECKING
@@ -19,6 +20,9 @@ from ai_query.types import (
     EmbeddingUsage,
 )
 
+if TYPE_CHECKING:
+    from ai_query.transport import HTTPTransport
+
 
 class BaseProvider(ABC):
     """Abstract base class for AI providers.
@@ -32,16 +36,37 @@ class BaseProvider(ABC):
     # Provider identifier (e.g., "openai", "anthropic", "google")
     name: str
 
-    def __init__(self, api_key: str | None = None, **kwargs: Any):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        transport: HTTPTransport | None = None,
+        **kwargs: Any,
+    ):
         """Initialize the provider.
 
         Args:
             api_key: API key for the provider. If None, will try to read from
                      environment variable (provider-specific).
+            transport: HTTP transport to use. If None, will auto-detect based on
+                       environment (aiohttp for standard Python, fetch for Workers).
             **kwargs: Additional provider-specific configuration.
         """
         self.api_key = api_key
         self.config = kwargs
+        self._transport = transport
+
+    @property
+    def transport(self) -> HTTPTransport:
+        """Get or create the HTTP transport.
+
+        Returns the transport passed to __init__, or auto-detects the appropriate
+        transport for the current environment.
+        """
+        if self._transport is None:
+            from ai_query.transport import get_default_transport
+
+            self._transport = get_default_transport()
+        return self._transport
 
     @abstractmethod
     async def generate(
@@ -109,63 +134,19 @@ class BaseProvider(ABC):
             return {}
         return provider_options.get(self.name, {})
 
-    async def _fetch_resource_as_base64(
-        self, url: str, session: Any
-    ) -> tuple[str, str]:
-        """Fetch a resource from URL and return as base64 with media type."""
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise Exception(f"Failed to fetch resource from {url}: {resp.status}")
-            content_type = resp.headers.get("Content-Type", "application/octet-stream")
-            # Extract just the mime type (remove charset etc)
-            media_type = content_type.split(";")[0].strip()
-            data_bytes = await resp.read()
-            import base64
+    async def _fetch_resource_as_base64(self, url: str) -> tuple[str, str]:
+        """Fetch a resource from URL and return as base64 with media type.
 
-            return base64.b64encode(data_bytes).decode(), media_type
+        Args:
+            url: The URL to fetch.
 
-    def create_session(self) -> aiohttp.ClientSession:
-        """Create an aiohttp ClientSession with environment-specific configuration.
-
-        This handles Cloudflare Worker specific issues like disabling SSL verification
-        which is required in that environment as the native 'ssl' module is not available.
+        Returns:
+            Tuple of (base64_data, media_type).
         """
-        import os
-        import sys
-        import aiohttp
-
-        # In Emscripten/Pyodide environments (like Cloudflare Workers), we need to use
-        # the Fetch API for networking. pyodide-http provides a custom connector for this.
-        # We explicitly try to use it here to be robust, even if global patching fails.
-        if (
-            sys.platform == "emscripten"
-            or os.environ.get("WORKER_RUNTIME") == "cloudflare"
-        ):
-            try:
-                # Try to use the explicit connector from pyodide_http
-                # This is more reliable than relying on patch_all() affecting aiohttp.ClientSession
-                from pyodide_http.aiohttp import PyodideTCPConnector
-                return aiohttp.ClientSession(connector=PyodideTCPConnector())
-            except ImportError:
-                # If pyodide_http is not available or the import fails,
-                # fall back to creating a default session (hoping for global patch)
-                pass
-
-            return aiohttp.ClientSession()
-
-        connector = None
-        # Check for Cloudflare/Pyodide environment by checking for ssl module
-        # This is more robust than checking sys.platform or env vars
-        try:
-            import ssl
-        except ImportError:
-            # If SSL is missing and we haven't already returned for emscripten,
-            # we might still be in a restricted environment.
-            # However, if we are here, we probably aren't in standard Pyodide
-            # (which is caught by sys.platform check above).
-            connector = aiohttp.TCPConnector(ssl=False)
-
-        return aiohttp.ClientSession(connector=connector)
+        data_bytes, content_type = await self.transport.get(url)
+        # Extract just the mime type (remove charset etc)
+        media_type = content_type.split(";")[0].strip()
+        return base64.b64encode(data_bytes).decode(), media_type
 
     def _parse_sse_line(self, line: bytes | str) -> str | None:
         """Parse an SSE line and extract the data payload.
