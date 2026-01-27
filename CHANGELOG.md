@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.14
+
+- patch: release
+
 ## 1.7.13
 
 - patch: Fix Cloudflare headers extraction using js.Object.fromEntries() to avoid iteration issues
