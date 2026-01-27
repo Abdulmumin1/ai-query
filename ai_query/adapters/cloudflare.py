@@ -84,6 +84,8 @@ class AgentDO(DurableObject):
             transport=self.transport,
             provider_options=provider_options,
         )
+        if hasattr(self.agent_class, "model") and not self.agent.model:
+            self.agent.model = self.agent_class.model
         self.agent.env = env  # type: ignore
 
     async def fetch(self, request: Any) -> Any:
