@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Fix Cloudflare Durable Object stub retrieval using getByName",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-27T07:48:47+00:00",
+  "version": "1.7.5"
+}
