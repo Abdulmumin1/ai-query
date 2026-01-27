@@ -88,15 +88,25 @@ class AgentDO(DurableObject):
             self.agent.model = self.agent_class.model
         self.agent.env = env  # type: ignore
 
-        # Inject emit handler for WebSocket delivery
+        # Inject emit handler for WebSocket and SSE delivery
         async def cloudflare_emit_handler(
             event_type: str, data: Dict[str, Any], event_id: int
         ) -> None:
             payload = json.dumps({"id": event_id, "type": event_type, "data": data})
-            # Broadcast to all accepted WebSockets
+
+            # 1. Broadcast to all accepted WebSockets (Hibernation API)
             for ws in self.ctx.getWebSockets():
                 try:
                     ws.send(payload)
+                except Exception:
+                    pass
+
+            # 2. Broadcast to all active SSE connections
+            # We convert to SSE format: "event: <type>\ndata: <json>\n\n"
+            sse_payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+            for sse_queue in self.agent._sse_connections:
+                try:
+                    sse_queue.put_nowait(sse_payload)
                 except Exception:
                     pass
 
