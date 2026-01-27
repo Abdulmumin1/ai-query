@@ -1,6 +1,7 @@
 
 from ai_query import Agent, action
 from ai_query.adapters.cloudflare import AgentDO, CloudflareRegistry
+from workers import DurableObject, Response, WorkerEntrypoint
 
 # --- 1. Define the Agent ---
 
@@ -55,11 +56,12 @@ class CounterDO(AgentDO):
 
 
 # --- 3. Define the Main Worker Handler ---
-
-async def fetch(request, env):
-    registry = CloudflareRegistry(env)
+class Default(WorkerEntrypoint):
     
-    # Route requests for `/agent/counter-1` to the COUNTER binding
-    registry.register("counter-.*", env.COUNTER)
-    
-    return await registry.handle_request(request)
+    async def fetch(self, request):
+        registry = CloudflareRegistry(self.env)
+        
+        # Route requests for `/agent/counter-1` to the COUNTER binding
+        registry.register("counter-.*", self.env.COUNTER)
+        
+        return await registry.handle_request(request)
