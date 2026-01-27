@@ -132,7 +132,10 @@ class AgentDO(DurableObject):
         connect_task = asyncio.create_task(self.agent.on_connect(bridge, ctx))
         self.ctx.waitUntil(connect_task)
 
-        return js.Response.new(None, {"status": 101, "webSocket": client})
+        return js.Response.new(
+            None,
+            js.Object.fromEntries(to_js({"status": 101, "webSocket": client})),
+        )
 
     # --- WebSocket Hibernation Events ---
     # These methods are called by the runtime when events occur on accepted WebSockets.
@@ -165,7 +168,11 @@ class AgentDO(DurableObject):
     def _json_response(self, data: Any, status: int = 200) -> Any:
         return js.Response.new(
             json.dumps(data),
-            to_js({"status": status, "headers": {"Content-Type": "application/json"}}),
+            js.Object.fromEntries(
+                to_js(
+                    {"status": status, "headers": {"Content-Type": "application/json"}}
+                )
+            ),
         )
 
     async def _drain_mailbox(self) -> None:
@@ -205,4 +212,6 @@ class CloudflareRegistry:
                 stub = binding.getByName(agent_id)
                 return await stub.fetch(request)
 
-        return js.Response.new("Agent not found", {"status": 404})
+        return js.Response.new(
+            "Agent not found", js.Object.fromEntries(to_js({"status": 404}))
+        )
