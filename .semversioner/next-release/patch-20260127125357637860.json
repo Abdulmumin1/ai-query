@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Fix Cloudflare headers extraction using js.Object.fromEntries() to avoid iteration issues"
-}

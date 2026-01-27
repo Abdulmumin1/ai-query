@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "ai-query"
-version = "1.7.11"
+version = "1.7.12"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
