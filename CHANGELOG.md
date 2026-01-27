@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.10
+
+- patch: Fix Cloudflare WebSocketPair unpacking using .object_values() for compatibility with Pyodide
+
 ## 1.7.9
 
 - patch: Centralize aiohttp session creation in BaseProvider to handle Cloudflare SSL support across all providers

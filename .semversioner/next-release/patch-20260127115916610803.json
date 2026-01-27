@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Fix Cloudflare WebSocketPair unpacking using .object_values() for compatibility with Pyodide"
-}
