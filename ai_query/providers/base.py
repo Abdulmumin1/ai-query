@@ -7,7 +7,17 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, TYPE_CHECKING
 
-from ai_query.types import GenerateTextResult, Message, ProviderOptions, StreamChunk, ToolSet, Usage, EmbedResult, EmbedManyResult, EmbeddingUsage
+from ai_query.types import (
+    GenerateTextResult,
+    Message,
+    ProviderOptions,
+    StreamChunk,
+    ToolSet,
+    Usage,
+    EmbedResult,
+    EmbedManyResult,
+    EmbeddingUsage,
+)
 
 
 class BaseProvider(ABC):
@@ -99,7 +109,9 @@ class BaseProvider(ABC):
             return {}
         return provider_options.get(self.name, {})
 
-    async def _fetch_resource_as_base64(self, url: str, session: Any) -> tuple[str, str]:
+    async def _fetch_resource_as_base64(
+        self, url: str, session: Any
+    ) -> tuple[str, str]:
         """Fetch a resource from URL and return as base64 with media type."""
         async with session.get(url) as resp:
             if resp.status != 200:
@@ -109,7 +121,23 @@ class BaseProvider(ABC):
             media_type = content_type.split(";")[0].strip()
             data_bytes = await resp.read()
             import base64
+
             return base64.b64encode(data_bytes).decode(), media_type
+
+    def create_session(self) -> aiohttp.ClientSession:
+        """Create an aiohttp ClientSession with environment-specific configuration.
+
+        This handles Cloudflare Worker specific issues like disabling SSL verification
+        which is required in that environment as the native 'ssl' module is not available.
+        """
+        import os
+        import aiohttp
+
+        connector = None
+        if os.environ.get("WORKER_RUNTIME") == "cloudflare":
+            connector = aiohttp.TCPConnector(ssl=False)
+
+        return aiohttp.ClientSession(connector=connector)
 
     def _parse_sse_line(self, line: bytes | str) -> str | None:
         """Parse an SSE line and extract the data payload.

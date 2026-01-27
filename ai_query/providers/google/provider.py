@@ -350,11 +350,7 @@ class GoogleProvider(BaseProvider):
 
         google_options = self.get_provider_options(provider_options)
 
-        async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=False)
-            if os.environ.get("WORKER_RUNTIME") == "cloudflare"
-            else None
-        ) as session:
+        async with self.create_session() as session:
             # Convert messages
             system_instruction, contents = await self._convert_messages(
                 messages, session
@@ -629,11 +625,7 @@ class GoogleProvider(BaseProvider):
 
         google_options = self.get_provider_options(provider_options)
 
-        async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=False)
-            if os.environ.get("WORKER_RUNTIME") == "cloudflare"
-            else None
-        ) as session:
+        async with self.create_session() as session:
             # Convert messages
             system_instruction, contents = await self._convert_messages(
                 messages, session
@@ -733,11 +725,7 @@ class GoogleProvider(BaseProvider):
 
         url = f"{self.base_url}/models/{model}:embedContent?key={self.api_key}"
 
-        async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=False)
-            if os.environ.get("WORKER_RUNTIME") == "cloudflare"
-            else None
-        ) as session:
+        async with self.create_session() as session:
             request_body: dict[str, Any] = {
                 "model": f"models/{model}",
                 "content": {"parts": [{"text": value}]},
@@ -790,11 +778,7 @@ class GoogleProvider(BaseProvider):
 
         url = f"{self.base_url}/models/{model}:batchEmbedContents?key={self.api_key}"
 
-        async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=False)
-            if os.environ.get("WORKER_RUNTIME") == "cloudflare"
-            else None
-        ) as session:
+        async with self.create_session() as session:
             # Build batch request
             requests = []
             for value in values:

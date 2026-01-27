@@ -402,7 +402,7 @@ class OpenAIProvider(BaseProvider):
 
         url = f"{self.base_url}/chat/completions"
 
-        async with aiohttp.ClientSession() as session:
+        async with self.create_session() as session:
             # Convert messages and fetch resources if needed
             converted_messages = await self._convert_messages(messages, session)
 
@@ -501,7 +501,7 @@ class OpenAIProvider(BaseProvider):
         usage = None
         current_tool_calls: dict[int, dict[str, Any]] = {}
 
-        async with aiohttp.ClientSession() as session:
+        async with self.create_session() as session:
             # Convert messages and fetch resources if needed
             converted_messages = await self._convert_messages(messages, session)
 
@@ -635,7 +635,7 @@ class OpenAIProvider(BaseProvider):
 
         url = f"{self.base_url}/embeddings"
 
-        async with aiohttp.ClientSession() as session:
+        async with self.create_session() as session:
             request_body: dict[str, Any] = {
                 "model": model,
                 "input": value,
@@ -693,7 +693,7 @@ class OpenAIProvider(BaseProvider):
 
         url = f"{self.base_url}/embeddings"
 
-        async with aiohttp.ClientSession() as session:
+        async with self.create_session() as session:
             request_body: dict[str, Any] = {
                 "model": model,
                 "input": values,
