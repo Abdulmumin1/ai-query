@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.4
+
+- patch: Add Cloudflare Durable Objects support for stateful agents
+
 ## 1.7.3
 
 - patch: Complete unified transport layer implementation
