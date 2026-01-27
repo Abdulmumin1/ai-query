@@ -159,13 +159,11 @@ class AgentDO(DurableObject):
         url = js.URL.new(request.url)
         path = url.pathname
 
-        # Convert headers to dict
-        headers = {}
-        # Iterate over headers (JS headers object is iterable)
-        for pair in request.headers:
-            # pair is [key, value]
-            key, value = pair.object_values()
-            headers[key] = value
+        # Convert headers and query params to python dicts
+        # We use Object.fromEntries to convert Iterables (Headers, URLSearchParams) to plain objects
+        # then .to_py() to convert them to Python dicts.
+        headers = js.Object.fromEntries(request.headers).to_py()
+        query_params = js.Object.fromEntries(url.searchParams).to_py()
 
         # We assume root path for connection context as standard convention
         ctx = ConnectionContext(
@@ -173,7 +171,7 @@ class AgentDO(DurableObject):
             metadata={
                 "path": path,
                 "headers": headers,
-                "query_params": dict(to_js(url.searchParams)),  # simplified
+                "query_params": query_params,
             },
         )
 
