@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Fix ConnectionContext initialization in Cloudflare adapter to match the defined signature"
+}
