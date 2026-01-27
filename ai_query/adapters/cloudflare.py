@@ -154,7 +154,9 @@ class AgentDO(DurableObject):
 
         bridge = WebSocketBridge(server)
         # We assume root path for connection context as standard convention
-        ctx = ConnectionContext(path="/", headers={}, query_params={})
+        ctx = ConnectionContext(
+            request=request, metadata={"path": "/", "headers": {}, "query_params": {}}
+        )
 
         # Trigger the initial on_connect event asynchronously
         # We use waitUntil to ensure on_connect finishes (e.g. if it emits events)
