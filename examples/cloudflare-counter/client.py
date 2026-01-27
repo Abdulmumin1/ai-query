@@ -1,17 +1,17 @@
-
 import asyncio
 import argparse
 import aiohttp
 import json
 import sys
 
+
 async def monitor_websocket(url: str, agent_id: str):
     """Connects to the WebSocket and prints incoming messages."""
     ws_url = f"{url}/agent/{agent_id}"
     ws_url = ws_url.replace("https://", "wss://").replace("http://", "ws://")
-    
+
     print(f"Connecting to WebSocket: {ws_url} ...")
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(ws_url) as ws:
@@ -21,29 +21,29 @@ async def monitor_websocket(url: str, agent_id: str):
                         data = json.loads(msg.data)
                         print(f"\n[WebSocket] Received: {json.dumps(data, indent=2)}")
                         if data.get("type", "") == "error":
-                             print("Error received, exiting.")
-                             break
+                            print("Error received, exiting.")
+                            break
                     elif msg.type == aiohttp.WSMsgType.ERROR:
-                        print('ws connection closed with exception %s',
-                              ws.exception())
+                        print("ws connection closed with exception %s", ws.exception())
     except Exception as e:
         print(f"WebSocket error: {e}")
+
 
 async def interactive_loop(url: str, agent_id: str):
     """Sends HTTP requests to increment or chat."""
     invoke_url = f"{url}/agent/{agent_id}/invoke"
     chat_url = f"{url}/agent/{agent_id}/chat"
-    
+
     print(f"\n[Commands] 'i': increment, 'q': quit, anything else: chat")
-    
+
     async with aiohttp.ClientSession() as session:
         while True:
             cmd = await asyncio.to_thread(input, "> ")
-            if cmd.lower() == 'q':
+            if cmd.lower() == "q":
                 break
-            
+
             try:
-                if cmd.lower() == 'i':
+                if cmd.lower() == "i":
                     # Increment Action
                     payload = {"payload": {"method": "increment"}}
                     async with session.post(invoke_url, json=payload) as resp:
@@ -56,27 +56,31 @@ async def interactive_loop(url: str, agent_id: str):
                     # Chat Message
                     payload = {"message": cmd}
                     async with session.post(chat_url, json=payload) as resp:
-                         if resp.status != 200:
+                        if resp.status != 200:
                             print(f"Error {resp.status}: {await resp.text()}")
                             continue
-                         data = await resp.json()
-                         print(f"[AI] {data.get('response')}")
+                        data = await resp.json()
+                        print(f"[AI] {data.get('response')}")
 
             except Exception as e:
                 print(f"Request failed: {e}")
 
+
 async def main():
     parser = argparse.ArgumentParser(description="Cloudflare Counter Client")
-    parser.add_argument("url", help="The base URL of your worker (e.g. https://my-worker.user.workers.dev)")
+    parser.add_argument(
+        "url",
+        help="The base URL of your worker (e.g. https://my-worker.user.workers.dev)",
+    )
     parser.add_argument("--id", default="counter-1", help="The Agent ID to target")
     args = parser.parse_args()
-    
+
     # Run WebSocket monitor in background
     ws_task = asyncio.create_task(monitor_websocket(args.url.rstrip("/"), args.id))
-    
+
     # Run interactive loop
     await interactive_loop(args.url.rstrip("/"), args.id)
-    
+
     # Cleanup
     ws_task.cancel()
     try:
@@ -84,11 +88,14 @@ async def main():
     except asyncio.CancelledError:
         pass
 
+
 if __name__ == "__main__":
     try:
         if len(sys.argv) < 2:
             print("Usage: python client.py <WORKER_URL>")
-            print("Example: python client.py https://ai-query-counter.my-user.workers.dev")
+            print(
+                "Example: python client.py https://ai-query-counter.my-user.workers.dev"
+            )
             sys.exit(1)
         asyncio.run(main())
     except KeyboardInterrupt:

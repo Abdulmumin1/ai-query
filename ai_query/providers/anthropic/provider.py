@@ -326,7 +326,7 @@ class AnthropicProvider(BaseProvider):
         """
         anthropic_options = self.get_provider_options(provider_options)
 
-        async with aiohttp.ClientSession() as session:
+        async with self.create_session() as session:
             # Convert messages and extract system prompt
             system_prompt, converted_messages = await self._convert_messages(
                 messages, session
@@ -429,7 +429,7 @@ class AnthropicProvider(BaseProvider):
         """
         anthropic_options = self.get_provider_options(provider_options)
 
-        async with aiohttp.ClientSession() as session:
+        async with self.create_session() as session:
             # Convert messages and extract system prompt
             system_prompt, converted_messages = await self._convert_messages(
                 messages, session

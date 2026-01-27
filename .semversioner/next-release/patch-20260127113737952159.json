@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Improve Cloudflare runtime detection using sys.platform check and add error logging to Cloudflare adapter"
+}
