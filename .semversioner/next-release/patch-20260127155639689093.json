@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Add pyodide-http patching to Cloudflare example to enable correct networking"
-}

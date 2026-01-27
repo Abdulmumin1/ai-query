@@ -1,6 +1,11 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.16
+
+- patch: Add pyodide-http patching to Cloudflare example to enable correct networking
+- patch: fix(cloudflare): resolve SSL support and WebSocket proxy errors in Cloudflare Workers
+
 ## 1.7.15
 
 - patch: release
