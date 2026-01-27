@@ -36,7 +36,6 @@ class WebSocketBridge(Connection):
 
     async def send(self, data: Union[str, bytes]) -> None:
         """Send data to the client."""
-        # Check if ws is still open? Cloudflare WS object handles this.
         self._ws.send(data)
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
@@ -146,28 +145,20 @@ class AgentDO(DurableObject):
 
     def handle_websocket_upgrade(self, request: Any) -> Any:
         """Handle WebSocket upgrade using Hibernation API."""
-        # Use Pythonic way to unpack JS iterable
         client, server = js.WebSocketPair.new().object_values()
 
-        # Accept the connection. This attaches the WebSocket to the Durable Object.
         self.ctx.acceptWebSocket(server)
 
         bridge = WebSocketBridge(server)
 
-        # Extract metadata from request to avoid holding onto the borrowed request proxy
-        # which would cause "borrowed proxy automatically destroyed" errors in async tasks.
         url = js.URL.new(request.url)
         path = url.pathname
 
-        # Convert headers and query params to python dicts
-        # We use Object.fromEntries to convert Iterables (Headers, URLSearchParams) to plain objects
-        # then .to_py() to convert them to Python dicts.
         headers = js.Object.fromEntries(request.headers).to_py()
         query_params = js.Object.fromEntries(url.searchParams).to_py()
 
-        # We assume root path for connection context as standard convention
         ctx = ConnectionContext(
-            request=None,  # Do not store borrowed request proxy
+            request=None,
             metadata={
                 "path": path,
                 "headers": headers,
@@ -175,8 +166,6 @@ class AgentDO(DurableObject):
             },
         )
 
-        # Trigger the initial on_connect event asynchronously
-        # We use waitUntil to ensure on_connect finishes (e.g. if it emits events)
         connect_task = asyncio.create_task(self.agent.on_connect(bridge, ctx))
         self.ctx.waitUntil(connect_task)
 
@@ -190,15 +179,12 @@ class AgentDO(DurableObject):
 
     async def webSocketMessage(self, ws: Any, message: Any) -> None:
         """Called when a message is received from a WebSocket."""
-        # Ensure agent is running. If the DO was hibernating, this will reload state.
         if not self.agent._running:
             await self.agent.start()
 
         bridge = WebSocketBridge(ws)
-        # message might be string or bytes
         await self.agent.on_message(bridge, message)
 
-        # Ensure any side-effects from processing the message are completed
         self.ctx.waitUntil(self._drain_mailbox())
 
     async def webSocketClose(
@@ -210,7 +196,6 @@ class AgentDO(DurableObject):
 
     async def webSocketError(self, ws: Any, error: Any) -> None:
         """Called when a WebSocket error occurs."""
-        # Errors are typically handled by the connection closing or client retrying
         pass
 
     def _json_response(self, data: Any, status: int = 200) -> Any:
@@ -225,7 +210,6 @@ class AgentDO(DurableObject):
 
     async def _drain_mailbox(self) -> None:
         """Wait until the agent's mailbox is empty."""
-        # join() blocks until all items in the queue have been processed and task_done() is called.
         await self.agent._mailbox.join()
 
     async def alarm(self) -> None:
