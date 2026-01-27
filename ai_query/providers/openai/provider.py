@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 from typing import Any, AsyncIterator
-import json
-import base64
-
-import aiohttp
 
 from ai_query.providers.base import BaseProvider
 from ai_query.types import (
@@ -59,24 +57,7 @@ class _OpenAINamespace:
         base_url: str | None = None,
         organization: str | None = None,
     ) -> LanguageModel:
-        """Create an OpenAI language model.
-
-        Args:
-            model_id: The model identifier (e.g., "gpt-4", "gpt-4o", "gpt-4o-mini").
-            api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var.
-            base_url: Custom base URL for API requests.
-            organization: OpenAI organization ID.
-
-        Returns:
-            A LanguageModel instance for use with generate_text().
-
-        Example:
-            >>> from ai_query import generate_text, openai
-            >>> result = await generate_text(
-            ...     model=openai("gpt-4o"),
-            ...     prompt="Hello!"
-            ... )
-        """
+        """Create an OpenAI language model."""
         global _default_provider
 
         # Create provider with custom settings, or reuse default
@@ -101,25 +82,7 @@ class _OpenAINamespace:
         base_url: str | None = None,
         organization: str | None = None,
     ) -> EmbeddingModel:
-        """Create an OpenAI embedding model.
-
-        Args:
-            model_id: The embedding model identifier (e.g., "text-embedding-3-small",
-                "text-embedding-3-large", "text-embedding-ada-002").
-            api_key: OpenAI API key. Falls back to OPENAI_API_KEY env var.
-            base_url: Custom base URL for API requests.
-            organization: OpenAI organization ID.
-
-        Returns:
-            An EmbeddingModel instance for use with embed().
-
-        Example:
-            >>> from ai_query import embed, openai
-            >>> result = await embed(
-            ...     model=openai.embedding("text-embedding-3-small"),
-            ...     value="Hello world"
-            ... )
-        """
+        """Create an OpenAI embedding model."""
         global _default_embedding_provider
 
         if api_key or base_url or organization:
@@ -160,7 +123,7 @@ class OpenAIProvider(BaseProvider):
         self.organization = kwargs.get("organization")
 
     async def _convert_messages(
-        self, messages: list[Message], session: aiohttp.ClientSession
+        self, messages: list[Message]
     ) -> list[dict[str, Any]]:
         """Convert Message objects to OpenAI format."""
         result = []
@@ -266,9 +229,7 @@ class OpenAIProvider(BaseProvider):
                             (
                                 image_data,
                                 media_type,
-                            ) = await self._fetch_resource_as_base64(
-                                image_data, session
-                            )
+                            ) = await self._fetch_resource_as_base64(image_data)
                             image_data = f"data:{media_type};base64,{image_data}"
                         elif isinstance(image_data, bytes):
                             image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
@@ -295,7 +256,7 @@ class OpenAIProvider(BaseProvider):
                             (
                                 file_data,
                                 fetched_type,
-                            ) = await self._fetch_resource_as_base64(file_data, session)
+                            ) = await self._fetch_resource_as_base64(file_data)
                             if not media_type:
                                 media_type = fetched_type
                             file_data = f"data:{media_type};base64,{file_data}"
@@ -317,7 +278,7 @@ class OpenAIProvider(BaseProvider):
                         ("http://", "https://")
                     ):
                         image_data, media_type = await self._fetch_resource_as_base64(
-                            image_data, session
+                            image_data
                         )
                         image_data = f"data:{media_type};base64,{image_data}"
                     elif isinstance(image_data, bytes):
@@ -337,7 +298,7 @@ class OpenAIProvider(BaseProvider):
                         ("http://", "https://")
                     ):
                         file_data, fetched_type = await self._fetch_resource_as_base64(
-                            file_data, session
+                            file_data
                         )
                         if not media_type:
                             media_type = fetched_type
@@ -371,6 +332,16 @@ class OpenAIProvider(BaseProvider):
             )
         return result
 
+    def _get_headers(self) -> dict[str, str]:
+        """Get headers for OpenAI API requests."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.organization:
+            headers["OpenAI-Organization"] = self.organization
+        return headers
+
     async def generate(
         self,
         *,
@@ -380,49 +351,28 @@ class OpenAIProvider(BaseProvider):
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> GenerateTextResult:
-        """Generate text using OpenAI API.
-
-        Args:
-            model: Model name (e.g., "gpt-4", "gpt-4o").
-            messages: Conversation messages.
-            provider_options: OpenAI-specific options under "openai" key.
-            **kwargs: Additional params (max_tokens, temperature, etc.).
-
-        Returns:
-            GenerateTextResult with generated text and metadata.
-        """
+        """Generate text using OpenAI API."""
         openai_options = self.get_provider_options(provider_options)
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
 
         url = f"{self.base_url}/chat/completions"
 
-        async with self.create_session() as session:
-            # Convert messages and fetch resources if needed
-            converted_messages = await self._convert_messages(messages, session)
+        # Convert messages
+        converted_messages = await self._convert_messages(messages)
 
-            # Build request parameters
-            request_body: dict[str, Any] = {
-                "model": model,
-                "messages": converted_messages,
-                **kwargs,
-                **openai_options,
-            }
+        # Build request parameters
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": converted_messages,
+            **kwargs,
+            **openai_options,
+        }
 
-            # Add tools if provided
-            if tools:
-                request_body["tools"] = self._convert_tools(tools)
+        # Add tools if provided
+        if tools:
+            request_body["tools"] = self._convert_tools(tools)
 
-            async with session.post(url, headers=headers, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"OpenAI API error ({resp.status}): {error_text}")
-                response = await resp.json()
+        # Use transport for HTTP request
+        response = await self.transport.post(url, request_body, headers=self._get_headers())
 
         # Extract result
         choice = response["choices"][0]
@@ -474,26 +424,8 @@ class OpenAIProvider(BaseProvider):
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Stream text using OpenAI API.
-
-        Args:
-            model: Model name (e.g., "gpt-4", "gpt-4o").
-            messages: Conversation messages.
-            tools: Optional tool definitions for tool calling.
-            provider_options: OpenAI-specific options under "openai" key.
-            **kwargs: Additional params (max_tokens, temperature, etc.).
-
-        Yields:
-            StreamChunk objects with text and final metadata.
-        """
+        """Stream text using OpenAI API."""
         openai_options = self.get_provider_options(provider_options)
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
 
         url = f"{self.base_url}/chat/completions"
 
@@ -501,82 +433,83 @@ class OpenAIProvider(BaseProvider):
         usage = None
         current_tool_calls: dict[int, dict[str, Any]] = {}
 
-        async with self.create_session() as session:
-            # Convert messages and fetch resources if needed
-            converted_messages = await self._convert_messages(messages, session)
+        # Convert messages
+        converted_messages = await self._convert_messages(messages)
 
-            # Build request parameters with streaming enabled
-            # Include stream_options to get usage in streaming response
-            request_body: dict[str, Any] = {
-                "model": model,
-                "messages": converted_messages,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-                **kwargs,
-                **openai_options,
-            }
+        # Build request parameters with streaming enabled
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": converted_messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            **kwargs,
+            **openai_options,
+        }
 
-            # Add tools if provided
-            if tools:
-                request_body["tools"] = self._convert_tools(tools)
+        # Add tools if provided
+        if tools:
+            request_body["tools"] = self._convert_tools(tools)
 
-            async with session.post(url, headers=headers, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"OpenAI API error ({resp.status}): {error_text}")
+        # Buffer for accumulating partial SSE data
+        buffer = b""
 
-                # Process SSE stream
-                async for line in resp.content:
-                    chunk = self._parse_sse_json(line)
-                    if chunk is None:
-                        continue
+        # Use transport for streaming
+        async for chunk_bytes in self.transport.stream(url, request_body, headers=self._get_headers()):
+            buffer += chunk_bytes
 
-                    # Check for usage in the chunk (sent at the end)
-                    if "usage" in chunk and chunk["usage"]:
-                        usage_data = chunk["usage"]
-                        usage = Usage(
-                            input_tokens=usage_data.get("prompt_tokens", 0),
-                            output_tokens=usage_data.get("completion_tokens", 0),
-                            cached_tokens=usage_data.get(
-                                "prompt_tokens_details", {}
-                            ).get("cached_tokens", 0),
-                            total_tokens=usage_data.get("total_tokens", 0),
-                        )
+            # Process complete lines
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                chunk = self._parse_sse_json(line)
+                if chunk is None:
+                    continue
 
-                    choices = chunk.get("choices", [])
-                    if choices:
-                        choice = choices[0]
-                        # Check for finish reason
-                        if choice.get("finish_reason"):
-                            finish_reason = choice["finish_reason"]
+                # Check for usage in the chunk (sent at the end)
+                if "usage" in chunk and chunk["usage"]:
+                    usage_data = chunk["usage"]
+                    usage = Usage(
+                        input_tokens=usage_data.get("prompt_tokens", 0),
+                        output_tokens=usage_data.get("completion_tokens", 0),
+                        cached_tokens=usage_data.get(
+                            "prompt_tokens_details", {}
+                        ).get("cached_tokens", 0),
+                        total_tokens=usage_data.get("total_tokens", 0),
+                    )
 
-                        delta = choice.get("delta", {})
-                        content = delta.get("content")
-                        if content:
-                            yield StreamChunk(text=content)
+                choices = chunk.get("choices", [])
+                if choices:
+                    choice = choices[0]
+                    # Check for finish reason
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
 
-                        # Handle tool calls
-                        if "tool_calls" in delta and delta["tool_calls"]:
-                            for tc in delta["tool_calls"]:
-                                idx = tc["index"]
-                                if idx not in current_tool_calls:
-                                    current_tool_calls[idx] = {
-                                        "id": "",
-                                        "name": "",
-                                        "arguments": "",
-                                    }
+                    delta = choice.get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        yield StreamChunk(text=content)
 
-                                if "id" in tc:
-                                    current_tool_calls[idx]["id"] += tc["id"]
+                    # Handle tool calls
+                    if "tool_calls" in delta and delta["tool_calls"]:
+                        for tc in delta["tool_calls"]:
+                            idx = tc["index"]
+                            if idx not in current_tool_calls:
+                                current_tool_calls[idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": "",
+                                }
 
-                                if "function" in tc:
-                                    fn = tc["function"]
-                                    if "name" in fn:
-                                        current_tool_calls[idx]["name"] += fn["name"]
-                                    if "arguments" in fn:
-                                        current_tool_calls[idx]["arguments"] += fn[
-                                            "arguments"
-                                        ]
+                            if "id" in tc:
+                                current_tool_calls[idx]["id"] += tc["id"]
+
+                            if "function" in tc:
+                                fn = tc["function"]
+                                if "name" in fn:
+                                    current_tool_calls[idx]["name"] += fn["name"]
+                                if "arguments" in fn:
+                                    current_tool_calls[idx]["arguments"] += fn[
+                                        "arguments"
+                                    ]
 
         # Process accumulated tool calls
         final_tool_calls = []
@@ -613,41 +546,20 @@ class OpenAIProvider(BaseProvider):
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> EmbedResult:
-        """Generate an embedding for a single value using OpenAI API.
-
-        Args:
-            model: Embedding model name (e.g., "text-embedding-3-small").
-            value: The text to embed.
-            provider_options: OpenAI-specific options under "openai" key.
-            **kwargs: Additional params (dimensions, encoding_format, etc.).
-
-        Returns:
-            EmbedResult with embedding vector and metadata.
-        """
+        """Generate an embedding for a single value using OpenAI API."""
         openai_options = self.get_provider_options(provider_options)
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
 
         url = f"{self.base_url}/embeddings"
 
-        async with self.create_session() as session:
-            request_body: dict[str, Any] = {
-                "model": model,
-                "input": value,
-                **kwargs,
-                **openai_options,
-            }
+        request_body: dict[str, Any] = {
+            "model": model,
+            "input": value,
+            **kwargs,
+            **openai_options,
+        }
 
-            async with session.post(url, headers=headers, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"OpenAI API error ({resp.status}): {error_text}")
-                response = await resp.json()
+        # Use transport for HTTP request
+        response = await self.transport.post(url, request_body, headers=self._get_headers())
 
         # Extract result
         embedding = response["data"][0]["embedding"]
@@ -668,44 +580,20 @@ class OpenAIProvider(BaseProvider):
         provider_options: ProviderOptions | None = None,
         **kwargs: Any,
     ) -> EmbedManyResult:
-        """Generate embeddings for multiple values using OpenAI API.
-
-        OpenAI supports batch embedding natively, so this is more efficient
-        than calling embed() for each value.
-
-        Args:
-            model: Embedding model name (e.g., "text-embedding-3-small").
-            values: List of texts to embed.
-            provider_options: OpenAI-specific options under "openai" key.
-            **kwargs: Additional params (dimensions, encoding_format, etc.).
-
-        Returns:
-            EmbedManyResult with embedding vectors and metadata.
-        """
+        """Generate embeddings for multiple values using OpenAI API."""
         openai_options = self.get_provider_options(provider_options)
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
 
         url = f"{self.base_url}/embeddings"
 
-        async with self.create_session() as session:
-            request_body: dict[str, Any] = {
-                "model": model,
-                "input": values,
-                **kwargs,
-                **openai_options,
-            }
+        request_body: dict[str, Any] = {
+            "model": model,
+            "input": values,
+            **kwargs,
+            **openai_options,
+        }
 
-            async with session.post(url, headers=headers, json=request_body) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"OpenAI API error ({resp.status}): {error_text}")
-                response = await resp.json()
+        # Use transport for HTTP request
+        response = await self.transport.post(url, request_body, headers=self._get_headers())
 
         # Extract embeddings in order (OpenAI returns them sorted by index)
         data = sorted(response["data"], key=lambda x: x["index"])
@@ -722,5 +610,4 @@ class OpenAIProvider(BaseProvider):
 
 
 # Create the openai namespace instance
-# This replaces the openai() function and adds openai.embedding() support
 openai = _OpenAINamespace()

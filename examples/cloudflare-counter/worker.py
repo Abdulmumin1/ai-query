@@ -1,7 +1,3 @@
-import pyodide_http
-
-pyodide_http.patch_all()
-
 from ai_query import Agent, action
 from ai_query.adapters.cloudflare import AgentDO, CloudflareRegistry
 from workers import DurableObject, Response, WorkerEntrypoint
@@ -34,10 +30,10 @@ class CounterAgent(Agent):
     async def chat(self, message, *, signal=None):
         # Dynamic System Prompt: Inject the current count so the AI knows about it
         count = self.state.get("count", 0)
-        self.system = f"""You are the Keeper of the Count. 
-The current count is {count}. 
+        self.system = f"""You are the Keeper of the Count.
+The current count is {count}.
 You are ancient, mystical, and very protective of your numbers.
-If the user asks to increment, tell them they must use the proper channels (the increment button/action), 
+If the user asks to increment, tell them they must use the proper channels (the increment button/action),
 but you can hint at how glorious the next number will be."""
 
         return await super().chat(message, signal=signal)
