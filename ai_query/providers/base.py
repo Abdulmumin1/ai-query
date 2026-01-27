@@ -134,15 +134,23 @@ class BaseProvider(ABC):
         import sys
         import aiohttp
 
-        # In Emscripten/Pyodide environments (like Cloudflare Workers), we typically
-        # rely on patches like pyodide-http to handle networking via the Fetch API.
-        # These patches work by injecting a custom connector into ClientSession.
-        # If we explicitly pass a TCPConnector (even with ssl=False), we override
-        # this mechanism and try to use native sockets, which fail.
+        # In Emscripten/Pyodide environments (like Cloudflare Workers), we need to use
+        # the Fetch API for networking. pyodide-http provides a custom connector for this.
+        # We explicitly try to use it here to be robust, even if global patching fails.
         if (
             sys.platform == "emscripten"
             or os.environ.get("WORKER_RUNTIME") == "cloudflare"
         ):
+            try:
+                # Try to use the explicit connector from pyodide_http
+                # This is more reliable than relying on patch_all() affecting aiohttp.ClientSession
+                from pyodide_http.aiohttp import PyodideTCPConnector
+                return aiohttp.ClientSession(connector=PyodideTCPConnector())
+            except ImportError:
+                # If pyodide_http is not available or the import fails,
+                # fall back to creating a default session (hoping for global patch)
+                pass
+
             return aiohttp.ClientSession()
 
         connector = None
