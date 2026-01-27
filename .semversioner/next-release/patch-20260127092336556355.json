@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Implement Cloudflare WebSocket emit handler to enable real-time event broadcasting"
-}

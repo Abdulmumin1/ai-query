@@ -1,6 +1,63 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.18
+
+- patch: release
+
+## 1.7.17
+
+- patch: release
+
+## 1.7.16
+
+- patch: Add pyodide-http patching to Cloudflare example to enable correct networking
+- patch: fix(cloudflare): resolve SSL support and WebSocket proxy errors in Cloudflare Workers
+
+## 1.7.15
+
+- patch: release
+
+## 1.7.14
+
+- patch: release
+
+## 1.7.13
+
+- patch: Fix Cloudflare headers extraction using js.Object.fromEntries() to avoid iteration issues
+
+## 1.7.12
+
+- patch: Prevent 'borrowed proxy destroyed' error by not storing raw request in ConnectionContext
+- patch: Use ssl module import check for robust Cloudflare runtime detection
+
+## 1.7.11
+
+- patch: Fix ConnectionContext initialization in Cloudflare adapter to match the defined signature
+
+## 1.7.10
+
+- patch: Fix Cloudflare WebSocketPair unpacking using .object_values() for compatibility with Pyodide
+
+## 1.7.9
+
+- patch: Centralize aiohttp session creation in BaseProvider to handle Cloudflare SSL support across all providers
+- patch: Fix Cloudflare Worker SSL error by disabling SSL verification in Google provider when running in Cloudflare
+- patch: Improve Cloudflare runtime detection using sys.platform check and add error logging to Cloudflare adapter
+
+## 1.7.8
+
+- patch: Update Cloudflare emit handler to support SSE broadcasting alongside WebSockets
+
+## 1.7.7
+
+- patch: Fix Cloudflare adapter to correctly inherit class-level model definitions on Agent subclasses
+- patch: Implement Cloudflare WebSocket emit handler to enable real-time event broadcasting
+
+## 1.7.6
+
+- patch: Fix Cloudflare Response initialization by explicitly converting options to JS objects
+
 ## 1.7.5
 
 - patch: Fix Cloudflare Durable Object stub retrieval using getByName

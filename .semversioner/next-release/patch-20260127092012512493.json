@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Fix Cloudflare adapter to correctly inherit class-level model definitions on Agent subclasses"
-}

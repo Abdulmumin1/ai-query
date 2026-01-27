@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Fix ConnectionContext initialization in Cloudflare adapter to match the defined signature",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-27T12:19:02+00:00",
+  "version": "1.7.11"
+}

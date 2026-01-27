@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Update Cloudflare emit handler to support SSE broadcasting alongside WebSockets"
-}

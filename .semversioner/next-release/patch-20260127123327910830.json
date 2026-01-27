@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Prevent 'borrowed proxy destroyed' error by not storing raw request in ConnectionContext"
-}

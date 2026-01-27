@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Centralize aiohttp session creation in BaseProvider to handle Cloudflare SSL support across all providers"
-}

@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Fix Cloudflare WebSocketPair unpacking using .object_values() for compatibility with Pyodide",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-27T12:00:31+00:00",
+  "version": "1.7.10"
+}

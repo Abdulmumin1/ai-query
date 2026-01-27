@@ -1,0 +1,14 @@
+{
+  "changes": [
+    {
+      "description": "Fix Cloudflare adapter to correctly inherit class-level model definitions on Agent subclasses",
+      "type": "patch"
+    },
+    {
+      "description": "Implement Cloudflare WebSocket emit handler to enable real-time event broadcasting",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-27T09:42:44+00:00",
+  "version": "1.7.7"
+}
