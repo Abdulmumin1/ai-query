@@ -1,6 +1,11 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.12
+
+- patch: Prevent 'borrowed proxy destroyed' error by not storing raw request in ConnectionContext
+- patch: Use ssl module import check for robust Cloudflare runtime detection
+
 ## 1.7.11
 
 - patch: Fix ConnectionContext initialization in Cloudflare adapter to match the defined signature
