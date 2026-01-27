@@ -146,9 +146,8 @@ class AgentDO(DurableObject):
 
     def handle_websocket_upgrade(self, request: Any) -> Any:
         """Handle WebSocket upgrade using Hibernation API."""
-        pair = js.WebSocketPair.new()
-        client = pair[0]
-        server = pair[1]
+        # Use Pythonic way to unpack JS iterable
+        client, server = js.WebSocketPair.new().object_values()
 
         # Accept the connection. This attaches the WebSocket to the Durable Object.
         self.ctx.acceptWebSocket(server)
