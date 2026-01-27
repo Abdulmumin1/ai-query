@@ -154,8 +154,8 @@ class AgentDO(DurableObject):
         url = js.URL.new(request.url)
         path = url.pathname
 
-        headers = js.Object.fromEntries(request.headers).to_py()
-        query_params = js.Object.fromEntries(url.searchParams).to_py()
+        headers = js.Object.fromEntries(request.headers.entries()).to_py()
+        query_params = js.Object.fromEntries(url.searchParams.entries()).to_py()
 
         ctx = ConnectionContext(
             request=None,
