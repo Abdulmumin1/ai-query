@@ -138,6 +138,10 @@ class AgentDO(DurableObject):
             return js.Response.new("Method not allowed", {"status": 405})
 
         except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"Error in DO fetch: {e}")
             return self._json_response({"error": str(e)}, status=500)
 
     def handle_websocket_upgrade(self, request: Any) -> Any:

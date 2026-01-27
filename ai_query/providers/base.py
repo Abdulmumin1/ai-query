@@ -134,7 +134,14 @@ class BaseProvider(ABC):
         import aiohttp
 
         connector = None
-        if os.environ.get("WORKER_RUNTIME") == "cloudflare":
+        # Check for Cloudflare/Pyodide environment
+        # sys.platform is 'emscripten' in Cloudflare Workers (Pyodide)
+        import sys
+
+        if (
+            sys.platform == "emscripten"
+            or os.environ.get("WORKER_RUNTIME") == "cloudflare"
+        ):
             connector = aiohttp.TCPConnector(ssl=False)
 
         return aiohttp.ClientSession(connector=connector)
