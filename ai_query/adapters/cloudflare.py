@@ -154,8 +154,21 @@ class AgentDO(DurableObject):
         url = js.URL.new(request.url)
         path = url.pathname
 
-        headers = js.Object.fromEntries(request.headers.entries()).to_py()
-        query_params = js.Object.fromEntries(url.searchParams.entries()).to_py()
+        # Handle Headers
+        # In Cloudflare Python Workers, request.headers is an http.client.HTTPMessage object
+        headers = {}
+        if hasattr(request.headers, "items"):
+            headers = dict(request.headers.items())
+        else:
+            # Fallback for potential JS Headers object or other mappings
+            try:
+                headers = dict(request.headers)
+            except Exception:
+                pass
+
+        # Handle Query Params
+        # url.searchParams is a JS URLSearchParams object
+        query_params = js.Object.fromEntries(url.searchParams).to_py()
 
         ctx = ConnectionContext(
             request=None,
