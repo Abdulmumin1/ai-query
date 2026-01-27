@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.19
+
+- patch: Add HTTP transport abstraction for Cloudflare Workers multi-runtime support
+
 ## 1.7.18
 
 - patch: release
