@@ -9,6 +9,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
+    { name = "httpx" },
 ]
 
 [package.optional-dependencies]
@@ -22,9 +23,13 @@ fastapi = [
 mcp = [
     { name = "mcp" },
 ]
+pydantic = [
+    { name = "pydantic" },
+]
 
 [package.dev-dependencies]
 dev = [
+    { name = "mcp" },
     { name = "pytest" },
     { name = "pytest-aiohttp" },
     { name = "pytest-asyncio" },
@@ -37,13 +42,16 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34.0" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.100.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.25.0" },
+    { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2.0.0" },
     { name = "uvicorn", marker = "extra == 'fastapi'", specifier = ">=0.20.0" },
 ]
-provides-extras = ["mcp", "bedrock", "fastapi"]
+provides-extras = ["mcp", "bedrock", "fastapi", "pydantic"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "mcp", specifier = ">=1.26.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-aiohttp", specifier = ">=1.1.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },

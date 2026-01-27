@@ -30,9 +30,7 @@ class TestAgentServerBasics:
                 super().__init__(agent_id, storage=MemoryStorage())
 
         config = AgentServerConfig(
-            idle_timeout=600,
-            max_agents=50,
-            base_path="/api/agent"
+            idle_timeout=600, max_agents=50, base_path="/api/agent"
         )
         server = AgentServer(TestAgent, config=config)
 
@@ -120,13 +118,15 @@ class TestAgentServerEndpoints:
     @pytest.fixture
     def agent_class(self):
         """Create a test Agent class."""
+        from ai_query.model import LanguageModel
 
         class TestAgent(Agent):
             def __init__(self, agent_id: str):
                 super().__init__(
                     agent_id,
                     storage=MemoryStorage(),
-                    initial_state={"count": 0}
+                    initial_state={"count": 0},
+                    model=MagicMock(spec=LanguageModel),
                 )
 
             async def handle_invoke(self, payload):
@@ -170,8 +170,7 @@ class TestAgentServerEndpoints:
         await agent.start()
 
         resp = await client.put(
-            "/agent/test-put/state",
-            json={"count": 100, "name": "updated"}
+            "/agent/test-put/state", json={"count": 100, "name": "updated"}
         )
         assert resp.status == 200
 
@@ -189,8 +188,7 @@ class TestAgentServerEndpoints:
         client = await aiohttp_client(app)
 
         resp = await client.post(
-            "/agent/test-invoke/invoke",
-            json={"task": "echo", "data": "hello"}
+            "/agent/test-invoke/invoke", json={"task": "echo", "data": "hello"}
         )
         assert resp.status == 200
         data = await resp.json()
@@ -232,10 +230,7 @@ class TestAgentServerEndpoints:
         with patch("ai_query.stream_text", return_value=mock_result):
             client = await aiohttp_client(app)
 
-            resp = await client.post(
-                "/agent/test-chat/chat",
-                json={"message": "Hi"}
-            )
+            resp = await client.post("/agent/test-chat/chat", json={"message": "Hi"})
             assert resp.status == 200
             data = await resp.json()
             assert data["response"] == "Hello World"
@@ -259,19 +254,22 @@ class TestAgentServerStreaming:
     @pytest.fixture
     def streaming_agent_class(self):
         """Create an Agent class with streaming support."""
+        from ai_query.model import LanguageModel
 
         class StreamingAgent(Agent):
             def __init__(self, agent_id: str):
                 super().__init__(
                     agent_id,
                     storage=MemoryStorage(),
-                    initial_state={}
+                    initial_state={},
+                    model=MagicMock(spec=LanguageModel),
                 )
 
             async def stream(self, message, **kwargs):
                 """Override stream to return mock data without API calls."""
                 # Add user message to history
                 from ai_query.types import Message
+
                 self._messages.append(Message(role="user", content=message))
 
                 # Yield mock chunks
@@ -301,7 +299,7 @@ class TestAgentServerStreaming:
         resp = await client.post(
             "/agent/test-stream/chat?stream=true",
             json={"message": "Hi"},
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
 
         assert resp.status == 200
@@ -335,8 +333,7 @@ class TestAgentServerCORS:
         await agent.start()
 
         resp = await client.get(
-            "/agent/test/state",
-            headers={"Origin": "https://example.com"}
+            "/agent/test/state", headers={"Origin": "https://example.com"}
         )
 
         assert "Access-Control-Allow-Origin" in resp.headers
@@ -354,8 +351,7 @@ class TestAgentServerCORS:
         await agent.start()
 
         resp = await client.get(
-            "/agent/test/state",
-            headers={"Origin": "https://myapp.com"}
+            "/agent/test/state", headers={"Origin": "https://myapp.com"}
         )
         assert resp.headers.get("Access-Control-Allow-Origin") == "https://myapp.com"
 
@@ -371,8 +367,7 @@ class TestAgentServerCORS:
         await agent.start()
 
         resp = await client.get(
-            "/agent/test/state",
-            headers={"Origin": "https://evil.com"}
+            "/agent/test/state", headers={"Origin": "https://evil.com"}
         )
         assert resp.headers.get("Access-Control-Allow-Origin") != "https://evil.com"
 
@@ -403,10 +398,7 @@ class TestAgentServerAuth:
         agent = server.get_or_create("test")
         await agent.start()
 
-        resp = await client.get(
-            "/agent/test/state",
-            headers={"X-API-Key": "secret"}
-        )
+        resp = await client.get("/agent/test/state", headers={"X-API-Key": "secret"})
         assert resp.status == 200
 
     @pytest.mark.asyncio
@@ -421,10 +413,7 @@ class TestAgentServerAuth:
         app = server.create_app()
         client = await aiohttp_client(app)
 
-        resp = await client.get(
-            "/agent/test/state",
-            headers={"X-API-Key": "wrong"}
-        )
+        resp = await client.get("/agent/test/state", headers={"X-API-Key": "wrong"})
         assert resp.status == 401
 
 
@@ -435,11 +424,7 @@ class TestAgentServerWebSocket:
     def agent_class(self):
         class TestAgent(Agent):
             def __init__(self, agent_id: str):
-                super().__init__(
-                    agent_id,
-                    storage=MemoryStorage(),
-                    initial_state={}
-                )
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
 
             async def on_message(self, connection, message):
                 await connection.send(f"Echo: {message}")
@@ -469,6 +454,7 @@ class TestAgentServerWebSocket:
             await ws.send_str("Hello")
 
             import asyncio
+
             await asyncio.sleep(0.1)
 
             await ws.close()
@@ -539,10 +525,7 @@ class TestAgentServerCustomRoutes:
                 app.router.add_get("/health", self.health_check)
 
             async def health_check(self, request):
-                return web.json_response({
-                    "status": "ok",
-                    "agents": len(self._agents)
-                })
+                return web.json_response({"status": "ok", "agents": len(self._agents)})
 
         server = CustomServer(agent_class)
         app = server.create_app()

@@ -37,7 +37,6 @@ class DurableObjectStorage(Storage):
         """Initialize with the Durable Object storage object (ctx.storage)."""
         self._storage = storage
         if js is None:
-            # We are likely running in a test or non-workerd environment
             pass
 
     async def get(self, key: str) -> Any | None:
@@ -50,13 +49,10 @@ class DurableObjectStorage(Storage):
         if val is None or (hasattr(val, "undefined") and val.undefined):
              return None
         
-        # We assume values are stored as JSON strings or JS objects.
-        # Ideally we store as JSON strings to avoid JS proxy overhead/complexity
-        # on complex Python objects.
+        
         try:
             return json.loads(val, object_hook=robust_object_hook)
         except (TypeError, json.JSONDecodeError):
-            # If it's already a JS primitive or dict that didn't need parsing
             return val
 
     async def set(self, key: str, value: Any) -> None:
@@ -70,15 +66,11 @@ class DurableObjectStorage(Storage):
 
     async def keys(self, prefix: str = "") -> List[str]:
         """List keys, optionally filtering by prefix."""
-        # storage.list() returns a Map. 
-        # We can use list({ prefix: ... })
         options = js.Object.fromEntries([["prefix", prefix]]) if prefix else None
         
         # This returns a Map<string, any>
         result_map = await self._storage.list(options)
         
-        # Convert JS Map keys to Python list
-        # result_map.keys() is a JS iterator
         return list(result_map.keys())
 
     def transaction(self, closure: Any) -> Any:

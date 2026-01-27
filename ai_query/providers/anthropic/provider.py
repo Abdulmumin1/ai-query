@@ -80,6 +80,11 @@ class AnthropicProvider(BaseProvider):
         """
         super().__init__(api_key, **kwargs)
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "Error: Anthropic API key is missing. Pass it using the 'api_key' parameter "
+                "or the ANTHROPIC_API_KEY environment variable."
+            )
         self.base_url = kwargs.get("base_url", "https://api.anthropic.com")
 
     async def _convert_messages(
@@ -112,65 +117,91 @@ class AnthropicProvider(BaseProvider):
                     # Handle dict-style parts (from user input)
                     if isinstance(part, dict):
                         if part.get("type") == "text":
-                            content_parts.append({"type": "text", "text": part.get("text", "")})
+                            content_parts.append(
+                                {"type": "text", "text": part.get("text", "")}
+                            )
                         elif part.get("type") == "image":
                             image_data = part.get("image")
                             media_type = part.get("media_type", "image/png")
 
                             # Handle URL
-                            if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
-                                image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                            if isinstance(image_data, str) and image_data.startswith(
+                                ("http://", "https://")
+                            ):
+                                (
+                                    image_data,
+                                    media_type,
+                                ) = await self._fetch_resource_as_base64(
+                                    image_data, session
+                                )
                             elif isinstance(image_data, bytes):
                                 import base64
+
                                 image_data = base64.b64encode(image_data).decode()
 
-                            content_parts.append({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data,
-                                },
-                            })
+                            content_parts.append(
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_data,
+                                    },
+                                }
+                            )
                         elif part.get("type") == "file":
                             file_data = part.get("data")
                             media_type = part.get("media_type")
 
                             # Handle URL
-                            if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
-                                file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                            if isinstance(file_data, str) and file_data.startswith(
+                                ("http://", "https://")
+                            ):
+                                (
+                                    file_data,
+                                    fetched_type,
+                                ) = await self._fetch_resource_as_base64(
+                                    file_data, session
+                                )
                                 if not media_type:
                                     media_type = fetched_type
                             elif isinstance(file_data, bytes):
                                 import base64
+
                                 file_data = base64.b64encode(file_data).decode()
 
-                            content_parts.append({
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type or "application/pdf",
-                                    "data": file_data,
-                                },
-                            })
+                            content_parts.append(
+                                {
+                                    "type": "document",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type or "application/pdf",
+                                        "data": file_data,
+                                    },
+                                }
+                            )
                         elif part.get("type") == "tool_call":
                             tc = part.get("tool_call")
                             if tc:
-                                content_parts.append({
-                                    "type": "tool_use",
-                                    "id": tc.id,
-                                    "name": tc.name,
-                                    "input": tc.arguments,
-                                })
+                                content_parts.append(
+                                    {
+                                        "type": "tool_use",
+                                        "id": tc.id,
+                                        "name": tc.name,
+                                        "input": tc.arguments,
+                                    }
+                                )
                         elif part.get("type") == "tool_result":
                             tr = part.get("tool_result")
                             if tr:
-                                content_parts.append({
-                                    "type": "tool_result",
-                                    "tool_use_id": tr.tool_call_id,
-                                    "content": str(tr.result),
-                                    "is_error": tr.is_error,
-                                })
+                                content_parts.append(
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": tr.tool_call_id,
+                                        "content": str(tr.result),
+                                        "is_error": tr.is_error,
+                                    }
+                                )
 
                     # Handle dataclass-style parts
                     elif isinstance(part, TextPart):
@@ -180,59 +211,81 @@ class AnthropicProvider(BaseProvider):
                         media_type = getattr(part, "media_type", "image/png")
 
                         # Handle URL
-                        if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
-                            image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                        if isinstance(image_data, str) and image_data.startswith(
+                            ("http://", "https://")
+                        ):
+                            (
+                                image_data,
+                                media_type,
+                            ) = await self._fetch_resource_as_base64(
+                                image_data, session
+                            )
                         elif isinstance(image_data, bytes):
                             import base64
+
                             image_data = base64.b64encode(image_data).decode()
 
-                        content_parts.append({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_data,
-                            },
-                        })
+                        content_parts.append(
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image_data,
+                                },
+                            }
+                        )
                     elif isinstance(part, FilePart):
                         file_data = part.data
                         media_type = getattr(part, "media_type", None)
 
                         # Handle URL
-                        if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
-                            file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                        if isinstance(file_data, str) and file_data.startswith(
+                            ("http://", "https://")
+                        ):
+                            (
+                                file_data,
+                                fetched_type,
+                            ) = await self._fetch_resource_as_base64(file_data, session)
                             if not media_type:
                                 media_type = fetched_type
                         elif isinstance(file_data, bytes):
                             import base64
+
                             file_data = base64.b64encode(file_data).decode()
 
-                        content_parts.append({
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type or "application/pdf",
-                                "data": file_data,
-                            },
-                        })
+                        content_parts.append(
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type or "application/pdf",
+                                    "data": file_data,
+                                },
+                            }
+                        )
                     elif isinstance(part, ToolCallPart):
                         tc = part.tool_call
                         if tc:
-                            content_parts.append({
-                                "type": "tool_use",
-                                "id": tc.id,
-                                "name": tc.name,
-                                "input": tc.arguments,
-                            })
+                            content_parts.append(
+                                {
+                                    "type": "tool_use",
+                                    "id": tc.id,
+                                    "name": tc.name,
+                                    "input": tc.arguments,
+                                }
+                            )
                     elif isinstance(part, ToolResultPart):
                         tr = part.tool_result
                         if tr:
-                            content_parts.append({
-                                "type": "tool_result",
-                                "tool_use_id": tr.tool_call_id,
-                                "content": str(tr.result),
-                                "is_error": tr.is_error,
-                            })
+                            content_parts.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tr.tool_call_id,
+                                    "content": str(tr.result),
+                                    "is_error": tr.is_error,
+                                }
+                            )
 
             result.append({"role": role, "content": content_parts})
 
@@ -242,11 +295,13 @@ class AnthropicProvider(BaseProvider):
         """Convert ToolSet to Anthropic tool format."""
         result = []
         for name, tool in tools.items():
-            result.append({
-                "name": name,
-                "description": tool.description,
-                "input_schema": tool.parameters,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters,
+                }
+            )
         return result
 
     async def generate(
@@ -273,7 +328,9 @@ class AnthropicProvider(BaseProvider):
 
         async with aiohttp.ClientSession() as session:
             # Convert messages and extract system prompt
-            system_prompt, converted_messages = await self._convert_messages(messages, session)
+            system_prompt, converted_messages = await self._convert_messages(
+                messages, session
+            )
 
             # Build request body
             request_body: dict[str, Any] = {
@@ -302,7 +359,9 @@ class AnthropicProvider(BaseProvider):
             async with session.post(url, headers=headers, json=request_body) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise Exception(f"Anthropic API error ({resp.status}): {error_text}")
+                    raise Exception(
+                        f"Anthropic API error ({resp.status}): {error_text}"
+                    )
                 response = await resp.json()
 
         # Extract text and tool calls from response
@@ -312,11 +371,13 @@ class AnthropicProvider(BaseProvider):
             if block.get("type") == "text":
                 text += block.get("text", "")
             elif block.get("type") == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block.get("id"),
-                    name=block.get("name"),
-                    arguments=block.get("input", {}),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=block.get("id"),
+                        name=block.get("name"),
+                        arguments=block.get("input", {}),
+                    )
+                )
 
         # Build usage info
         usage_data = response.get("usage", {})
@@ -339,7 +400,10 @@ class AnthropicProvider(BaseProvider):
             finish_reason=response.get("stop_reason"),
             usage=usage,
             response=response_with_tools,
-            provider_metadata={"model": response.get("model"), "id": response.get("id")},
+            provider_metadata={
+                "model": response.get("model"),
+                "id": response.get("id"),
+            },
         )
 
     async def stream(
@@ -367,7 +431,9 @@ class AnthropicProvider(BaseProvider):
 
         async with aiohttp.ClientSession() as session:
             # Convert messages and extract system prompt
-            system_prompt, converted_messages = await self._convert_messages(messages, session)
+            system_prompt, converted_messages = await self._convert_messages(
+                messages, session
+            )
 
             # Build request body with streaming enabled
             request_body: dict[str, Any] = {
@@ -402,7 +468,9 @@ class AnthropicProvider(BaseProvider):
             async with session.post(url, headers=headers, json=request_body) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise Exception(f"Anthropic API error ({resp.status}): {error_text}")
+                    raise Exception(
+                        f"Anthropic API error ({resp.status}): {error_text}"
+                    )
 
                 # Process SSE stream
                 async for line in resp.content:
@@ -422,7 +490,7 @@ class AnthropicProvider(BaseProvider):
                                 "index": index,
                                 "id": content_block.get("id"),
                                 "name": content_block.get("name"),
-                                "arguments_json": ""
+                                "arguments_json": "",
                             }
 
                     # content_block_delta contains the text chunks or json fragments
@@ -436,8 +504,13 @@ class AnthropicProvider(BaseProvider):
                                 yield StreamChunk(text=text)
 
                         elif delta.get("type") == "input_json_delta":
-                            if current_tool_call and current_tool_call["index"] == index:
-                                current_tool_call["arguments_json"] += delta.get("partial_json", "")
+                            if (
+                                current_tool_call
+                                and current_tool_call["index"] == index
+                            ):
+                                current_tool_call["arguments_json"] += delta.get(
+                                    "partial_json", ""
+                                )
 
                     # content_block_stop: end of a block
                     elif event_type == "content_block_stop":
@@ -445,12 +518,16 @@ class AnthropicProvider(BaseProvider):
                         if current_tool_call and current_tool_call["index"] == index:
                             # Parse collected JSON and add to tool_calls
                             try:
-                                arguments = json.loads(current_tool_call["arguments_json"])
-                                tool_calls.append(ToolCall(
-                                    id=current_tool_call["id"],
-                                    name=current_tool_call["name"],
-                                    arguments=arguments
-                                ))
+                                arguments = json.loads(
+                                    current_tool_call["arguments_json"]
+                                )
+                                tool_calls.append(
+                                    ToolCall(
+                                        id=current_tool_call["id"],
+                                        name=current_tool_call["name"],
+                                        arguments=arguments,
+                                    )
+                                )
                             except json.JSONDecodeError:
                                 # Handle parsing error gracefully
                                 pass
@@ -478,7 +555,9 @@ class AnthropicProvider(BaseProvider):
                             usage = Usage(
                                 input_tokens=usage_data.get("input_tokens", 0),
                                 output_tokens=0,
-                                cached_tokens=usage_data.get("cache_read_input_tokens", 0),
+                                cached_tokens=usage_data.get(
+                                    "cache_read_input_tokens", 0
+                                ),
                                 total_tokens=usage_data.get("input_tokens", 0),
                             )
 
@@ -487,5 +566,5 @@ class AnthropicProvider(BaseProvider):
             is_final=True,
             usage=usage,
             finish_reason=finish_reason,
-            tool_calls=tool_calls if tool_calls else None
+            tool_calls=tool_calls if tool_calls else None,
         )
