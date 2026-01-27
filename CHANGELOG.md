@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.11
+
+- patch: Fix ConnectionContext initialization in Cloudflare adapter to match the defined signature
+
 ## 1.7.10
 
 - patch: Fix Cloudflare WebSocketPair unpacking using .object_values() for compatibility with Pyodide
