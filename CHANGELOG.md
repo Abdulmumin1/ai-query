@@ -1,6 +1,11 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.7
+
+- patch: Fix Cloudflare adapter to correctly inherit class-level model definitions on Agent subclasses
+- patch: Implement Cloudflare WebSocket emit handler to enable real-time event broadcasting
+
 ## 1.7.6
 
 - patch: Fix Cloudflare Response initialization by explicitly converting options to JS objects
