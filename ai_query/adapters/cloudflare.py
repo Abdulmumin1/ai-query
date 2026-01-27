@@ -145,7 +145,10 @@ class AgentDO(DurableObject):
 
     def handle_websocket_upgrade(self, request: Any) -> Any:
         """Handle WebSocket upgrade using Hibernation API."""
-        client, server = js.WebSocketPair.new().object_values()
+        # Create WebSocketPair and keep a reference to prevent "borrowed proxy" errors
+        # causing the proxy to be destroyed before object_values() completes.
+        ws_pair = js.WebSocketPair.new()
+        client, server = ws_pair.object_values()
 
         self.ctx.acceptWebSocket(server)
 
