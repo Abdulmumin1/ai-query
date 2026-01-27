@@ -37,8 +37,9 @@ from ai_query.agents.websocket import Connection, ConnectionContext
 class WebSocketBridge(Connection):
     """Bridges a Cloudflare WebSocket to the Agent Connection protocol."""
 
-    def __init__(self, ws: Any):
+    def __init__(self, ws: Any, parent: Any = None):
         self._ws = ws
+        self._parent = parent  # Keep parent alive to prevent borrowed proxy destruction
 
     async def send(self, data: Union[str, bytes]) -> None:
         """Send data to the client."""
@@ -159,7 +160,8 @@ class AgentDO(DurableObject):
 
         self.ctx.acceptWebSocket(server)
 
-        bridge = WebSocketBridge(server)
+        # Pass ws_pair as parent to keep it alive
+        bridge = WebSocketBridge(server, parent=ws_pair)
 
         url = js.URL.new(request.url)
         path = url.pathname
