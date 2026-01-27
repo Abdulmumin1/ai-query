@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Fix Cloudflare Worker SSL error by disabling SSL verification in Google provider when running in Cloudflare"
-}

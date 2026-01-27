@@ -1,6 +1,12 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.9
+
+- patch: Centralize aiohttp session creation in BaseProvider to handle Cloudflare SSL support across all providers
+- patch: Fix Cloudflare Worker SSL error by disabling SSL verification in Google provider when running in Cloudflare
+- patch: Improve Cloudflare runtime detection using sys.platform check and add error logging to Cloudflare adapter
+
 ## 1.7.8
 
 - patch: Update Cloudflare emit handler to support SSE broadcasting alongside WebSockets

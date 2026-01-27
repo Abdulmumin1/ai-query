@@ -1,0 +1,18 @@
+{
+  "changes": [
+    {
+      "description": "Centralize aiohttp session creation in BaseProvider to handle Cloudflare SSL support across all providers",
+      "type": "patch"
+    },
+    {
+      "description": "Fix Cloudflare Worker SSL error by disabling SSL verification in Google provider when running in Cloudflare",
+      "type": "patch"
+    },
+    {
+      "description": "Improve Cloudflare runtime detection using sys.platform check and add error logging to Cloudflare adapter",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-27T11:39:08+00:00",
+  "version": "1.7.9"
+}
