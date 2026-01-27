@@ -35,6 +35,24 @@ from ai_query.agents.transport.cloudflare import DurableObjectTransport
 from ai_query.agents.websocket import Connection, ConnectionContext
 
 
+def _safe_wait_until(ctx: Any, awaitable: Any) -> None:
+    """Wrap awaitable for waitUntil to prevent borrowed proxy destruction.
+
+    In Pyodide, when a Python coroutine is passed to JavaScript's waitUntil,
+    it creates a "borrowed proxy" that gets destroyed when the Python function
+    returns. Using create_once_callable creates a persistent proxy that
+    auto-destroys after being called once.
+    """
+    try:
+        # Wrap the awaitable in create_once_callable to prevent proxy destruction
+        # This creates a persistent reference that survives function return
+        wrapped = create_once_callable(lambda: awaitable)
+        ctx.waitUntil(wrapped())
+    except Exception:
+        # Fallback to raw awaitable if wrapping fails
+        ctx.waitUntil(awaitable)
+
+
 class WebSocketBridge(Connection):
     """Bridges a Cloudflare WebSocket to the Agent Connection protocol."""
 
@@ -148,7 +166,7 @@ class AgentDO(DurableObject):
                 result = await self.agent.handle_request(data)
 
                 # Ensure background tasks (like emit) are completed before hibernation
-                self.ctx.waitUntil(self._drain_mailbox())
+                _safe_wait_until(self.ctx, self._drain_mailbox())
 
                 return self._json_response(result)
             elif request.method == "GET":
@@ -201,7 +219,7 @@ class AgentDO(DurableObject):
         )
 
         connect_task = asyncio.create_task(self.agent.on_connect(bridge, ctx))
-        self.ctx.waitUntil(connect_task)
+        _safe_wait_until(self.ctx, connect_task)
 
         return js.Response.new(
             None,
@@ -218,7 +236,7 @@ class AgentDO(DurableObject):
         bridge = WebSocketBridge(ws)
         await self.agent.on_message(bridge, message)
 
-        self.ctx.waitUntil(self._drain_mailbox())
+        _safe_wait_until(self.ctx, self._drain_mailbox())
 
     async def webSocketClose(
         self, ws: Any, code: int, reason: str, wasClean: bool
