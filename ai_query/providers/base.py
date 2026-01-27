@@ -131,7 +131,19 @@ class BaseProvider(ABC):
         which is required in that environment as the native 'ssl' module is not available.
         """
         import os
+        import sys
         import aiohttp
+
+        # In Emscripten/Pyodide environments (like Cloudflare Workers), we typically
+        # rely on patches like pyodide-http to handle networking via the Fetch API.
+        # These patches work by injecting a custom connector into ClientSession.
+        # If we explicitly pass a TCPConnector (even with ssl=False), we override
+        # this mechanism and try to use native sockets, which fail.
+        if (
+            sys.platform == "emscripten"
+            or os.environ.get("WORKER_RUNTIME") == "cloudflare"
+        ):
+            return aiohttp.ClientSession()
 
         connector = None
         # Check for Cloudflare/Pyodide environment by checking for ssl module
@@ -139,17 +151,11 @@ class BaseProvider(ABC):
         try:
             import ssl
         except ImportError:
+            # If SSL is missing and we haven't already returned for emscripten,
+            # we might still be in a restricted environment.
+            # However, if we are here, we probably aren't in standard Pyodide
+            # (which is caught by sys.platform check above).
             connector = aiohttp.TCPConnector(ssl=False)
-        else:
-            # Even if ssl imports, we might be in an environment where we want to force disable it
-            # if we are definitely in Cloudflare
-            import sys
-
-            if (
-                sys.platform == "emscripten"
-                or os.environ.get("WORKER_RUNTIME") == "cloudflare"
-            ):
-                connector = aiohttp.TCPConnector(ssl=False)
 
         return aiohttp.ClientSession(connector=connector)
 
