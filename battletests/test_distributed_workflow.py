@@ -45,12 +45,12 @@ class CoordinatorAgent(Agent):
         # Call the remote researcher
         researcher_proxy = self.call("researcher", agent_cls=ResearcherAgent)
         research_summary = await researcher_proxy.research(topic=topic)
-        print(f"[{self.id}] Got research summary: '{research_summary[:30]}...'")
+        print(f"[{self.id}] Got research summary: '{research_summary}...{research_summary[-30:]}'")
         
         # Call the remote writer
         writer_proxy = self.call("writer", agent_cls=WriterAgent)
         article_intro = await writer_proxy.write(research_summary=research_summary)
-        print(f"[{self.id}] Got article intro: '{article_intro[:30]}...'")
+        print(f"[{self.id}] Got article intro: '{article_intro}...{article_intro[-30:]}'")
         
         return {
             "topic": topic,
