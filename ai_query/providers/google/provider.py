@@ -117,7 +117,16 @@ class GoogleProvider(BaseProvider):
             **kwargs: Additional configuration.
         """
         super().__init__(api_key, **kwargs)
-        self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        self.api_key = (
+            api_key
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")
+        )
+        if not self.api_key:
+            raise ValueError(
+                "Error: Google Generative AI API key is missing. Pass it using the 'api_key' parameter "
+                "or the GOOGLE_GENERATIVE_AI_API_KEY environment variable."
+            )
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     async def _convert_messages(
@@ -159,37 +168,58 @@ class GoogleProvider(BaseProvider):
                             media_type = part.get("media_type", "image/png")
 
                             # Handle URL
-                            if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
-                                image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                            if isinstance(image_data, str) and image_data.startswith(
+                                ("http://", "https://")
+                            ):
+                                (
+                                    image_data,
+                                    media_type,
+                                ) = await self._fetch_resource_as_base64(
+                                    image_data, session
+                                )
                             elif isinstance(image_data, bytes):
                                 import base64
+
                                 image_data = base64.b64encode(image_data).decode()
 
-                            parts.append({
-                                "inline_data": {
-                                    "mime_type": media_type,
-                                    "data": image_data,
+                            parts.append(
+                                {
+                                    "inline_data": {
+                                        "mime_type": media_type,
+                                        "data": image_data,
+                                    }
                                 }
-                            })
+                            )
                         elif part.get("type") == "file":
                             file_data = part.get("data")
                             media_type = part.get("media_type")
 
                             # Handle URL
-                            if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
-                                file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                            if isinstance(file_data, str) and file_data.startswith(
+                                ("http://", "https://")
+                            ):
+                                (
+                                    file_data,
+                                    fetched_type,
+                                ) = await self._fetch_resource_as_base64(
+                                    file_data, session
+                                )
                                 if not media_type:
                                     media_type = fetched_type
                             elif isinstance(file_data, bytes):
                                 import base64
+
                                 file_data = base64.b64encode(file_data).decode()
 
-                            parts.append({
-                                "inline_data": {
-                                    "mime_type": media_type or "application/octet-stream",
-                                    "data": file_data,
+                            parts.append(
+                                {
+                                    "inline_data": {
+                                        "mime_type": media_type
+                                        or "application/octet-stream",
+                                        "data": file_data,
+                                    }
                                 }
-                            })
+                            )
                     # Handle dataclass-style parts
                     elif hasattr(part, "type") and part.type == "tool_call":
                         # ToolCallPart - convert to functionCall
@@ -203,18 +233,24 @@ class GoogleProvider(BaseProvider):
                             }
                             # Include thoughtSignature if present (required for Gemini 3)
                             if tc.metadata and tc.metadata.get("thought_signature"):
-                                part_data["thoughtSignature"] = tc.metadata["thought_signature"]
+                                part_data["thoughtSignature"] = tc.metadata[
+                                    "thought_signature"
+                                ]
                             parts.append(part_data)
                     elif hasattr(part, "type") and part.type == "tool_result":
                         # ToolResultPart - convert to functionResponse
                         tr = part.tool_result
                         if tr:
-                            parts.append({
-                                "functionResponse": {
-                                    "name": tr.tool_name,
-                                    "response": tr.result if isinstance(tr.result, dict) else {"result": tr.result},
+                            parts.append(
+                                {
+                                    "functionResponse": {
+                                        "name": tr.tool_name,
+                                        "response": tr.result
+                                        if isinstance(tr.result, dict)
+                                        else {"result": tr.result},
+                                    }
                                 }
-                            })
+                            )
                     elif isinstance(part, TextPart):
                         parts.append({"text": part.text})
                     elif isinstance(part, ImagePart):
@@ -222,37 +258,56 @@ class GoogleProvider(BaseProvider):
                         media_type = getattr(part, "media_type", "image/png")
 
                         # Handle URL
-                        if isinstance(image_data, str) and image_data.startswith(("http://", "https://")):
-                            image_data, media_type = await self._fetch_resource_as_base64(image_data, session)
+                        if isinstance(image_data, str) and image_data.startswith(
+                            ("http://", "https://")
+                        ):
+                            (
+                                image_data,
+                                media_type,
+                            ) = await self._fetch_resource_as_base64(
+                                image_data, session
+                            )
                         elif isinstance(image_data, bytes):
                             import base64
+
                             image_data = base64.b64encode(image_data).decode()
 
-                        parts.append({
-                            "inline_data": {
-                                "mime_type": media_type,
-                                "data": image_data,
+                        parts.append(
+                            {
+                                "inline_data": {
+                                    "mime_type": media_type,
+                                    "data": image_data,
+                                }
                             }
-                        })
+                        )
                     elif isinstance(part, FilePart):
                         file_data = part.data
                         media_type = getattr(part, "media_type", None)
 
                         # Handle URL
-                        if isinstance(file_data, str) and file_data.startswith(("http://", "https://")):
-                            file_data, fetched_type = await self._fetch_resource_as_base64(file_data, session)
+                        if isinstance(file_data, str) and file_data.startswith(
+                            ("http://", "https://")
+                        ):
+                            (
+                                file_data,
+                                fetched_type,
+                            ) = await self._fetch_resource_as_base64(file_data, session)
                             if not media_type:
                                 media_type = fetched_type
                         elif isinstance(file_data, bytes):
                             import base64
+
                             file_data = base64.b64encode(file_data).decode()
 
-                        parts.append({
-                            "inline_data": {
-                                "mime_type": media_type or "application/octet-stream",
-                                "data": file_data,
+                        parts.append(
+                            {
+                                "inline_data": {
+                                    "mime_type": media_type
+                                    or "application/octet-stream",
+                                    "data": file_data,
+                                }
                             }
-                        })
+                        )
                 contents.append({"role": role, "parts": parts})
 
         return system_instruction, contents
@@ -261,11 +316,13 @@ class GoogleProvider(BaseProvider):
         """Convert ToolSet to Google function calling format."""
         function_declarations = []
         for name, tool in tools.items():
-            function_declarations.append({
-                "name": name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            })
+            function_declarations.append(
+                {
+                    "name": name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            )
         return [{"functionDeclarations": function_declarations}]
 
     async def generate(
@@ -295,7 +352,9 @@ class GoogleProvider(BaseProvider):
 
         async with aiohttp.ClientSession() as session:
             # Convert messages
-            system_instruction, contents = await self._convert_messages(messages, session)
+            system_instruction, contents = await self._convert_messages(
+                messages, session
+            )
 
             # Build generation config from kwargs (common params)
             generation_config: dict[str, Any] = {}
@@ -338,7 +397,7 @@ class GoogleProvider(BaseProvider):
                     generation_config[camel_key] = google_options.pop(snake_key)
                 elif camel_key in google_options:
                     generation_config[camel_key] = google_options.pop(camel_key)
-            
+
             # Also check for direct camelCase keys that aren't in the mapping
             direct_keys = ["temperature", "seed"]
             for key in direct_keys:
@@ -360,7 +419,9 @@ class GoogleProvider(BaseProvider):
             }
 
             if system_instruction:
-                request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+                request_body["systemInstruction"] = {
+                    "parts": [{"text": system_instruction}]
+                }
 
             if generation_config:
                 request_body["generationConfig"] = generation_config
@@ -405,12 +466,14 @@ class GoogleProvider(BaseProvider):
                     metadata = {}
                     if "thoughtSignature" in part:
                         metadata["thought_signature"] = part["thoughtSignature"]
-                    tool_calls.append(ToolCall(
-                        id=f"call_{i}",  # Google doesn't provide IDs, generate one
-                        name=fc.get("name"),
-                        arguments=fc.get("args", {}),
-                        metadata=metadata,
-                    ))
+                    tool_calls.append(
+                        ToolCall(
+                            id=f"call_{i}",  # Google doesn't provide IDs, generate one
+                            name=fc.get("name"),
+                            arguments=fc.get("args", {}),
+                            metadata=metadata,
+                        )
+                    )
 
         # Build usage info if available
         usage = None
@@ -490,7 +553,7 @@ class GoogleProvider(BaseProvider):
                 generation_config[camel_key] = google_options.pop(snake_key)
             elif camel_key in google_options:
                 generation_config[camel_key] = google_options.pop(camel_key)
-        
+
         # Also check for direct camelCase keys that aren't in the mapping
         direct_keys = ["temperature", "seed"]
         for key in direct_keys:
@@ -512,7 +575,9 @@ class GoogleProvider(BaseProvider):
         }
 
         if system_instruction:
-            request_body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+            request_body["systemInstruction"] = {
+                "parts": [{"text": system_instruction}]
+            }
 
         if generation_config:
             request_body["generationConfig"] = generation_config
@@ -523,8 +588,7 @@ class GoogleProvider(BaseProvider):
             if isinstance(safety_settings, dict):
                 # Convert dict format {category: threshold} to list format
                 request_body["safetySettings"] = [
-                    {"category": k, "threshold": v}
-                    for k, v in safety_settings.items()
+                    {"category": k, "threshold": v} for k, v in safety_settings.items()
                 ]
             elif isinstance(safety_settings, list):
                 # Already in list format, use as-is
@@ -563,7 +627,9 @@ class GoogleProvider(BaseProvider):
 
         async with aiohttp.ClientSession() as session:
             # Convert messages
-            system_instruction, contents = await self._convert_messages(messages, session)
+            system_instruction, contents = await self._convert_messages(
+                messages, session
+            )
 
             # Build request body
             request_body = self._build_request_body(
@@ -594,7 +660,9 @@ class GoogleProvider(BaseProvider):
                         usage = Usage(
                             input_tokens=usage_metadata.get("promptTokenCount", 0),
                             output_tokens=usage_metadata.get("candidatesTokenCount", 0),
-                            cached_tokens=usage_metadata.get("cachedContentTokenCount", 0),
+                            cached_tokens=usage_metadata.get(
+                                "cachedContentTokenCount", 0
+                            ),
                             total_tokens=usage_metadata.get("totalTokenCount", 0),
                         )
 
@@ -614,20 +682,24 @@ class GoogleProvider(BaseProvider):
                                 # Capture thoughtSignature for Gemini 3 models
                                 metadata = {}
                                 if "thoughtSignature" in part:
-                                    metadata["thought_signature"] = part["thoughtSignature"]
-                                tool_calls.append(ToolCall(
-                                    id=f"call_{len(tool_calls)}",  # Google doesn't provide IDs
-                                    name=fc.get("name"),
-                                    arguments=fc.get("args", {}),
-                                    metadata=metadata,
-                                ))
+                                    metadata["thought_signature"] = part[
+                                        "thoughtSignature"
+                                    ]
+                                tool_calls.append(
+                                    ToolCall(
+                                        id=f"call_{len(tool_calls)}",  # Google doesn't provide IDs
+                                        name=fc.get("name"),
+                                        arguments=fc.get("args", {}),
+                                        metadata=metadata,
+                                    )
+                                )
 
         # Yield final chunk with metadata
         yield StreamChunk(
             is_final=True,
             usage=usage,
             finish_reason=finish_reason,
-            tool_calls=tool_calls if tool_calls else None
+            tool_calls=tool_calls if tool_calls else None,
         )
 
     async def embed(
@@ -656,9 +728,7 @@ class GoogleProvider(BaseProvider):
         async with aiohttp.ClientSession() as session:
             request_body: dict[str, Any] = {
                 "model": f"models/{model}",
-                "content": {
-                    "parts": [{"text": value}]
-                },
+                "content": {"parts": [{"text": value}]},
                 **kwargs,
                 **google_options,
             }
@@ -714,9 +784,7 @@ class GoogleProvider(BaseProvider):
             for value in values:
                 req = {
                     "model": f"models/{model}",
-                    "content": {
-                        "parts": [{"text": value}]
-                    },
+                    "content": {"parts": [{"text": value}]},
                     **kwargs,
                     **google_options,
                 }

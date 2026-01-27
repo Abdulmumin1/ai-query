@@ -78,6 +78,36 @@ async with agent:
     await agent.clear()
 ```
 
+### Typed State (Pydantic)
+
+For better DX, you can define your state structure directly in the class body. This provides IDE autocompletion and automatic validation.
+
+```python
+from pydantic import BaseModel
+from ai_query.agents import Agent
+
+class UserState(BaseModel):
+    name: str = "Anonymous"
+    age: int | None = None
+
+class MyAgent(Agent):
+    state = UserState  # Blueprint
+
+    async def update_profile(self, name: str):
+        # Full autocomplete for .name!
+        await self.update_state(name=name)
+```
+
+You can also use a plain dictionary as a blueprint:
+
+```python
+class CounterAgent(Agent):
+    state = {"count": 0}
+
+    async def increment(self):
+        await self.update_state(count=self.state["count"] + 1)
+```
+
 ### Durability & Event Replay
 
 A common challenge with real-time agents is network stability. If a client disconnects while the agent is streaming a response, that data is typically lost.

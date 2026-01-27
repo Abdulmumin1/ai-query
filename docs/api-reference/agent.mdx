@@ -21,10 +21,22 @@ Agent(
     system: str = "You are a helpful assistant.",
     tools: ToolSet | None = None,
     storage: Storage | None = None,
-    initial_state: dict[str, Any] | None = None,
+    initial_state: StateT | None = None,
     stop_when: StopCondition | list[StopCondition] | None = None,
     provider_options: ProviderOptions | None = None,
 )
+```
+
+### Typed State (Optional)
+
+`Agent` supports **Pydantic** for typed state. To use it, subclass `Agent` and set `state_model`:
+
+```python
+class MyState(BaseModel):
+    count: int = 0
+
+class MyAgent(Agent[MyState]):
+    state_model = MyState
 ```
 
 ### Parameters
@@ -35,7 +47,7 @@ Agent(
 
 <ParamField path="model" type="LanguageModel">
   The language model to use. Created with provider functions like
-  `openai("gpt-4o")`. If not provided, defaults to `google("gemini-2.0-flash")`.
+  `openai("gpt-4o")`.
 </ParamField>
 
 <ParamField path="storage" type="Storage">
