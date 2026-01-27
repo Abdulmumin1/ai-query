@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.6
+
+- patch: Fix Cloudflare Response initialization by explicitly converting options to JS objects
+
 ## 1.7.5
 
 - patch: Fix Cloudflare Durable Object stub retrieval using getByName

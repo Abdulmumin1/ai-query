@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Fix Cloudflare Response initialization by explicitly converting options to JS objects"
-}
