@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Fix Cloudflare Durable Object stub retrieval using getByName"
+}

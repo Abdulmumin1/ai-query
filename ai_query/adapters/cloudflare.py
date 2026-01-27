@@ -1,4 +1,3 @@
-
 import asyncio
 import json
 import re
@@ -8,10 +7,12 @@ from typing import Any, Dict, List, Optional, Type, Union
 try:
     from workers import DurableObject
 except ImportError:
+
     class DurableObject:  # type: ignore
         def __init__(self, ctx: Any, env: Any):
             self.ctx = ctx
             self.env = env
+
 
 try:
     import js
@@ -48,7 +49,7 @@ class AgentDO(DurableObject):
 
     Subclass this and set `agent_class` to your Agent implementation.
     Inherits from `workers.DurableObject`.
-    
+
     Implements WebSocket Hibernation API: https://developers.cloudflare.com/durable-objects/best-practices/websockets/#websocket-hibernation-api
     """
 
@@ -58,16 +59,21 @@ class AgentDO(DurableObject):
         super().__init__(ctx, env)
         self.ctx = ctx
         self.env = env
-        
+
         # The `id` is available on the context object in the new Python runtime
         self.id = str(ctx.id) if hasattr(ctx, "id") else "unknown"
-        
+
         self.storage = DurableObjectStorage(ctx.storage)
         self.transport = DurableObjectTransport(env)
-        
+
         # Provider options extraction
         provider_options: Dict[str, Any] = {}
-        for key in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]:
+        for key in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "OPENROUTER_API_KEY",
+        ]:
             val = getattr(env, key, None)
             if val:
                 provider_options[key] = val
@@ -76,11 +82,9 @@ class AgentDO(DurableObject):
             id=self.id,
             storage=self.storage,
             transport=self.transport,
-            provider_options=provider_options
+            provider_options=provider_options,
         )
-        self.agent.env = env # type: ignore
-        
-
+        self.agent.env = env  # type: ignore
 
     async def fetch(self, request: Any) -> Any:
         try:
@@ -92,21 +96,21 @@ class AgentDO(DurableObject):
             upgrade = headers.get("Upgrade")
             if upgrade == "websocket":
                 return self.handle_websocket_upgrade(request)
-            
+
             if request.method == "POST":
                 body = await request.json()
                 data = body.to_py() if hasattr(body, "to_py") else body
                 result = await self.agent.handle_request(data)
-                
+
                 # Ensure background tasks (like emit) are completed before hibernation
                 self.ctx.waitUntil(self._drain_mailbox())
-                
+
                 return self._json_response(result)
             elif request.method == "GET":
-                 return self._json_response({"agent_id": self.agent.id})
+                return self._json_response({"agent_id": self.agent.id})
 
             return js.Response.new("Method not allowed", {"status": 405})
-            
+
         except Exception as e:
             return self._json_response({"error": str(e)}, status=500)
 
@@ -115,24 +119,20 @@ class AgentDO(DurableObject):
         pair = js.WebSocketPair.new()
         client = pair[0]
         server = pair[1]
-        
+
         # Accept the connection. This attaches the WebSocket to the Durable Object.
         self.ctx.acceptWebSocket(server)
-        
+
         bridge = WebSocketBridge(server)
         # We assume root path for connection context as standard convention
         ctx = ConnectionContext(path="/", headers={}, query_params={})
-        
-        
+
         # Trigger the initial on_connect event asynchronously
         # We use waitUntil to ensure on_connect finishes (e.g. if it emits events)
         connect_task = asyncio.create_task(self.agent.on_connect(bridge, ctx))
         self.ctx.waitUntil(connect_task)
 
-        return js.Response.new(None, {
-            "status": 101,
-            "webSocket": client
-        })
+        return js.Response.new(None, {"status": 101, "webSocket": client})
 
     # --- WebSocket Hibernation Events ---
     # These methods are called by the runtime when events occur on accepted WebSockets.
@@ -141,16 +141,18 @@ class AgentDO(DurableObject):
         """Called when a message is received from a WebSocket."""
         # Ensure agent is running. If the DO was hibernating, this will reload state.
         if not self.agent._running:
-             await self.agent.start()
-        
+            await self.agent.start()
+
         bridge = WebSocketBridge(ws)
         # message might be string or bytes
         await self.agent.on_message(bridge, message)
-        
+
         # Ensure any side-effects from processing the message are completed
         self.ctx.waitUntil(self._drain_mailbox())
 
-    async def webSocketClose(self, ws: Any, code: int, reason: str, wasClean: bool) -> None:
+    async def webSocketClose(
+        self, ws: Any, code: int, reason: str, wasClean: bool
+    ) -> None:
         """Called when a WebSocket is closed."""
         bridge = WebSocketBridge(ws)
         await self.agent.on_close(bridge, code, reason)
@@ -163,7 +165,7 @@ class AgentDO(DurableObject):
     def _json_response(self, data: Any, status: int = 200) -> Any:
         return js.Response.new(
             json.dumps(data),
-            to_js({"status": status, "headers": {"Content-Type": "application/json"}})
+            to_js({"status": status, "headers": {"Content-Type": "application/json"}}),
         )
 
     async def _drain_mailbox(self) -> None:
@@ -173,7 +175,9 @@ class AgentDO(DurableObject):
 
     async def alarm(self) -> None:
         if not self.agent._processor_task or self.agent._processor_task.done():
-            self.agent._processor_task = asyncio.create_task(self.agent._process_mailbox())
+            self.agent._processor_task = asyncio.create_task(
+                self.agent._process_mailbox()
+            )
 
 
 class CloudflareRegistry:
@@ -187,7 +191,7 @@ class CloudflareRegistry:
     async def handle_request(self, request: Any) -> Any:
         url = js.URL.new(request.url)
         path = url.pathname
-        
+
         parts = path.strip("/").split("/")
         if len(parts) >= 2 and parts[0] == "agent":
             agent_id = parts[1]
@@ -196,10 +200,9 @@ class CloudflareRegistry:
                 if pattern.match(agent_id):
                     binding = b
                     break
-            
+
             if binding:
-                id_obj = binding.idFromName(agent_id)
-                stub = id_obj.getStub()
+                stub = binding.getByName(agent_id)
                 return await stub.fetch(request)
-        
+
         return js.Response.new("Agent not found", {"status": 404})
