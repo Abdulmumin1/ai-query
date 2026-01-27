@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.15
+
+- patch: release
+
 ## 1.7.14
 
 - patch: release
