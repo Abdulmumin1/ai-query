@@ -1,12 +1,18 @@
 import asyncio
 import json
 import re
+import os
 from typing import Any, Dict, List, Optional, Type, Union
 
-# Try to import workers.DurableObject (Cloudflare runtime)
+# Force Cloudflare runtime environment for BaseProvider detection
+# This ensures providers know to rely on pyodide-http patching
+os.environ["WORKER_RUNTIME"] = "cloudflare"
+
+# Try to import workers (Cloudflare runtime)
 try:
-    from workers import DurableObject
+    from workers import DurableObject, Response
 except ImportError:
+    Response = None
 
     class DurableObject:  # type: ignore
         def __init__(self, ctx: Any, env: Any):
@@ -145,8 +151,9 @@ class AgentDO(DurableObject):
 
     def handle_websocket_upgrade(self, request: Any) -> Any:
         """Handle WebSocket upgrade using Hibernation API."""
-        # Create WebSocketPair and keep a reference to prevent "borrowed proxy" errors
-        # causing the proxy to be destroyed before object_values() completes.
+        # Create WebSocketPair and keep a reference to prevent "borrowed proxy" errors.
+        # We strictly follow the docs using object_values(), but ensuring the parent object
+        # stays alive during the unpacking.
         ws_pair = js.WebSocketPair.new()
         client, server = ws_pair.object_values()
 

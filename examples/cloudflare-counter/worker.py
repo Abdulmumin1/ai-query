@@ -1,8 +1,8 @@
-from ai_query import Agent, action
 import pyodide_http
 
 pyodide_http.patch_all()
 
+from ai_query import Agent, action
 from ai_query.adapters.cloudflare import AgentDO, CloudflareRegistry
 from workers import DurableObject, Response, WorkerEntrypoint
 
