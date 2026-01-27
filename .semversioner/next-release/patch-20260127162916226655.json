@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "fix(cloudflare): resolve SSL support and WebSocket proxy errors in Cloudflare Workers"
+}
