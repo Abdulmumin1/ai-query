@@ -22,11 +22,12 @@ except ImportError:
 
 try:
     import js
-    from pyodide.ffi import to_js, create_proxy
+    from pyodide.ffi import to_js, create_proxy, create_once_callable
 except ImportError:
     js = None
     to_js = lambda x: x
     create_proxy = lambda x: x
+    create_once_callable = lambda x: x
 
 from ai_query.agents.agent import Agent
 from ai_query.agents.storage.cloudflare import DurableObjectStorage
@@ -132,6 +133,18 @@ class AgentDO(DurableObject):
             if request.method == "POST":
                 body = await request.json()
                 data = body.to_py() if hasattr(body, "to_py") else body
+
+                # Parse URL path to determine action type
+                url = js.URL.new(request.url)
+                path = url.pathname
+                parts = path.strip("/").split("/")
+
+                # Path format: /agent/<agent_id>/<action>
+                # If action is in the path but not in body, inject it
+                if len(parts) >= 3 and "action" not in data:
+                    path_action = parts[2]  # e.g., "invoke", "chat"
+                    data["action"] = path_action
+
                 result = await self.agent.handle_request(data)
 
                 # Ensure background tasks (like emit) are completed before hibernation
