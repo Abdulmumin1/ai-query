@@ -134,15 +134,22 @@ class BaseProvider(ABC):
         import aiohttp
 
         connector = None
-        # Check for Cloudflare/Pyodide environment
-        # sys.platform is 'emscripten' in Cloudflare Workers (Pyodide)
-        import sys
-
-        if (
-            sys.platform == "emscripten"
-            or os.environ.get("WORKER_RUNTIME") == "cloudflare"
-        ):
+        # Check for Cloudflare/Pyodide environment by checking for ssl module
+        # This is more robust than checking sys.platform or env vars
+        try:
+            import ssl
+        except ImportError:
             connector = aiohttp.TCPConnector(ssl=False)
+        else:
+            # Even if ssl imports, we might be in an environment where we want to force disable it
+            # if we are definitely in Cloudflare
+            import sys
+
+            if (
+                sys.platform == "emscripten"
+                or os.environ.get("WORKER_RUNTIME") == "cloudflare"
+            ):
+                connector = aiohttp.TCPConnector(ssl=False)
 
         return aiohttp.ClientSession(connector=connector)
 
