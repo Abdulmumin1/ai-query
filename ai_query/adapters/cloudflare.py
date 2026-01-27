@@ -153,9 +153,28 @@ class AgentDO(DurableObject):
         self.ctx.acceptWebSocket(server)
 
         bridge = WebSocketBridge(server)
+
+        # Extract metadata from request to avoid holding onto the borrowed request proxy
+        # which would cause "borrowed proxy automatically destroyed" errors in async tasks.
+        url = js.URL.new(request.url)
+        path = url.pathname
+
+        # Convert headers to dict
+        headers = {}
+        # Iterate over headers (JS headers object is iterable)
+        for pair in request.headers:
+            # pair is [key, value]
+            key, value = pair.object_values()
+            headers[key] = value
+
         # We assume root path for connection context as standard convention
         ctx = ConnectionContext(
-            request=request, metadata={"path": "/", "headers": {}, "query_params": {}}
+            request=None,  # Do not store borrowed request proxy
+            metadata={
+                "path": path,
+                "headers": headers,
+                "query_params": dict(to_js(url.searchParams)),  # simplified
+            },
         )
 
         # Trigger the initial on_connect event asynchronously
