@@ -88,6 +88,20 @@ class AgentDO(DurableObject):
             self.agent.model = self.agent_class.model
         self.agent.env = env  # type: ignore
 
+        # Inject emit handler for WebSocket delivery
+        async def cloudflare_emit_handler(
+            event_type: str, data: Dict[str, Any], event_id: int
+        ) -> None:
+            payload = json.dumps({"id": event_id, "type": event_type, "data": data})
+            # Broadcast to all accepted WebSockets
+            for ws in self.ctx.getWebSockets():
+                try:
+                    ws.send(payload)
+                except Exception:
+                    pass
+
+        self.agent._emit_handler = cloudflare_emit_handler
+
     async def fetch(self, request: Any) -> Any:
         try:
             # Lazy start: Ensure agent is initialized
