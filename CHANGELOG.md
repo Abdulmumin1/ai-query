@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.8
+
+- patch: Update Cloudflare emit handler to support SSE broadcasting alongside WebSockets
+
 ## 1.7.7
 
 - patch: Fix Cloudflare adapter to correctly inherit class-level model definitions on Agent subclasses
