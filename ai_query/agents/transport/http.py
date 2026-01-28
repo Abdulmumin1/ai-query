@@ -185,25 +185,36 @@ class HTTPTransport(AgentTransport):
                 if signal:
                     signal.add_listener(lambda: asyncio.create_task(response.aclose()))
 
+                current_event = None
                 async for line in response.aiter_lines():
                     if signal:
                         signal.throw_if_aborted()
 
                     if not line.strip():
+                        # Empty line marks end of SSE event
+                        current_event = None
                         continue
 
-                    if line.startswith("data: "):
+                    if line.startswith("event: "):
+                        current_event = line[7:].strip()
+                    elif line.startswith("data: "):
                         data_str = line[6:]
-                        try:
-                            # Decode JSON data
-                            chunk = json.loads(data_str)
-                            if isinstance(chunk, str):
-                                yield chunk
-                        except json.JSONDecodeError:
-                            pass
-                    elif line.startswith("event: error"):
-                        # We need to read the next line for data
-                        pass  # Simplified handling for now
+                        # Only yield chunks, not start/end/error events
+                        if current_event == "chunk" and data_str:
+                            try:
+                                # Decode JSON data
+                                chunk = json.loads(data_str)
+                                if isinstance(chunk, str):
+                                    yield chunk
+                            except json.JSONDecodeError:
+                                # Fallback: yield raw data if not valid JSON
+                                yield data_str
+                        elif current_event == "error":
+                            try:
+                                error_msg = json.loads(data_str)
+                                raise Exception(f"Stream error: {error_msg}")
+                            except json.JSONDecodeError:
+                                raise Exception(f"Stream error: {data_str}")
         except asyncio.CancelledError:
             if signal and signal.aborted:
                 raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")

@@ -746,15 +746,13 @@ class Agent(Generic[StateT]):
                 # Stream chunks using the agent's stream method
                 async for chunk in self.stream(message):
                     full_text += chunk
-                    # SSE format: escape newlines for safety
-                    safe_chunk = chunk.replace("\n", "\\n")
-                    yield f"event: chunk\ndata: {safe_chunk}\n\n"
+                    # SSE format: JSON-encode the chunk for proper parsing by client
+                    yield f"event: chunk\ndata: {json.dumps(chunk)}\n\n"
 
                 # End event with full text
-                safe_full = json.dumps(full_text)
-                yield f"event: end\ndata: {safe_full}\n\n"
+                yield f"event: end\ndata: {json.dumps(full_text)}\n\n"
 
             except Exception as e:
-                yield f"event: error\ndata: {str(e)}\n\n"
+                yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
         else:
-            yield f"event: error\ndata: Streaming not supported for action: {action}\n\n"
+            yield f"event: error\ndata: {json.dumps(f'Streaming not supported for action: {action}')}\n\n"
