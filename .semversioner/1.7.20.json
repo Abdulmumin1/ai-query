@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Fix Cloudflare adapter to parse URL path for action type in invoke requests",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-01-27T20:27:17+00:00",
+  "version": "1.7.20"
+}
