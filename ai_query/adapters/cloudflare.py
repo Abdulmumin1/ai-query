@@ -163,6 +163,10 @@ class AgentDO(DurableObject):
                     path_action = parts[2]  # e.g., "invoke", "chat"
                     data["action"] = path_action
 
+                # Check if this is a streaming request
+                if data.get("stream"):
+                    return await self._handle_stream_request(data)
+
                 result = await self.agent.handle_request(data)
 
                 # Ensure background tasks (like emit) are completed before hibernation
@@ -255,6 +259,50 @@ class AgentDO(DurableObject):
             js.Object.fromEntries(
                 to_js(
                     {"status": status, "headers": {"Content-Type": "application/json"}}
+                )
+            ),
+        )
+
+    async def _handle_stream_request(self, data: Dict[str, Any]) -> Any:
+        """Handle a streaming request and return an SSE response.
+
+        Uses ReadableStream to stream SSE events from handle_request_stream.
+        """
+        # Create a TransformStream for SSE
+        transform_stream = js.TransformStream.new()
+        readable = transform_stream.readable
+        writable = transform_stream.writable
+        writer = writable.getWriter()
+
+        async def stream_task():
+            try:
+                async for sse_chunk in self.agent.handle_request_stream(data):
+                    # Write raw SSE chunk (already formatted by handle_request_stream)
+                    await writer.write(js.TextEncoder.new().encode(sse_chunk))
+            except Exception as e:
+                error_msg = f"event: error\ndata: {str(e)}\n\n"
+                await writer.write(js.TextEncoder.new().encode(error_msg))
+            finally:
+                await writer.close()
+                _safe_wait_until(self.ctx, self._drain_mailbox())
+
+        # Start streaming task in background
+        task = asyncio.create_task(stream_task())
+        _safe_wait_until(self.ctx, task)
+
+        # Return SSE response with readable stream
+        return js.Response.new(
+            readable,
+            js.Object.fromEntries(
+                to_js(
+                    {
+                        "status": 200,
+                        "headers": {
+                            "Content-Type": "text/event-stream",
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                        },
+                    }
                 )
             ),
         )

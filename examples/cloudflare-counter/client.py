@@ -3,6 +3,7 @@ import argparse
 import aiohttp
 import json
 import sys
+from ai_query import connect
 
 
 async def monitor_websocket(url: str, agent_id: str):
@@ -31,39 +32,34 @@ async def monitor_websocket(url: str, agent_id: str):
 
 async def interactive_loop(url: str, agent_id: str):
     """Sends HTTP requests to increment or chat."""
-    invoke_url = f"{url}/agent/{agent_id}/invoke"
-    chat_url = f"{url}/agent/{agent_id}/chat"
+    agent = connect(f"{url}/agent/{agent_id}")
 
-    print(f"\n[Commands] 'i': increment, 'q': quit, anything else: chat")
+    print(f"\n[Commands] 'i': increment, 's': stream chat, 'q': quit, anything else: chat")
 
-    async with aiohttp.ClientSession() as session:
-        while True:
-            cmd = await asyncio.to_thread(input, "> ")
-            if cmd.lower() == "q":
-                break
+    while True:
+        cmd = await asyncio.to_thread(input, "> ")
+        if cmd.lower() == "q":
+            break
 
-            try:
-                if cmd.lower() == "i":
-                    # Increment Action
-                    payload = {"payload": {"method": "increment"}}
-                    async with session.post(invoke_url, json=payload) as resp:
-                        if resp.status != 200:
-                            print(f"Error {resp.status}: {await resp.text()}")
-                            continue
-                        data = await resp.json()
-                        print(f"[Count] New Value: {data.get('result')}")
-                else:
-                    # Chat Message
-                    payload = {"message": cmd}
-                    async with session.post(chat_url, json=payload) as resp:
-                        if resp.status != 200:
-                            print(f"Error {resp.status}: {await resp.text()}")
-                            continue
-                        data = await resp.json()
-                        print(f"[AI] {data.get('response')}")
+        try:
+            if cmd.lower() == "i":
+                # Increment Action using RemoteAgent
+                result = await agent.call().increment()
+                print(f"[Count] New Value: {result}")
+            elif cmd.lower() == "s":
+                # Stream chat demo
+                user_msg = await asyncio.to_thread(input, "Message to stream: ")
+                print("[AI] ", end="", flush=True)
+                async for chunk in agent.stream(user_msg):
+                    print(chunk, end="", flush=True)
+                print()  # newline after stream
+            else:
+                # Chat Message using RemoteAgent
+                response = await agent.chat(cmd)
+                print(f"[AI] {response}")
 
-            except Exception as e:
-                print(f"Request failed: {e}")
+        except Exception as e:
+            print(f"Request failed: {e}")
 
 
 async def main():
