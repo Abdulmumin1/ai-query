@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.23
+
+- patch: Improve tool schema inference for nested types and align docs
+
 ## 1.7.22
 
 - patch: release
