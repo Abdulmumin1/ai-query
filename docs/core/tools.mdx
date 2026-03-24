@@ -23,7 +23,7 @@ async def get_weather(
 
 ## The `@tool` Decorator
 
-The decorator takes a single required parameter:
+The decorator accepts this optional parameter:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -49,6 +49,9 @@ async def search(
 |----------------|------|-------------|
 | `description` | `str` | Parameter description for the AI |
 | `default` | `Any` | Default value (makes parameter optional) |
+| `enum` | `list[Any]` | Restrict the parameter to a fixed set of values |
+| `min_value` | `float` | Minimum numeric value |
+| `max_value` | `float` | Maximum numeric value |
 
 ## Supported Parameter Types
 
@@ -58,6 +61,28 @@ ai-query supports these Python types:
 - `int` - Integer values
 - `float` - Floating point numbers
 - `bool` - Boolean values
+- `list[T]` - Arrays with inferred item types
+- `dict[str, T]` - Objects with typed values
+- `tuple[T1, T2]` and `tuple[T, ...]` - Fixed or variable-length arrays
+- `Optional[T]`, `Union[...]`, and `Literal[...]` - Optional, union, and enum-like values
+- `TypedDict` and dataclasses - Nested object schemas
+
+If a type annotation is not recognized, inference falls back to `string`. For full control, create a tool with an explicit `parameters` schema.
+
+```python
+from typing import NotRequired, TypedDict
+
+class SearchFilters(TypedDict):
+    tags: list[str]
+    include_archived: NotRequired[bool]
+
+@tool(description="Search documents")
+async def search_documents(
+    query: str = Field(description="Search query"),
+    filters: SearchFilters = Field(description="Structured filters")
+) -> str:
+    ...
+```
 
 ## Using Tools with generate_text
 

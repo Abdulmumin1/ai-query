@@ -4,10 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from dataclasses import dataclass, field
+from dataclasses import (
+    MISSING as DATACLASS_MISSING,
+    dataclass,
+    field,
+    fields as dataclass_fields,
+    is_dataclass,
+)
+from types import UnionType
 from typing import (
     Any,
+    Annotated,
     Literal,
+    NotRequired,
+    Required,
     Union,
     AsyncIterator,
     Callable,
@@ -16,6 +26,7 @@ from typing import (
     get_type_hints,
     get_origin,
     get_args,
+    is_typeddict,
     overload,
 )
 
@@ -52,26 +63,262 @@ class Field:
         return f"Field(description={self.description!r}, default={self.default!r})"
 
 
-def _python_type_to_json_schema(py_type: Any) -> dict[str, Any]:
+def _literal_value_to_json_type(value: Any) -> Union[str, None]:
+    """Map a literal value to its JSON Schema type."""
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if value is None:
+        return "null"
+    return None
+
+
+def _typed_dict_to_json_schema(
+    typed_dict_cls: type[Any],
+    seen: set[Any],
+    globalns: Union[dict[str, Any], None] = None,
+    localns: Union[dict[str, Any], None] = None,
+) -> dict[str, Any]:
+    """Convert a TypedDict type to JSON Schema."""
+    if typed_dict_cls in seen:
+        return {"type": "object"}
+
+    seen.add(typed_dict_cls)
+    try:
+        hints = get_type_hints(
+            typed_dict_cls,
+            globalns=globalns,
+            localns=localns,
+            include_extras=True,
+        )
+        properties: dict[str, Any] = {}
+        required_keys_attr = getattr(typed_dict_cls, "__required_keys__", set())
+        optional_keys_attr = getattr(typed_dict_cls, "__optional_keys__", set())
+        total = getattr(typed_dict_cls, "__total__", True)
+        required: list[str] = []
+
+        for key, value_type in hints.items():
+            origin = get_origin(value_type)
+            is_required = total
+            if origin is Required:
+                is_required = True
+            elif origin is NotRequired:
+                is_required = False
+            elif key in required_keys_attr and key not in optional_keys_attr:
+                is_required = True
+            elif key in optional_keys_attr and key not in required_keys_attr:
+                is_required = False
+
+            if origin in (Required, NotRequired):
+                value_type = get_args(value_type)[0]
+
+            properties[key] = _python_type_to_json_schema(
+                value_type,
+                seen,
+                globalns=globalns,
+                localns=localns,
+            )
+            if is_required:
+                required.append(key)
+
+        return {"type": "object", "properties": properties, "required": required}
+    finally:
+        seen.remove(typed_dict_cls)
+
+
+def _dataclass_to_json_schema(
+    dataclass_cls: type[Any],
+    seen: set[Any],
+    globalns: Union[dict[str, Any], None] = None,
+    localns: Union[dict[str, Any], None] = None,
+) -> dict[str, Any]:
+    """Convert a dataclass type to JSON Schema."""
+    if dataclass_cls in seen:
+        return {"type": "object"}
+
+    seen.add(dataclass_cls)
+    try:
+        hints = get_type_hints(
+            dataclass_cls,
+            globalns=globalns,
+            localns=localns,
+            include_extras=True,
+        )
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+
+        for field_info in dataclass_fields(dataclass_cls):
+            field_type = hints.get(field_info.name, Any)
+            properties[field_info.name] = _python_type_to_json_schema(
+                field_type,
+                seen,
+                globalns=globalns,
+                localns=localns,
+            )
+
+            if (
+                field_info.default is DATACLASS_MISSING
+                and field_info.default_factory is DATACLASS_MISSING
+            ):
+                required.append(field_info.name)
+
+        return {"type": "object", "properties": properties, "required": required}
+    finally:
+        seen.remove(dataclass_cls)
+
+
+def _python_type_to_json_schema(
+    py_type: Any,
+    seen: Union[set[Any], None] = None,
+    *,
+    globalns: Union[dict[str, Any], None] = None,
+    localns: Union[dict[str, Any], None] = None,
+) -> dict[str, Any]:
     """Convert a Python type hint to JSON Schema."""
+    seen = seen or set()
+    if globalns is None and localns is None:
+        frame = inspect.currentframe()
+        try:
+            caller = frame.f_back if frame else None
+            if caller is not None:
+                globalns = caller.f_globals
+                localns = caller.f_locals
+        finally:
+            del frame
     origin = get_origin(py_type)
     args = get_args(py_type)
 
-    if origin is Union:
+    if origin is Annotated:
+        return (
+            _python_type_to_json_schema(
+                args[0],
+                seen,
+                globalns=globalns,
+                localns=localns,
+            )
+            if args
+            else {}
+        )
+
+    if origin in (Union, UnionType):
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
-            return _python_type_to_json_schema(non_none[0])
-        return {"anyOf": [_python_type_to_json_schema(t) for t in non_none]}
+            return _python_type_to_json_schema(
+                non_none[0],
+                seen,
+                globalns=globalns,
+                localns=localns,
+            )
+        return {
+            "anyOf": [
+                _python_type_to_json_schema(
+                    t,
+                    seen,
+                    globalns=globalns,
+                    localns=localns,
+                )
+                for t in non_none
+            ]
+        }
 
-    if origin is list:
-        item_schema = _python_type_to_json_schema(args[0]) if args else {}
+    if origin in (list, set, frozenset):
+        item_schema = (
+            _python_type_to_json_schema(
+                args[0],
+                seen,
+                globalns=globalns,
+                localns=localns,
+            )
+            if args
+            else {}
+        )
         return {"type": "array", "items": item_schema}
 
+    if origin is tuple:
+        if len(args) == 2 and args[1] is Ellipsis:
+            return {
+                "type": "array",
+                "items": _python_type_to_json_schema(
+                    args[0],
+                    seen,
+                    globalns=globalns,
+                    localns=localns,
+                ),
+            }
+        if args:
+            prefix_items = [
+                _python_type_to_json_schema(
+                    arg,
+                    seen,
+                    globalns=globalns,
+                    localns=localns,
+                )
+                for arg in args
+            ]
+            return {
+                "type": "array",
+                "prefixItems": prefix_items,
+                "minItems": len(prefix_items),
+                "maxItems": len(prefix_items),
+            }
+        return {"type": "array"}
+
     if origin is dict:
-        return {"type": "object"}
+        schema: dict[str, Any] = {"type": "object"}
+        if len(args) == 2:
+            schema["additionalProperties"] = _python_type_to_json_schema(
+                args[1],
+                seen,
+                globalns=globalns,
+                localns=localns,
+            )
+        return schema
 
     if origin is Literal:
-        return {"type": "string", "enum": list(args)}
+        literal_types = {
+            literal_type
+            for literal_type in (_literal_value_to_json_type(value) for value in args)
+            if literal_type is not None
+        }
+        if len(literal_types) == 1:
+            return {"type": literal_types.pop(), "enum": list(args)}
+        return {
+            "anyOf": [
+                {
+                    "const": value,
+                    **(
+                        {"type": literal_type}
+                        if (literal_type := _literal_value_to_json_type(value)) is not None
+                        else {}
+                    ),
+                }
+                for value in args
+            ]
+        }
+
+    if py_type is Any:
+        return {}
+
+    if is_typeddict(py_type):
+        return _typed_dict_to_json_schema(
+            py_type,
+            seen,
+            globalns=globalns,
+            localns=localns,
+        )
+
+    if inspect.isclass(py_type) and is_dataclass(py_type):
+        return _dataclass_to_json_schema(
+            py_type,
+            seen,
+            globalns=globalns,
+            localns=localns,
+        )
 
     type_map = {
         str: "string",
@@ -136,6 +383,13 @@ def tool(
     parameters: Union[dict[str, Any], None] = None,
     execute: Union[Callable[..., Any], Callable[..., Awaitable[Any]], None] = None,
 ) -> Union[Tool, Callable[[Callable[..., Any]], Tool]]:
+    frame = inspect.currentframe()
+    try:
+        caller = frame.f_back if frame else None
+        definition_localns = dict(caller.f_locals) if caller is not None else None
+    finally:
+        del frame
+
     if execute is not None and parameters is not None and description is not None:
         return Tool(description=description, parameters=parameters, execute=execute)
 
@@ -147,7 +401,11 @@ def tool(
             tool_description = f"Execute the {fn.__name__} function"
 
         try:
-            hints = get_type_hints(fn)
+            hints = get_type_hints(
+                fn,
+                globalns=fn.__globals__,
+                localns=definition_localns,
+            )
         except Exception:
             hints = {}
 
@@ -160,7 +418,11 @@ def tool(
                 continue
 
             param_type = hints.get(param_name, str)
-            prop = _python_type_to_json_schema(param_type)
+            prop = _python_type_to_json_schema(
+                param_type,
+                globalns=fn.__globals__,
+                localns=definition_localns,
+            )
 
             if isinstance(param.default, Field):
                 field_meta = param.default

@@ -20,8 +20,8 @@ async def my_tool(
 
 ### Decorator Parameters
 
-<ParamField path="description" type="str" required>
-  A description of what the tool does. This is shown to the AI to help it decide when to use the tool.
+<ParamField path="description" type="str">
+  Optional description of what the tool does. If omitted, ai-query uses the function docstring or a generated fallback.
 </ParamField>
 
 ## The Field Helper
@@ -42,6 +42,18 @@ Field(description="...", default=None)
   Default value. If provided, the parameter becomes optional.
 </ParamField>
 
+<ParamField path="enum" type="list[Any]">
+  Optional fixed set of allowed values for the parameter.
+</ParamField>
+
+<ParamField path="min_value" type="float">
+  Optional minimum numeric value.
+</ParamField>
+
+<ParamField path="max_value" type="float">
+  Optional maximum numeric value.
+</ParamField>
+
 ## Supported Types
 
 | Type | Description |
@@ -50,6 +62,17 @@ Field(description="...", default=None)
 | `int` | Integer values |
 | `float` | Floating point numbers |
 | `bool` | Boolean values |
+| `list[T]` | Arrays with inferred item types |
+| `dict[str, T]` | Objects with typed values via `additionalProperties` |
+| `tuple[T1, T2]` | Fixed-length arrays using `prefixItems` |
+| `tuple[T, ...]` | Variable-length arrays with typed items |
+| `Optional[T]` | Optional parameters |
+| `Union[T1, T2]` | Union types via `anyOf` |
+| `Literal[...]` | Enum-like constrained values |
+| `TypedDict` | Nested object schemas |
+| `@dataclass` types | Nested object schemas |
+
+Unrecognized annotations fall back to `string` inference. If you need full control, use the factory form and pass `parameters` explicitly.
 
 ## Examples
 
@@ -92,6 +115,49 @@ async def search(
 ) -> str:
     # limit and include_archived have defaults
     ...
+```
+
+### Nested Parameters
+
+```python
+from typing import NotRequired, TypedDict
+
+class SearchFilters(TypedDict):
+    tags: list[str]
+    include_archived: NotRequired[bool]
+
+@tool(description="Search documents")
+async def search_documents(
+    query: str = Field(description="Search query"),
+    filters: SearchFilters = Field(description="Structured search filters")
+) -> str:
+    ...
+```
+
+### Manual Schema Override
+
+```python
+def run_query(payload: dict) -> str:
+    return "ok"
+
+custom_tool = tool(
+    description="Run a query with a custom schema",
+    parameters={
+        "type": "object",
+        "properties": {
+            "payload": {
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["sql"],
+            }
+        },
+        "required": ["payload"],
+    },
+    execute=run_query,
+)
 ```
 
 ### Using Tools

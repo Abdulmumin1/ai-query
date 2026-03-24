@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import pytest
-from typing import Literal
+from typing import Literal, NotRequired, TypedDict
 
 from ai_query.types import (
     Field,
@@ -111,6 +112,29 @@ class TestTypeConversion:
         schema = _python_type_to_json_schema(dict)
         assert schema == {"type": "object"}
 
+    def test_dict_with_value_type(self):
+        """dict[str, int] should convert to object with typed values."""
+        schema = _python_type_to_json_schema(dict[str, int])
+        assert schema == {
+            "type": "object",
+            "additionalProperties": {"type": "integer"},
+        }
+
+    def test_tuple_type(self):
+        """tuple[str, int] should convert to fixed-length array."""
+        schema = _python_type_to_json_schema(tuple[str, int])
+        assert schema == {
+            "type": "array",
+            "prefixItems": [{"type": "string"}, {"type": "integer"}],
+            "minItems": 2,
+            "maxItems": 2,
+        }
+
+    def test_variadic_tuple_type(self):
+        """tuple[str, ...] should convert to array with item schema."""
+        schema = _python_type_to_json_schema(tuple[str, ...])
+        assert schema == {"type": "array", "items": {"type": "string"}}
+
     def test_optional_type(self):
         """Optional[str] should unwrap to string."""
         from typing import Optional
@@ -122,6 +146,11 @@ class TestTypeConversion:
         schema = _python_type_to_json_schema(Literal["a", "b", "c"])
         assert schema == {"type": "string", "enum": ["a", "b", "c"]}
 
+    def test_literal_integer_type(self):
+        """Literal integers should preserve integer typing."""
+        schema = _python_type_to_json_schema(Literal[1, 2, 3])
+        assert schema == {"type": "integer", "enum": [1, 2, 3]}
+
     def test_union_type(self):
         """Union should convert to anyOf."""
         from typing import Union
@@ -129,6 +158,80 @@ class TestTypeConversion:
         assert "anyOf" in schema
         assert {"type": "string"} in schema["anyOf"]
         assert {"type": "integer"} in schema["anyOf"]
+
+    def test_pipe_union_type(self):
+        """Pipe unions should convert to anyOf."""
+        schema = _python_type_to_json_schema(str | int)
+        assert "anyOf" in schema
+        assert {"type": "string"} in schema["anyOf"]
+        assert {"type": "integer"} in schema["anyOf"]
+
+    def test_typed_dict_type(self):
+        """TypedDict should convert to nested object schema."""
+
+        class Address(TypedDict):
+            city: str
+            zip_code: int
+
+        class UserProfile(TypedDict):
+            name: str
+            address: Address
+            tags: NotRequired[list[str]]
+
+        schema = _python_type_to_json_schema(UserProfile)
+        assert schema == {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "address": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string"},
+                        "zip_code": {"type": "integer"},
+                    },
+                    "required": ["city", "zip_code"],
+                },
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["name", "address"],
+        }
+
+    def test_dataclass_type(self):
+        """Dataclasses should convert to nested object schema."""
+
+        @dataclass
+        class Coordinates:
+            lat: float
+            lng: float
+
+        @dataclass
+        class Place:
+            name: str
+            coords: Coordinates
+            aliases: list[str]
+            metadata: dict[str, str] = None
+
+        schema = _python_type_to_json_schema(Place)
+        assert schema == {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "coords": {
+                    "type": "object",
+                    "properties": {
+                        "lat": {"type": "number"},
+                        "lng": {"type": "number"},
+                    },
+                    "required": ["lat", "lng"],
+                },
+                "aliases": {"type": "array", "items": {"type": "string"}},
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["name", "coords", "aliases"],
+        }
 
 
 # =============================================================================
@@ -266,6 +369,26 @@ class TestToolDecorator:
         props = rate.parameters["properties"]["score"]
         assert props["minimum"] == 1
         assert props["maximum"] == 10
+
+    def test_tool_decorator_nested_param_type(self):
+        """@tool should infer nested object schemas for TypedDict params."""
+
+        class Filters(TypedDict):
+            tags: list[str]
+            include_archived: NotRequired[bool]
+
+        @tool
+        def search(filters: Filters) -> str:
+            return ",".join(filters["tags"])
+
+        assert search.parameters["properties"]["filters"] == {
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "include_archived": {"type": "boolean"},
+            },
+            "required": ["tags"],
+        }
 
     def test_tool_factory_mode(self):
         """tool() can be used in factory mode."""
