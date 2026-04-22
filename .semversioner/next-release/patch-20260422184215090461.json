@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Persist tool call, tool result, and intermediate assistant messages in agent storage"
+}

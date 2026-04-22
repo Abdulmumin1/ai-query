@@ -58,7 +58,7 @@ async def generate_text(
             if isinstance(msg, Message):
                 final_messages.append(msg)
             else:
-                final_messages.append(Message(role=msg["role"], content=msg["content"]))
+                final_messages.append(Message.from_dict(msg))
     else:
         if system:
             final_messages.append(Message(role="system", content=system))
@@ -251,7 +251,7 @@ def stream_text(
             if isinstance(msg, Message):
                 final_messages.append(msg)
             else:
-                final_messages.append(Message(role=msg["role"], content=msg["content"]))
+                final_messages.append(Message.from_dict(msg))
     else:
         if system:
             final_messages.append(Message(role="system", content=system))

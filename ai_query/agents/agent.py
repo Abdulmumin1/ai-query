@@ -23,7 +23,15 @@ from typing import (
 from ai_query.agents.storage import MemoryStorage, Storage
 from ai_query.agents.websocket import Connection, ConnectionContext
 from ai_query.model import LanguageModel
-from ai_query.types import AbortError, AbortSignal, Message
+from ai_query.types import (
+    AbortError,
+    AbortSignal,
+    Message,
+    StepResult,
+    TextPart,
+    ToolCallPart,
+    ToolResultPart,
+)
 
 if TYPE_CHECKING:
     from ai_query.agents.events import EventBus
@@ -331,6 +339,53 @@ class Agent(Generic[StateT]):
         self._messages = []
         await self._storage.set(f"{self._id}:messages", [])
 
+    async def _persist_messages(self) -> None:
+        await self._storage.set(
+            f"{self._id}:messages", [message.to_dict() for message in self._messages]
+        )
+
+    def _append_step_messages(
+        self, steps: list[StepResult] | None, fallback_response: str
+    ) -> None:
+        if not steps:
+            self._messages.append(Message(role="assistant", content=fallback_response))
+            return
+
+        for step in steps:
+            if step.tool_calls:
+                assistant_content: list[Any] = []
+                if step.text:
+                    assistant_content.append(TextPart(text=step.text))
+                for tool_call in step.tool_calls:
+                    assistant_content.append(ToolCallPart(tool_call=tool_call))
+
+                self._messages.append(
+                    Message(
+                        role="assistant",
+                        content=assistant_content if assistant_content else "",
+                    )
+                )
+
+                tool_result_parts = [
+                    ToolResultPart(tool_result=tool_result)
+                    for tool_result in step.tool_results
+                ]
+                if tool_result_parts:
+                    self._messages.append(
+                        Message(role="tool", content=tool_result_parts)
+                    )
+                continue
+
+            if step.text:
+                self._messages.append(Message(role="assistant", content=step.text))
+
+    async def _get_result_steps(self, result: Any) -> list[StepResult] | None:
+        steps_property = getattr(type(result), "steps", None)
+        if not isinstance(steps_property, property):
+            return None
+
+        return await result.steps
+
     # ─── Chat & Streaming ──────────────────────────────────────────────────
 
     async def chat(
@@ -392,10 +447,8 @@ class Agent(Generic[StateT]):
         async for chunk in result.text_stream:
             full_response += chunk
 
-        self._messages.append(Message(role="assistant", content=full_response))
-        await self._storage.set(
-            f"{self._id}:messages", [m.to_dict() for m in self._messages]
-        )
+        self._append_step_messages(await self._get_result_steps(result), full_response)
+        await self._persist_messages()
         return full_response
 
     async def stream(
@@ -439,10 +492,8 @@ class Agent(Generic[StateT]):
             full_response += chunk
             yield chunk
 
-        self._messages.append(Message(role="assistant", content=full_response))
-        await self._storage.set(
-            f"{self._id}:messages", [m.to_dict() for m in self._messages]
-        )
+        self._append_step_messages(await self._get_result_steps(result), full_response)
+        await self._persist_messages()
 
     # ─── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -486,9 +537,7 @@ class Agent(Generic[StateT]):
             # Load messages
             messages_data = await self._storage.get(f"{self._id}:messages")
             if messages_data:
-                self._messages = [
-                    Message(role=m["role"], content=m["content"]) for m in messages_data
-                ]
+                self._messages = [Message.from_dict(message) for message in messages_data]
 
             # Load event log if persistence is enabled
             if self.enable_event_log:

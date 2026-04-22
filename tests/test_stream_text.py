@@ -289,6 +289,53 @@ class TestStreamTextWithTools:
         assert usage.input_tokens == 30  # 10 + 20
         assert usage.output_tokens == 15  # 5 + 10
 
+    @pytest.mark.asyncio
+    async def test_stream_steps_include_tool_messages(self):
+        """stream_text should retain tool-call steps after consumption."""
+
+        @tool(description="Add")
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="Let me calculate. "),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="add",
+                                arguments={"a": 2, "b": 3},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="The result is 5."),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            prompt="What is 2 + 3?",
+            tools={"add": add},
+            stop_when=step_count_is(10),
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        steps = await result.steps
+        assert len(steps) == 2
+        assert steps[0].tool_calls[0].name == "add"
+        assert steps[0].tool_results[0].result == 5
+
 
 # =============================================================================
 # stream_text Stop Conditions Tests
