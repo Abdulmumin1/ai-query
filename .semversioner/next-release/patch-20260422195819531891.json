@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Harden Cloudflare env binding handling and serialize tool parts in the messages endpoint"
+}

@@ -5,6 +5,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from aiohttp import web
 from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig
+from ai_query.types import Message, ToolCall, ToolCallPart, ToolResult, ToolResultPart
 
 
 class TestAgentServerBasics:
@@ -177,6 +178,53 @@ class TestAgentServerEndpoints:
         resp = await client.get("/agent/test-put/state")
         data = await resp.json()
         assert data == {"count": 100, "name": "updated"}
+
+    @pytest.mark.asyncio
+    async def test_get_messages_endpoint_serializes_tool_parts(
+        self, aiohttp_client, agent_class
+    ):
+        """GET /agent/{id}/messages should serialize tool parts to JSON."""
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(agent_class, config=config)
+        app = server.create_app()
+
+        client = await aiohttp_client(app)
+
+        agent = server.get_or_create("test-messages")
+        await agent.start()
+        agent._messages = [
+            Message(role="user", content="Hi"),
+            Message(
+                role="assistant",
+                content=[
+                    ToolCallPart(
+                        tool_call=ToolCall(
+                            id="call_1",
+                            name="search",
+                            arguments={"query": "weather"},
+                        )
+                    )
+                ],
+            ),
+            Message(
+                role="tool",
+                content=[
+                    ToolResultPart(
+                        tool_result=ToolResult(
+                            tool_call_id="call_1",
+                            tool_name="search",
+                            result="Sunny",
+                        )
+                    )
+                ],
+            ),
+        ]
+
+        resp = await client.get("/agent/test-messages/messages")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["messages"][1]["content"][0]["type"] == "tool_call"
+        assert data["messages"][2]["content"][0]["type"] == "tool_result"
 
     @pytest.mark.asyncio
     async def test_invoke_endpoint(self, aiohttp_client, agent_class):
