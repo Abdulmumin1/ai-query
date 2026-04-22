@@ -556,7 +556,7 @@ class FilePart:
     media_type: str = ""
 
 
-ContentPart = Union[TextPart, ImagePart, FilePart]
+ContentPart = Union[TextPart, ImagePart, FilePart, ToolCallPart, ToolResultPart]
 
 
 @dataclass
@@ -564,27 +564,119 @@ class Message:
     role: Role
     content: Union[str, list[ContentPart]]
 
+    @staticmethod
+    def _tool_call_to_dict(tool_call: ToolCall) -> dict[str, Any]:
+        return {
+            "id": tool_call.id,
+            "name": tool_call.name,
+            "arguments": tool_call.arguments,
+            "metadata": tool_call.metadata,
+        }
+
+    @staticmethod
+    def _tool_result_to_dict(tool_result: ToolResult) -> dict[str, Any]:
+        return {
+            "tool_call_id": tool_result.tool_call_id,
+            "tool_name": tool_result.tool_name,
+            "result": tool_result.result,
+            "is_error": tool_result.is_error,
+        }
+
+    @classmethod
+    def _part_to_dict(cls, part: Any) -> dict[str, Any]:
+        if isinstance(part, dict):
+            part_type = part.get("type")
+            if part_type == "tool_call" and isinstance(part.get("tool_call"), ToolCall):
+                return {
+                    "type": "tool_call",
+                    "tool_call": cls._tool_call_to_dict(part["tool_call"]),
+                }
+            if part_type == "tool_result" and isinstance(
+                part.get("tool_result"), ToolResult
+            ):
+                return {
+                    "type": "tool_result",
+                    "tool_result": cls._tool_result_to_dict(part["tool_result"]),
+                }
+            return part
+
+        part_dict: dict[str, Any] = {"type": part.type}
+        if isinstance(part, TextPart):
+            part_dict["text"] = part.text
+        elif isinstance(part, ImagePart):
+            part_dict["image"] = part.image
+            if part.media_type:
+                part_dict["media_type"] = part.media_type
+        elif isinstance(part, FilePart):
+            part_dict["data"] = part.data
+            part_dict["media_type"] = part.media_type
+        elif isinstance(part, ToolCallPart):
+            if part.tool_call:
+                part_dict["tool_call"] = cls._tool_call_to_dict(part.tool_call)
+        elif isinstance(part, ToolResultPart):
+            if part.tool_result:
+                part_dict["tool_result"] = cls._tool_result_to_dict(part.tool_result)
+
+        return part_dict
+
+    @staticmethod
+    def _part_from_dict(part: Any) -> ContentPart | dict[str, Any]:
+        if not isinstance(part, dict):
+            return part
+
+        part_type = part.get("type")
+        if part_type == "text":
+            return TextPart(text=part.get("text", ""))
+        if part_type == "image":
+            return ImagePart(
+                image=part.get("image", b""),
+                media_type=part.get("media_type"),
+            )
+        if part_type == "file":
+            return FilePart(
+                data=part.get("data", b""),
+                media_type=part.get("media_type", ""),
+            )
+        if part_type == "tool_call":
+            tool_call = part.get("tool_call")
+            if isinstance(tool_call, dict):
+                tool_call = ToolCall(
+                    id=tool_call["id"],
+                    name=tool_call["name"],
+                    arguments=tool_call.get("arguments", {}),
+                    metadata=tool_call.get("metadata", {}),
+                )
+            return ToolCallPart(tool_call=tool_call)
+        if part_type == "tool_result":
+            tool_result = part.get("tool_result")
+            if isinstance(tool_result, dict):
+                tool_result = ToolResult(
+                    tool_call_id=tool_result["tool_call_id"],
+                    tool_name=tool_result["tool_name"],
+                    result=tool_result.get("result"),
+                    is_error=tool_result.get("is_error", False),
+                )
+            return ToolResultPart(tool_result=tool_result)
+
+        return part
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Message":
+        content = data["content"]
+        if isinstance(content, str):
+            return cls(role=data["role"], content=content)
+
+        return cls(
+            role=data["role"],
+            content=[cls._part_from_dict(part) for part in content],
+        )
+
     def to_dict(self) -> dict[str, Any]:
         if isinstance(self.content, str):
             return {"role": self.role, "content": self.content}
-        
-        content_list = []
-        for p in self.content:
-            if isinstance(p, dict):
-                content_list.append(p)
-            else:
-                part_dict: dict[str, Any] = {"type": p.type}
-                if isinstance(p, TextPart):
-                    part_dict["text"] = p.text
-                elif isinstance(p, ImagePart):
-                    part_dict["image"] = p.image
-                    if p.media_type:
-                        part_dict["media_type"] = p.media_type
-                elif isinstance(p, FilePart):
-                    part_dict["data"] = p.data
-                    part_dict["media_type"] = p.media_type
-                content_list.append(part_dict)
-        
+
+        content_list = [self._part_to_dict(part) for part in self.content]
+
         return {"role": self.role, "content": content_list}
 
 
@@ -650,7 +742,7 @@ class TextStreamResult:
         self._chunks: list[str] = []
         self._usage: Union[Usage, None] = None
         self._finish_reason: Union[str, None] = None
-        self._steps: list[StepResult] = steps or []
+        self._steps: list[StepResult] = steps if steps is not None else []
         self._done = False
         self._done_event = asyncio.Event()
         self._consumed = False

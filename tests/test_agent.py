@@ -10,8 +10,17 @@ from ai_query.agents import (
     Connection,
     ConnectionContext,
 )
-from ai_query.types import Message, tool
+from ai_query.types import (
+    Message,
+    StreamChunk,
+    ToolCall,
+    ToolCallPart,
+    ToolResultPart,
+    step_count_is,
+    tool,
+)
 from ai_query.model import LanguageModel
+from tests.conftest import MockProvider
 
 
 class TestAgentInitialization:
@@ -289,6 +298,80 @@ class TestAgentChat:
         assert len(stored) == 2
         await agent.stop()
 
+    @pytest.mark.asyncio
+    async def test_chat_persists_tool_messages(self):
+        """chat() should persist tool calls and tool results."""
+
+        @tool(description="Add")
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="Let me calculate. "),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="add",
+                                arguments={"a": 2, "b": 3},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="The result is 5."),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        storage = MemoryStorage()
+        agent = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"add": add},
+            stop_when=step_count_is(10),
+        )
+        await agent.start()
+
+        response = await agent.chat("What is 2 + 3?")
+        stored = await storage.get("test:messages")
+
+        assert "5" in response
+        assert [message.role for message in agent.messages] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+        ]
+        assert stored is not None
+        assert [message["role"] for message in stored] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+        ]
+        assert stored[1]["content"][1]["type"] == "tool_call"
+        assert stored[2]["content"][0]["type"] == "tool_result"
+        await agent.stop()
+
+        agent_reloaded = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"add": add},
+            stop_when=step_count_is(10),
+        )
+        await agent_reloaded.start()
+        assert isinstance(agent_reloaded.messages[1].content[1], ToolCallPart)
+        assert isinstance(agent_reloaded.messages[2].content[0], ToolResultPart)
+        await agent_reloaded.stop()
+
 
 class TestAgentStream:
     """Tests for Agent streaming functionality."""
@@ -338,6 +421,64 @@ class TestAgentStream:
             pass
 
         assert len(agent.messages) == 2
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_stream_persists_tool_messages(self):
+        """stream() should persist tool calls and tool results."""
+
+        @tool(description="Echo")
+        def echo(message: str) -> str:
+            return message
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="Calling tool. "),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"message": "hello"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="hello"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        storage = MemoryStorage()
+        agent = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(10),
+        )
+        await agent.start()
+
+        chunks = []
+        async for chunk in agent.stream("Repeat hello"):
+            chunks.append(chunk)
+
+        stored = await storage.get("test:messages")
+        assert "hello" in "".join(chunks)
+        assert stored is not None
+        assert [message["role"] for message in stored] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+        ]
+        assert stored[1]["content"][1]["type"] == "tool_call"
+        assert stored[2]["content"][0]["type"] == "tool_result"
         await agent.stop()
 
 

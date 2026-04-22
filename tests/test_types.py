@@ -520,6 +520,53 @@ class TestMessage:
         assert d["content"][0]["type"] == "text"
         assert d["content"][1]["type"] == "image"
 
+    def test_message_tool_parts_round_trip(self):
+        """Message should preserve tool parts through dict serialization."""
+        msg = Message(
+            role="assistant",
+            content=[
+                TextPart(text="Calling tool"),
+                ToolCallPart(
+                    tool_call=ToolCall(
+                        id="call_1",
+                        name="search",
+                        arguments={"query": "weather"},
+                    )
+                ),
+            ],
+        )
+
+        stored = msg.to_dict()
+        restored = Message.from_dict(stored)
+
+        assert stored["content"][1]["type"] == "tool_call"
+        assert isinstance(restored.content[1], ToolCallPart)
+        assert restored.content[1].tool_call is not None
+        assert restored.content[1].tool_call.name == "search"
+
+    def test_message_tool_result_round_trip(self):
+        """Message.from_dict should restore tool result parts."""
+        stored = {
+            "role": "tool",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_result": {
+                        "tool_call_id": "call_1",
+                        "tool_name": "search",
+                        "result": "Sunny",
+                        "is_error": False,
+                    },
+                }
+            ],
+        }
+
+        restored = Message.from_dict(stored)
+
+        assert isinstance(restored.content[0], ToolResultPart)
+        assert restored.content[0].tool_result is not None
+        assert restored.content[0].tool_result.result == "Sunny"
+
 
 # =============================================================================
 # Usage Tests
