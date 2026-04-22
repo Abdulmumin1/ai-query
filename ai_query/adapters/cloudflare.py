@@ -85,6 +85,20 @@ class AgentDO(DurableObject):
         self.ctx = ctx
         self.env = env
 
+        # Inject Cloudflare env bindings into os.environ for provider compatibility
+        # Providers check os.environ for API keys during initialization
+        for key in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "XAI_API_KEY",
+        ]:
+            val = getattr(env, key, None)
+            if isinstance(val, str) and val:
+                os.environ[key] = val
+
         # The `id` is available on the context object in the new Python runtime
         self.id = str(ctx.id) if hasattr(ctx, "id") else "unknown"
 
@@ -98,9 +112,11 @@ class AgentDO(DurableObject):
             "ANTHROPIC_API_KEY",
             "GEMINI_API_KEY",
             "OPENROUTER_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "XAI_API_KEY",
         ]:
             val = getattr(env, key, None)
-            if val:
+            if isinstance(val, str) and val:
                 provider_options[key] = val
 
         self.agent = self.agent_class(

@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Serialize tool call and tool result parts in the agent messages endpoint"
+}

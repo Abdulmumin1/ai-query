@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Add HTTP transport abstraction for Cloudflare Workers multi-runtime support"
-}
