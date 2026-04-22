@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Improve tool schema inference for nested types and align docs"
-}

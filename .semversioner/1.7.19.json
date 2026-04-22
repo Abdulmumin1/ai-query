@@ -1,0 +1,22 @@
+{
+  "changes": [
+    {
+      "description": "Fix Cloudflare adapter to parse URL path for action type in invoke requests",
+      "type": "patch"
+    },
+    {
+      "description": "Improve tool schema inference for nested types and align docs",
+      "type": "patch"
+    },
+    {
+      "description": "Persist tool call, tool result, and intermediate assistant messages in agent storage",
+      "type": "patch"
+    },
+    {
+      "description": "Serialize tool call and tool result parts in the agent messages endpoint",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-04-22T19:51:45+00:00",
+  "version": "1.7.19"
+}

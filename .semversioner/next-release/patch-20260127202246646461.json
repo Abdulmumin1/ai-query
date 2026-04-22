@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Fix Cloudflare adapter to parse URL path for action type in invoke requests"
-}
