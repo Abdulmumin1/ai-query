@@ -369,7 +369,7 @@ class ServerHandlers:
             raise web.HTTPNotFound()
 
         agent = self.server._agents[agent_id].agent
-        msgs = [{"role": m.role, "content": m.content} for m in agent.messages]
+        msgs = [message.to_dict() for message in agent.messages]
         return web.json_response({"messages": msgs})
 
     async def handle_put_state(self, request: web.Request) -> web.Response:

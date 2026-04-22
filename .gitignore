@@ -14,4 +14,6 @@ index.html
 lmfetch-plan.md
 hybrid-design.md
 whatcooked-plan.md
+.plans/
+.DS_Store
 data/
