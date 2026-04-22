@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.25
+
+- patch: Harden Cloudflare env binding handling and serialize tool parts in the messages endpoint
+
 ## 1.7.24
 
 - patch: Persist tool call, tool result, and intermediate assistant messages in agent storage
