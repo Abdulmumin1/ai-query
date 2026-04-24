@@ -1,0 +1,73 @@
+---
+title: "workers_ai()"
+description: "Create a Cloudflare Workers AI model"
+---
+
+Factory function to create a Workers AI model instance using Cloudflare's OpenAI-compatible endpoints.
+
+## Signature
+
+```python
+def workers_ai(
+    model_id: str,
+    *,
+    api_key: str | None = None,
+    account_id: str | None = None,
+    base_url: str | None = None,
+) -> LanguageModel
+```
+
+## Parameters
+
+<ParamField path="model_id" type="str" required>
+  The Workers AI model identifier, usually in Cloudflare's `@cf/...` format.
+</ParamField>
+
+<ParamField path="api_key" type="str">
+  Cloudflare API token. Falls back to `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_AUTH_TOKEN`, or `CLOUDFLARE_API_KEY`.
+</ParamField>
+
+<ParamField path="account_id" type="str">
+  Cloudflare account ID. Falls back to `CLOUDFLARE_ACCOUNT_ID`.
+</ParamField>
+
+<ParamField path="base_url" type="str">
+  Custom OpenAI-compatible Workers AI base URL. Use this for AI Gateway or other custom routing.
+</ParamField>
+
+## Returns
+
+A `LanguageModel` instance configured for Workers AI.
+
+## Environment
+
+When `base_url` is not provided, Workers AI requires:
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID="..."
+export CLOUDFLARE_API_TOKEN="..."
+```
+
+## Example
+
+```python
+from ai_query import generate_text
+from ai_query.providers import workers_ai
+
+result = await generate_text(
+    model=workers_ai("@cf/meta/llama-3.1-8b-instruct"),
+    prompt="Hello, world!",
+)
+```
+
+## Embeddings
+
+```python
+embedding_model = workers_ai.embedding("@cf/baai/bge-large-en-v1.5")
+```
+
+## Notes
+
+- Uses Cloudflare's OpenAI-compatible `/ai/v1/chat/completions` and `/ai/v1/embeddings` endpoints
+- Supports tool calling through the same OpenAI-compatible request format used by ai-query's existing tool loop
+- Accepts custom `base_url` values for AI Gateway or other OpenAI-compatible Workers AI routing

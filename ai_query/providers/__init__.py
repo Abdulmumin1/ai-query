@@ -9,6 +9,7 @@ from ai_query.providers.groq import groq
 from ai_query.providers.llama import llama
 from ai_query.providers.xai import xai
 from ai_query.providers.bedrock import bedrock
+from ai_query.providers.workers_ai import workers_ai
 
 __all__ = [
     "openai",
@@ -20,4 +21,5 @@ __all__ = [
     "llama",
     "xai",
     "bedrock",
+    "workers_ai",
 ]

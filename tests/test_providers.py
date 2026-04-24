@@ -258,6 +258,72 @@ class TestAnthropicProvider:
 
 
 # =============================================================================
+# Workers AI Provider Tests
+# =============================================================================
+
+
+class TestWorkersAIProvider:
+    """Tests for Workers AI provider."""
+
+    def test_workers_ai_function_creates_model(self):
+        """workers_ai() should create a LanguageModel."""
+        from ai_query.providers import workers_ai
+
+        with patch.dict(
+            "os.environ",
+            {
+                "CLOUDFLARE_ACCOUNT_ID": "account-123",
+                "CLOUDFLARE_API_TOKEN": "test-token",
+            },
+        ):
+            model = workers_ai("@cf/meta/llama-3.1-8b-instruct")
+
+        assert isinstance(model, LanguageModel)
+        assert model.model_id == "@cf/meta/llama-3.1-8b-instruct"
+        assert model.provider.name == "workers_ai"
+        assert (
+            model.provider.base_url
+            == "https://api.cloudflare.com/client/v4/accounts/account-123/ai/v1"
+        )
+
+    def test_workers_ai_with_custom_base_url(self):
+        """workers_ai() should accept custom base URL without account_id."""
+        from ai_query.providers import workers_ai
+
+        model = workers_ai(
+            "@cf/meta/llama-3.1-8b-instruct",
+            api_key="token",
+            base_url="https://gateway.ai.cloudflare.com/v1/account/gateway/workers-ai",
+        )
+
+        assert model.provider.base_url == (
+            "https://gateway.ai.cloudflare.com/v1/account/gateway/workers-ai"
+        )
+
+    def test_workers_ai_embedding_creates_model(self):
+        """workers_ai.embedding() should create an EmbeddingModel."""
+        from ai_query.providers import workers_ai
+        from ai_query.model import EmbeddingModel
+
+        model = workers_ai.embedding(
+            "@cf/baai/bge-large-en-v1.5",
+            api_key="token",
+            account_id="account-123",
+        )
+
+        assert isinstance(model, EmbeddingModel)
+        assert model.model_id == "@cf/baai/bge-large-en-v1.5"
+        assert model.provider.name == "workers_ai"
+
+    def test_workers_ai_requires_account_id_without_base_url(self):
+        """WorkersAIProvider should require account_id when base_url is absent."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        with pytest.raises(ValueError, match="Cloudflare account ID is missing"):
+            WorkersAIProvider(api_key="token")
+
+
+# =============================================================================
 # Google Provider Tests
 # =============================================================================
 

@@ -1,0 +1,100 @@
+---
+title: "Workers AI"
+description: "Use Cloudflare Workers AI models with ai-query"
+---
+
+The Workers AI provider lets you call Cloudflare-hosted models through the OpenAI-compatible Workers AI endpoints.
+
+## Setup
+
+Set your Cloudflare account ID and API token:
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID="..."
+export CLOUDFLARE_API_TOKEN="..."
+```
+
+`workers_ai()` also accepts `CLOUDFLARE_AUTH_TOKEN` and `CLOUDFLARE_API_KEY`.
+
+## Usage
+
+```python
+from ai_query import generate_text
+from ai_query.providers import workers_ai
+
+result = await generate_text(
+    model=workers_ai("@cf/meta/llama-3.1-8b-instruct"),
+    prompt="Explain edge computing in simple terms.",
+)
+```
+
+## Embeddings
+
+```python
+from ai_query import embed
+from ai_query.providers import workers_ai
+
+result = await embed(
+    model=workers_ai.embedding("@cf/baai/bge-large-en-v1.5"),
+    value="Cloudflare runs workloads close to users.",
+)
+```
+
+## Available Models
+
+Workers AI model IDs use Cloudflare's `@cf/...` format.
+
+| Model ID | Description |
+|----------|-------------|
+| `@cf/meta/llama-3.1-8b-instruct` | General-purpose instruction model |
+| `@cf/openai/gpt-oss-120b` | Open-weight reasoning/chat model |
+| `@cf/baai/bge-large-en-v1.5` | Text embeddings |
+
+Browse the full catalog in the [Cloudflare Workers AI models docs](https://developers.cloudflare.com/workers-ai/models/).
+
+## Custom Configuration
+
+If you want to route through AI Gateway or another compatible base URL, pass `base_url` explicitly:
+
+```python
+from ai_query.providers import workers_ai
+
+model = workers_ai(
+    "@cf/meta/llama-3.1-8b-instruct",
+    api_key="...",
+    base_url="https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1",
+)
+```
+
+You can also pass `account_id` directly instead of relying on `CLOUDFLARE_ACCOUNT_ID`:
+
+```python
+model = workers_ai(
+    "@cf/meta/llama-3.1-8b-instruct",
+    api_key="...",
+    account_id="...",
+)
+```
+
+## Tool Calling
+
+Workers AI uses Cloudflare's OpenAI-compatible chat completions API, so tool calling works through the same ai-query tool loop:
+
+```python
+from ai_query import generate_text, tool, Field
+from ai_query.providers import workers_ai
+
+@tool(description="Search docs")
+async def search(query: str = Field(description="Search query")) -> str:
+    return f"Results for: {query}"
+
+result = await generate_text(
+    model=workers_ai("@cf/meta/llama-3.1-8b-instruct"),
+    prompt="Search for Workers AI pricing.",
+    tools={"search": search},
+)
+```
+
+## Cloudflare Workers Runtime
+
+If you use the Cloudflare adapter, `ai-query` now forwards `CLOUDFLARE_ACCOUNT_ID` and Cloudflare token env bindings into provider configuration automatically, so `workers_ai()` can be used inside Durable Objects and Workers-backed agents.
