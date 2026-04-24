@@ -34,6 +34,7 @@ asyncio.run(main())
 | `stop_when` | [`StopCondition`](/api-reference/types/stop-conditions) | Stop condition for tool loops (e.g., `step_count_is(5)` or `has_tool_call("finish")`) |
 | `on_step_start` | `Callable` | Callback when a step starts |
 | `on_step_finish` | `Callable` | Callback when a step finishes |
+| `reasoning` | `ReasoningConfig` | Normalized reasoning-depth controls like `effort` and `budget` |
 | `provider_options` | `dict` | Provider-specific options |
 
 ## Using Messages
@@ -111,6 +112,27 @@ result = await generate_text(
     }
 )
 ```
+
+## Reasoning
+
+Use the top-level `reasoning` parameter for normalized reasoning-depth controls:
+
+```python
+result = await generate_text(
+    model=openai("gpt-5.4"),
+    prompt="Solve this carefully.",
+    reasoning={"effort": "high"},
+    max_tokens=500,
+)
+```
+
+Current first-pass support:
+
+- OpenAI and OpenAI-compatible providers: `effort`
+- Google: `budget`
+- Anthropic: model-aware `effort` and `budget`
+
+If you need provider-specific thinking visibility or raw provider configuration, continue using `provider_options`.
 
 ## Error Handling
 

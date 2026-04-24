@@ -6,7 +6,7 @@ import os
 from typing import Any, AsyncIterator
 import json
 
-from ai_query.providers.base import BaseProvider
+from ai_query.providers.base import BaseProvider, ReasoningCapabilities
 from ai_query.types import (
     GenerateTextResult,
     Message,
@@ -84,6 +84,48 @@ class AnthropicProvider(BaseProvider):
                 "or the ANTHROPIC_API_KEY environment variable."
             )
         self.base_url = kwargs.get("base_url", "https://api.anthropic.com")
+
+    def reasoning_capabilities(self, model: str | None = None) -> ReasoningCapabilities:
+        return ReasoningCapabilities(
+            supported=True,
+            supports_effort=True,
+            supports_budget=True,
+            supports_visibility_controls=True,
+            requires_reasoning_state_roundtrip=True,
+        )
+
+    def apply_reasoning(
+        self,
+        provider_options: ProviderOptions | None,
+        reasoning: dict[str, Any],
+        *,
+        model: str,
+    ) -> ProviderOptions | None:
+        if not reasoning:
+            return provider_options
+
+        capabilities = self.reasoning_capabilities(model)
+        if not capabilities.supported:
+            return super().apply_reasoning(provider_options, reasoning, model=model)
+
+        effort = reasoning.get("effort")
+        budget = reasoning.get("budget")
+
+        updated, options = self._get_or_create_provider_options_namespace(provider_options)
+        conflicts = [key for key in ("thinking", "output_config") if key in options]
+        if conflicts:
+            self._raise_reasoning_conflict(model=model, conflicting_keys=conflicts)
+
+        if budget is not None:
+            options["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": budget,
+            }
+
+        if effort is not None:
+            options["output_config"] = {"effort": effort}
+
+        return updated
 
     async def _convert_messages(
         self, messages: list[Message]

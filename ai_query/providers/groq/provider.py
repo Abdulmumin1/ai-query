@@ -12,6 +12,7 @@ class GroqProvider(OpenAIProvider):
     """Groq provider - wraps OpenAI provider with Groq's base URL."""
 
     name = "groq"
+    _upstream_max_tokens_param = "max_tokens"
 
     def __init__(self, api_key: str | None = None, **kwargs):
         resolved_api_key = api_key or os.environ.get("GROQ_API_KEY")
@@ -61,4 +62,3 @@ def groq(
         provider = _default_provider
 
     return LanguageModel(provider=provider, model_id=model_id)
-

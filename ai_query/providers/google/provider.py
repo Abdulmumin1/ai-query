@@ -6,7 +6,7 @@ import base64
 import os
 from typing import Any, AsyncIterator
 
-from ai_query.providers.base import BaseProvider
+from ai_query.providers.base import BaseProvider, ReasoningCapabilities
 from ai_query.types import (
     GenerateTextResult,
     Message,
@@ -126,6 +126,45 @@ class GoogleProvider(BaseProvider):
                 "or the GOOGLE_GENERATIVE_AI_API_KEY environment variable."
             )
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    def reasoning_capabilities(self, model: str | None = None) -> ReasoningCapabilities:
+        return ReasoningCapabilities(
+            supported=True,
+            supports_budget=True,
+        )
+
+    def apply_reasoning(
+        self,
+        provider_options: ProviderOptions | None,
+        reasoning: dict[str, Any],
+        *,
+        model: str,
+    ) -> ProviderOptions | None:
+        if not reasoning:
+            return provider_options
+
+        if "effort" in reasoning:
+            raise ValueError(
+                f"{self.name} provider does not support normalized reasoning.effort yet; "
+                f"use provider_options['{self.name}']['thinking_config'] for model-specific thinking controls."
+            )
+
+        unsupported = [key for key in reasoning if key != "budget"]
+        if unsupported:
+            raise ValueError(
+                f"{self.name} provider does not support normalized reasoning fields: {', '.join(sorted(unsupported))}."
+            )
+
+        updated, options = self._get_or_create_provider_options_namespace(provider_options)
+        conflicts = [key for key in ["thinking_config", "thinkingConfig"] if key in options]
+        if conflicts:
+            self._raise_reasoning_conflict(model=model, conflicting_keys=conflicts)
+
+        budget = reasoning.get("budget")
+        if budget is not None:
+            options["thinking_config"] = {"thinking_budget": budget}
+
+        return updated
 
     async def _convert_messages(
         self, messages: list[Message]

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import json
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, TYPE_CHECKING
 
 from ai_query.types import (
@@ -18,6 +20,7 @@ from ai_query.types import (
     EmbedResult,
     EmbedManyResult,
     EmbeddingUsage,
+    ReasoningConfig,
 )
 
 if TYPE_CHECKING:
@@ -133,6 +136,54 @@ class BaseProvider(ABC):
         if provider_options is None:
             return {}
         return provider_options.get(self.name, {})
+
+    def reasoning_capabilities(self, model: str | None = None) -> "ReasoningCapabilities":
+        """Describe normalized reasoning support for this provider."""
+        return ReasoningCapabilities()
+
+    def apply_reasoning(
+        self,
+        provider_options: ProviderOptions | None,
+        reasoning: ReasoningConfig,
+        *,
+        model: str,
+    ) -> ProviderOptions | None:
+        """Map normalized reasoning settings into provider-specific options."""
+        capabilities = self.reasoning_capabilities(model)
+        if not capabilities.supported:
+            raise ValueError(
+                f"{self.name} provider does not support normalized reasoning yet; "
+                f"use provider_options['{self.name}'] for provider-specific controls."
+            )
+        raise NotImplementedError(
+            f"{self.name} provider declares reasoning support but does not implement apply_reasoning()"
+        )
+
+    def _clone_provider_options(
+        self, provider_options: ProviderOptions | None
+    ) -> ProviderOptions:
+        return copy.deepcopy(provider_options) if provider_options is not None else {}
+
+    def _get_or_create_provider_options_namespace(
+        self, provider_options: ProviderOptions | None
+    ) -> tuple[ProviderOptions, dict[str, Any]]:
+        updated = self._clone_provider_options(provider_options)
+        namespace = updated.setdefault(self.name, {})
+        if not isinstance(namespace, dict):
+            raise TypeError(
+                f"provider_options['{self.name}'] must be a dict, got {type(namespace).__name__}"
+            )
+        return updated, namespace
+
+    def _raise_reasoning_conflict(
+        self, *, model: str, conflicting_keys: list[str]
+    ) -> None:
+        keys = ", ".join(f"'{key}'" for key in conflicting_keys)
+        raise ValueError(
+            f"Conflicting reasoning settings for {self.name}/{model}: {keys}. "
+            f"Use either the top-level reasoning parameter or provider_options['{self.name}'], not both."
+        )
+
 
     async def _fetch_resource_as_base64(self, url: str) -> tuple[str, str]:
         """Fetch a resource from URL and return as base64 with media type.
@@ -265,3 +316,13 @@ class BaseProvider(ABC):
             embeddings=embeddings,
             usage=EmbeddingUsage(tokens=total_tokens),
         )
+
+
+@dataclass
+class ReasoningCapabilities:
+    supported: bool = False
+    supports_effort: bool = False
+    supports_budget: bool = False
+    allowed_efforts: tuple[str, ...] = ()
+    supports_visibility_controls: bool = False
+    requires_reasoning_state_roundtrip: bool = False
