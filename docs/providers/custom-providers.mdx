@@ -1,0 +1,255 @@
+---
+title: "Custom Providers"
+description: "Build your own ai-query provider adapters"
+---
+
+ai-query already ships with built-in providers, but you can also add your own.
+
+This is useful when you want to:
+
+- integrate a provider that ai-query does not support yet
+- wrap an internal gateway or model router
+- target an OpenAI-compatible API with custom auth or routing
+- run ai-query in a custom runtime with a custom transport
+
+## The Extension Points
+
+The provider system is built from a small set of primitives:
+
+- `BaseProvider`: implement provider behavior
+- `LanguageModel`: wrap a provider + model ID for text generation
+- `EmbeddingModel`: wrap a provider + model ID for embeddings
+- `HTTPTransport`: optionally replace the networking layer
+- `GenerateTextResult`, `StreamChunk`, `Usage`, `ToolCall`: the result types your provider returns
+
+## Two Common Patterns
+
+Most custom providers fit one of these patterns:
+
+1. **OpenAI-compatible wrapper**
+2. **Full custom provider**
+
+If your API already supports OpenAI-style `/chat/completions` and `/embeddings`, prefer the first pattern. It is much smaller.
+
+## Pattern 1: OpenAI-Compatible Wrapper
+
+This is the simplest approach. Subclass `OpenAIProvider`, then customize auth and base URL.
+
+```python
+import os
+
+from ai_query.model import LanguageModel
+from ai_query.providers.openai.provider import OpenAIProvider
+
+
+class AcmeProvider(OpenAIProvider):
+    name = "acme"
+
+    def __init__(self, api_key: str | None = None, **kwargs):
+        resolved_api_key = api_key or os.environ.get("ACME_API_KEY")
+        super().__init__(
+            api_key=resolved_api_key,
+            base_url="https://api.acme.ai/v1",
+            **kwargs,
+        )
+
+
+_default_provider: AcmeProvider | None = None
+
+
+def acme(model_id: str, *, api_key: str | None = None) -> LanguageModel:
+    global _default_provider
+
+    if api_key:
+        provider = AcmeProvider(api_key=api_key)
+    else:
+        if _default_provider is None:
+            _default_provider = AcmeProvider()
+        provider = _default_provider
+
+    return LanguageModel(provider=provider, model_id=model_id)
+```
+
+Use it exactly like a built-in provider:
+
+```python
+from ai_query import generate_text
+
+result = await generate_text(
+    model=acme("acme-chat-large"),
+    prompt="Hello!",
+)
+```
+
+## Pattern 2: Full Custom Provider
+
+If the API is not OpenAI-compatible, subclass `BaseProvider` directly.
+
+You must implement:
+
+- `generate()`
+- `stream()`
+
+You can optionally implement:
+
+- `embed()`
+- `embed_many()`
+
+### Minimal Example
+
+```python
+from typing import Any, AsyncIterator
+
+from ai_query.model import LanguageModel
+from ai_query.providers.base import BaseProvider
+from ai_query.types import GenerateTextResult, Message, StreamChunk, ToolSet, Usage
+
+
+class EchoProvider(BaseProvider):
+    name = "echo"
+
+    async def generate(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        tools: ToolSet | None = None,
+        provider_options: dict | None = None,
+        **kwargs: Any,
+    ) -> GenerateTextResult:
+        last_message = messages[-1]
+        text = last_message.content if isinstance(last_message.content, str) else ""
+        return GenerateTextResult(
+            text=f"echo:{text}",
+            finish_reason="stop",
+            usage=Usage(total_tokens=0),
+            response={},
+        )
+
+    async def stream(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        tools: ToolSet | None = None,
+        provider_options: dict | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        last_message = messages[-1]
+        text = last_message.content if isinstance(last_message.content, str) else ""
+        yield StreamChunk(text=f"echo:{text}")
+        yield StreamChunk(is_final=True, usage=Usage(total_tokens=0), finish_reason="stop")
+
+
+def echo(model_id: str = "echo-1") -> LanguageModel:
+    return LanguageModel(provider=EchoProvider(), model_id=model_id)
+```
+
+## Provider Contracts
+
+### `generate()`
+
+`generate()` returns a `GenerateTextResult`.
+
+At minimum, set:
+
+- `text`
+- `finish_reason`
+- `response`
+
+Set `usage` when the upstream API exposes token information.
+
+If the model requests tools, place parsed `ToolCall` values in `result.response["tool_calls"]`.
+
+## `stream()`
+
+`stream()` yields `StreamChunk` objects.
+
+Typical shape:
+
+1. yield chunks with `text=...`
+2. accumulate any tool call state if the API streams it incrementally
+3. yield one final chunk with:
+   - `is_final=True`
+   - `usage=...`
+   - `finish_reason=...`
+   - `tool_calls=[...]` when present
+
+## Tool Calling
+
+If your provider supports tool calling:
+
+- accept `tools: ToolSet | None`
+- convert `ToolSet` into the provider's tool schema
+- parse the provider's tool-call response into ai-query `ToolCall` objects
+- return them in `response["tool_calls"]` for `generate()` or in the final `StreamChunk.tool_calls` for `stream()`
+
+The execution loop in `generate_text()` / `stream_text()` handles the rest.
+
+## Provider Options
+
+ai-query passes all provider-specific options through `provider_options`.
+
+Inside your provider, use:
+
+```python
+my_options = self.get_provider_options(provider_options)
+```
+
+This extracts the entry matching `self.name`.
+
+Example:
+
+```python
+result = await generate_text(
+    model=acme("acme-chat-large"),
+    prompt="Hello!",
+    provider_options={
+        "acme": {
+            "temperature": 0.7,
+            "max_tokens": 500,
+        }
+    },
+)
+```
+
+## Embeddings
+
+If your provider supports embeddings, implement `embed()` and optionally `embed_many()`.
+
+Factory pattern:
+
+```python
+from ai_query.model import EmbeddingModel
+
+
+def acme_embedding(model_id: str) -> EmbeddingModel:
+    return EmbeddingModel(provider=AcmeProvider(), model_id=model_id)
+```
+
+## Custom Transports
+
+If you need a custom runtime or HTTP stack, pass a custom `HTTPTransport` to your provider.
+
+```python
+provider = AcmeProvider(api_key="...", transport=my_transport)
+model = LanguageModel(provider=provider, model_id="acme-chat-large")
+```
+
+This is how ai-query supports both standard Python and Cloudflare Workers.
+
+## Recommended Workflow
+
+1. Start with an OpenAI-compatible wrapper if possible.
+2. Only subclass `BaseProvider` directly when the upstream API shape is meaningfully different.
+3. Implement `generate()` first.
+4. Add `stream()` once non-streaming works.
+5. Add embeddings only if the provider supports them.
+6. Add tests that validate message conversion, tool call parsing, and usage extraction.
+
+## Related Reference
+
+- [BaseProvider API](/api-reference/providers/base-provider)
+- [Transport Base Classes](/api-reference/transport-base)
+- [Results](/api-reference/types/results)
+- [workers_ai()](/api-reference/providers/workers-ai)

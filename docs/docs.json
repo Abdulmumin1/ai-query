@@ -73,6 +73,8 @@
               "providers/openrouter",
               "providers/deepseek",
               "providers/groq",
+              "providers/workers-ai",
+              "providers/custom-providers",
               "providers/llama",
               "providers/xai"
             ]
@@ -92,6 +94,8 @@
               "api-reference/providers/openrouter",
               "api-reference/providers/deepseek",
               "api-reference/providers/groq",
+              "api-reference/providers/workers-ai",
+              "api-reference/providers/base-provider",
               "api-reference/providers/llama",
               "api-reference/providers/xai",
               "api-reference/providers/bedrock"

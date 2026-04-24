@@ -93,6 +93,10 @@ class AgentDO(DurableObject):
             "OPENROUTER_API_KEY",
             "DEEPSEEK_API_KEY",
             "XAI_API_KEY",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "CLOUDFLARE_API_TOKEN",
+            "CLOUDFLARE_AUTH_TOKEN",
+            "CLOUDFLARE_API_KEY",
         ]:
             val = getattr(env, key, None)
             if isinstance(val, str) and val:
@@ -113,6 +117,10 @@ class AgentDO(DurableObject):
             "OPENROUTER_API_KEY",
             "DEEPSEEK_API_KEY",
             "XAI_API_KEY",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "CLOUDFLARE_API_TOKEN",
+            "CLOUDFLARE_AUTH_TOKEN",
+            "CLOUDFLARE_API_KEY",
         ]:
             val = getattr(env, key, None)
             if isinstance(val, str) and val:

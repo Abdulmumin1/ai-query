@@ -26,6 +26,12 @@ ai-query supports multiple AI providers through a unified interface. Each provid
   <Card title="Groq" icon="bolt" href="/providers/groq">
     Groq LPU Inference
   </Card>
+  <Card title="Workers AI" icon="cloud" href="/providers/workers-ai">
+    Cloudflare Workers AI via OpenAI-compatible endpoints
+  </Card>
+  <Card title="Custom Providers" icon="toolbox" href="/providers/custom-providers">
+    Build your own provider adapters and wrappers
+  </Card>
   <Card title="Meta Llama" icon="meta" href="/providers/llama">
     Official Meta Llama API
   </Card>
@@ -68,6 +74,10 @@ export DEEPSEEK_API_KEY="sk-..."
 
 # Groq
 export GROQ_API_KEY="gsk-..."
+
+# Workers AI
+export CLOUDFLARE_ACCOUNT_ID="..."
+export CLOUDFLARE_API_TOKEN="..."
 ```
 
 ## Usage
@@ -76,7 +86,7 @@ All providers follow the same pattern - import the factory function and use it w
 
 ```python
 from ai_query import generate_text
-from ai_query.providers import openai, anthropic, google, openrouter, deepseek, groq
+from ai_query.providers import openai, anthropic, google, openrouter, deepseek, groq, workers_ai
 
 # OpenAI
 result = await generate_text(model=openai("gpt-4o"), prompt="Hello!")
@@ -95,6 +105,9 @@ result = await generate_text(model=deepseek("deepseek-chat"), prompt="Hello!")
 
 # Groq (ultra-fast inference)
 result = await generate_text(model=groq("llama-3.3-70b-versatile"), prompt="Hello!")
+
+# Workers AI
+result = await generate_text(model=workers_ai("@cf/moonshotai/kimi-k2.5"), prompt="Hello!")
 ```
 
 ## Switching Providers
@@ -138,19 +151,19 @@ See individual provider pages for available options.
 
 ## OpenAI-Compatible Providers
 
-OpenRouter, DeepSeek, and Groq use OpenAI-compatible APIs internally. This means:
+OpenRouter, DeepSeek, Groq, and Workers AI use OpenAI-compatible APIs internally. This means:
 
 - They share the same request/response format
-- Provider options use the `"openai"` key
+- Provider options still use their own provider keys (`"openrouter"`, `"deepseek"`, `"groq"`, `"workers_ai"`)
 - Tool calling works identically
 
 ```python
-# All three use the same underlying format
+# All four use the same underlying format
 result = await generate_text(
-    model=openrouter("openai/gpt-4o"),  # or deepseek("deepseek-chat") or groq("llama-3.3-70b-versatile")
+    model=openrouter("openai/gpt-4o"),  # or deepseek(...), groq(...), workers_ai(...)
     prompt="Hello!",
     provider_options={
-        "openai": {"temperature": 0.7}  # Same options key
+        "workers_ai": {"temperature": 0.7}
     }
 )
 ```
