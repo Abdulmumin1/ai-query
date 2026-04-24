@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.27
+
+- patch: Add normalized reasoning controls and provider-level token compatibility
+
 ## 1.7.26
 
 - patch: Add a Cloudflare Workers AI provider using the OpenAI-compatible API
