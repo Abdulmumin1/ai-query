@@ -31,8 +31,23 @@ from ai_query.types import (
     EmbeddingUsage,
     AbortSignal,
     AbortError,
+    ReasoningConfig,
 )
 from ai_query.model import LanguageModel, EmbeddingModel
+
+
+def _apply_reasoning(
+    model: LanguageModel,
+    provider_options: ProviderOptions | None,
+    reasoning: ReasoningConfig | None,
+) -> ProviderOptions | None:
+    if not reasoning:
+        return provider_options
+    return model.provider.apply_reasoning(
+        provider_options,
+        reasoning,
+        model=model.model_id,
+    )
 
 
 async def generate_text(
@@ -46,6 +61,7 @@ async def generate_text(
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
     provider_options: ProviderOptions | None = None,
+    reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
     **kwargs: Any,
 ) -> GenerateTextResult:
@@ -108,7 +124,7 @@ async def generate_text(
             model=model.model_id,
             messages=current_messages,
             tools=tools,
-            provider_options=provider_options,
+            provider_options=_apply_reasoning(model, provider_options, reasoning),
             **kwargs,
         )
 
@@ -240,6 +256,7 @@ def stream_text(
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
     provider_options: ProviderOptions | None = None,
+    reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
     **kwargs: Any,
 ) -> TextStreamResult:
@@ -304,7 +321,7 @@ def stream_text(
                 model=model.model_id,
                 messages=current_messages,
                 tools=tools,
-                provider_options=provider_options,
+                provider_options=_apply_reasoning(model, provider_options, reasoning),
                 **kwargs,
             )
 

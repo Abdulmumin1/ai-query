@@ -80,6 +80,7 @@ class WorkersAIProvider(OpenAIProvider):
     """Cloudflare Workers AI provider via OpenAI-compatible endpoints."""
 
     name = "workers_ai"
+    _upstream_max_tokens_param = "max_tokens"
 
     def __init__(
         self,

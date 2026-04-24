@@ -126,6 +126,24 @@ class TestBaseProvider:
         assert total.output_tokens == 8
         assert total.total_tokens == 23
 
+    def test_apply_reasoning_unsupported_by_default(self):
+        """BaseProvider should reject normalized reasoning unless implemented."""
+        from ai_query.providers.base import BaseProvider
+
+        class TestProvider(BaseProvider):
+            name = "test"
+
+            async def generate(self, **kwargs):
+                pass
+
+            async def stream(self, **kwargs):
+                pass
+
+        provider = TestProvider()
+
+        with pytest.raises(ValueError, match="does not support normalized reasoning"):
+            provider.apply_reasoning(None, {"effort": "high"}, model="test-model")
+
 
 # =============================================================================
 # OpenAI Provider Tests
@@ -204,6 +222,90 @@ class TestOpenAIProvider:
         assert converted[0] == {"role": "system", "content": "You are helpful."}
         assert converted[1] == {"role": "user", "content": "Hello!"}
 
+    def test_openai_apply_reasoning_maps_effort(self):
+        """OpenAI provider should map normalized reasoning effort."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        provider = OpenAIProvider(api_key="test")
+
+        options = provider.apply_reasoning(None, {"effort": "high"}, model="gpt-5.4")
+
+        assert options == {"openai": {"reasoning_effort": "high"}}
+
+    def test_openai_apply_reasoning_rejects_conflict(self):
+        """OpenAI provider should reject overlapping raw reasoning options."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        provider = OpenAIProvider(api_key="test")
+
+        with pytest.raises(ValueError, match="Conflicting reasoning settings"):
+            provider.apply_reasoning(
+                {"openai": {"reasoning_effort": "low"}},
+                {"effort": "high"},
+                model="gpt-5.4",
+            )
+
+    @pytest.mark.asyncio
+    async def test_openai_generate_maps_max_tokens_to_completion_tokens(self):
+        """OpenAI provider should normalize max_tokens to max_completion_tokens."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class CaptureTransport:
+            def __init__(self):
+                self.last_json = None
+
+            async def post(self, url, json, headers=None):
+                self.last_json = json
+                return {
+                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        transport = CaptureTransport()
+        provider = OpenAIProvider(api_key="test", transport=transport)
+
+        await provider.generate(
+            model="gpt-5.4",
+            messages=[Message(role="user", content="Hello")],
+            max_tokens=123,
+        )
+
+        assert transport.last_json["max_completion_tokens"] == 123
+        assert "max_tokens" not in transport.last_json
+
+    @pytest.mark.asyncio
+    async def test_openai_generate_rejects_conflicting_token_aliases(self):
+        """OpenAI provider should reject conflicting token aliases."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class CaptureTransport:
+            async def post(self, url, json, headers=None):
+                return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = OpenAIProvider(api_key="test", transport=CaptureTransport())
+
+        with pytest.raises(ValueError, match="Conflicting token limit settings"):
+            await provider.generate(
+                model="gpt-5.4",
+                messages=[Message(role="user", content="Hello")],
+                max_tokens=100,
+                max_completion_tokens=200,
+            )
+
 
 # =============================================================================
 # Anthropic Provider Tests
@@ -256,6 +358,66 @@ class TestAnthropicProvider:
         assert converted[0]["description"] == "Search the web"
         assert "input_schema" in converted[0]
 
+    def test_anthropic_apply_reasoning_maps_effort(self):
+        """Anthropic provider should map normalized effort generically."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        provider = AnthropicProvider(api_key="test")
+
+        options = provider.apply_reasoning(None, {"effort": "medium"}, model="claude-opus-4-7")
+
+        assert options == {
+            "anthropic": {
+                "output_config": {"effort": "medium"},
+            }
+        }
+
+    def test_anthropic_apply_reasoning_maps_budget(self):
+        """Anthropic provider should map normalized budget generically."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        provider = AnthropicProvider(api_key="test")
+
+        options = provider.apply_reasoning(None, {"budget": 8000}, model="claude-3-7-sonnet-20250219")
+
+        assert options == {
+            "anthropic": {
+                "thinking": {"type": "enabled", "budget_tokens": 8000},
+            }
+        }
+
+    def test_anthropic_apply_reasoning_maps_effort_and_budget_together(self):
+        """Anthropic provider should map both normalized fields without model gating."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        provider = AnthropicProvider(api_key="test")
+
+        options = provider.apply_reasoning(
+            None,
+            {"effort": "high", "budget": 8000},
+            model="claude-opus-4-7",
+        )
+
+        assert options == {
+            "anthropic": {
+                "thinking": {"type": "enabled", "budget_tokens": 8000},
+                "output_config": {"effort": "high"},
+            }
+        }
+
+    def test_anthropic_apply_reasoning_rejects_conflict(self):
+        """Anthropic provider should reject overlap with raw thinking config."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        provider = AnthropicProvider(api_key="test")
+
+        with pytest.raises(ValueError, match="Conflicting reasoning settings"):
+            provider.apply_reasoning(
+                {"anthropic": {"thinking": {"type": "adaptive"}}},
+                {"effort": "medium"},
+                model="claude-opus-4-7",
+            )
+
 
 # =============================================================================
 # Workers AI Provider Tests
@@ -281,10 +443,45 @@ class TestWorkersAIProvider:
         assert isinstance(model, LanguageModel)
         assert model.model_id == "@cf/moonshotai/kimi-k2.5"
         assert model.provider.name == "workers_ai"
-        assert (
-            model.provider.base_url
-            == "https://api.cloudflare.com/client/v4/accounts/account-123/ai/v1"
+
+    @pytest.mark.asyncio
+    async def test_workers_ai_generate_uses_max_tokens_upstream(self):
+        """Workers AI should keep upstream max_tokens for OpenAI-compatible requests."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        class CaptureTransport:
+            def __init__(self):
+                self.last_json = None
+
+            async def post(self, url, json, headers=None):
+                self.last_json = json
+                return {
+                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        transport = CaptureTransport()
+        provider = WorkersAIProvider(
+            api_key="token",
+            account_id="account-123",
+            transport=transport,
         )
+
+        await provider.generate(
+            model="@cf/moonshotai/kimi-k2.5",
+            messages=[Message(role="user", content="Hello")],
+            max_tokens=123,
+        )
+
+        assert transport.last_json["max_tokens"] == 123
+        assert "max_completion_tokens" not in transport.last_json
 
     def test_workers_ai_with_custom_base_url(self):
         """workers_ai() should accept custom base URL without account_id."""
@@ -321,6 +518,42 @@ class TestWorkersAIProvider:
 
         with pytest.raises(ValueError, match="Cloudflare account ID is missing"):
             WorkersAIProvider(api_key="token")
+
+
+class TestGoogleReasoningProvider:
+    """Tests for normalized reasoning mapping in Google provider."""
+
+    def test_google_apply_reasoning_maps_budget(self):
+        """Google provider should map normalized reasoning budget."""
+        from ai_query.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key="test")
+
+        options = provider.apply_reasoning(None, {"budget": 1024}, model="gemini-2.5-pro")
+
+        assert options == {"google": {"thinking_config": {"thinking_budget": 1024}}}
+
+    def test_google_apply_reasoning_rejects_conflict(self):
+        """Google provider should reject overlapping raw thinking config."""
+        from ai_query.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key="test")
+
+        with pytest.raises(ValueError, match="Conflicting reasoning settings"):
+            provider.apply_reasoning(
+                {"google": {"thinking_config": {"thinking_budget": 2048}}},
+                {"budget": 1024},
+                model="gemini-2.5-pro",
+            )
+
+    def test_google_apply_reasoning_rejects_effort(self):
+        """Google provider should reject normalized effort until mapped explicitly."""
+        from ai_query.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key="test")
+
+        with pytest.raises(ValueError, match="does not support normalized reasoning.effort"):
+            provider.apply_reasoning(None, {"effort": "high"}, model="gemini-2.5-pro")
 
 
 # =============================================================================

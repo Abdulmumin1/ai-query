@@ -28,6 +28,7 @@ from typing import (
     get_args,
     is_typeddict,
     overload,
+    TypedDict,
 )
 
 # Message types
@@ -801,6 +802,13 @@ class TextStreamResult:
         return self.text_stream
 
 ProviderOptions = dict[str, dict[str, Any]]
+
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+
+
+class ReasoningConfig(TypedDict, total=False):
+    effort: ReasoningEffort
+    budget: int
 
 
 # =============================================================================

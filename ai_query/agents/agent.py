@@ -36,7 +36,7 @@ from ai_query.types import (
 if TYPE_CHECKING:
     from ai_query.agents.events import EventBus
     from ai_query.agents.transport import AgentTransport
-    from ai_query.types import ProviderOptions, StopCondition, ToolSet
+    from ai_query.types import ProviderOptions, ReasoningConfig, StopCondition, ToolSet
     from pydantic import BaseModel
 
 
@@ -177,6 +177,7 @@ class Agent(Generic[StateT]):
         initial_state: Union[StateT, None] = None,
         stop_when: Union[StopCondition, List[StopCondition], None] = None,
         provider_options: Union[ProviderOptions, None] = None,
+        reasoning: Union[ReasoningConfig, None] = None,
         transport: Union[AgentTransport, None] = None,
         event_bus: Union[EventBus, None] = None,
     ) -> None:
@@ -197,6 +198,7 @@ class Agent(Generic[StateT]):
         self.tools = tools or {}
         self.stop_when = stop_when
         self.provider_options = provider_options
+        self.reasoning = reasoning
 
         # Agent state
         self._state: Union[StateT, None] = None
@@ -441,6 +443,7 @@ class Agent(Generic[StateT]):
             tools=self.tools if self.tools else None,
             stop_when=self.stop_when,
             provider_options=self.provider_options,
+            reasoning=self.reasoning,
         )
 
         full_response = ""
@@ -482,6 +485,7 @@ class Agent(Generic[StateT]):
             tools=self.tools if self.tools else None,
             stop_when=self.stop_when,
             provider_options=self.provider_options,
+            reasoning=self.reasoning,
         )
 
         full_response = ""

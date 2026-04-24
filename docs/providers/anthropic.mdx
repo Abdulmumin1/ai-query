@@ -5,6 +5,37 @@ description: "Use Claude models with ai-query"
 
 The Anthropic provider gives you access to Claude models, known for their strong reasoning capabilities and safety features.
 
+## Reasoning
+
+Claude reasoning support in ai-query is intentionally provider-level, not model-version-gated.
+
+Examples:
+
+```python
+result = await generate_text(
+    model=anthropic("claude-opus-4-7"),
+    prompt="Analyze this carefully.",
+    reasoning={"effort": "medium"},
+    max_tokens=4096,
+)
+```
+
+```python
+result = await generate_text(
+    model=anthropic("claude-3-7-sonnet-20250219"),
+    prompt="Think through this.",
+    reasoning={"budget": 8000},
+    max_tokens=16000,
+)
+```
+
+Notes:
+
+- normalized `effort` maps to Anthropic's `output_config.effort`
+- normalized `budget` maps to `thinking.budget_tokens`
+- if a specific Claude model rejects a combination, Anthropic returns the validation error directly
+- thinking visibility controls like summarized vs omitted remain provider-specific and should still be configured through `provider_options["anthropic"]`
+
 ## Setup
 
 Set your API key as an environment variable:

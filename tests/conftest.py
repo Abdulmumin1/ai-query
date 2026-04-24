@@ -59,6 +59,7 @@ class MockProvider(BaseProvider):
         self.stream_call_count = 0
         self.last_messages: list[Message] = []
         self.last_tools: ToolSet | None = None
+        self.last_provider_options: dict[str, Any] | None = None
         self.last_kwargs: dict[str, Any] = {}
 
     async def generate(
@@ -73,6 +74,7 @@ class MockProvider(BaseProvider):
         """Mock generate that returns pre-configured responses."""
         self.last_messages = messages
         self.last_tools = tools
+        self.last_provider_options = provider_options
         self.last_kwargs = kwargs
 
         if self.call_count < len(self.responses):
@@ -100,6 +102,7 @@ class MockProvider(BaseProvider):
         """Mock stream that yields pre-configured chunks."""
         self.last_messages = messages
         self.last_tools = tools
+        self.last_provider_options = provider_options
         self.last_kwargs = kwargs
 
         if self.stream_call_count < len(self.stream_chunks):

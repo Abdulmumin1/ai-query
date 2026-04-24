@@ -128,6 +128,52 @@ class TestGenerateTextBasic:
         assert provider.last_kwargs["max_tokens"] == 100
         assert provider.last_kwargs["temperature"] == 0.7
 
+    @pytest.mark.asyncio
+    async def test_reasoning_is_mapped_into_provider_options(self):
+        """generate_text should map normalized reasoning before provider invocation."""
+
+        class ReasoningMockProvider(MockProvider):
+            def reasoning_capabilities(self, model=None):
+                from ai_query.providers.base import ReasoningCapabilities
+
+                return ReasoningCapabilities(supported=True, supports_effort=True)
+
+            def apply_reasoning(self, provider_options, reasoning, *, model):
+                options = self._clone_provider_options(provider_options)
+                options.setdefault(self.name, {})["effort"] = reasoning["effort"]
+                return options
+
+        provider = ReasoningMockProvider(responses=[make_response(text="Done")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        original_provider_options = {"other": {"value": 1}}
+
+        result = await generate_text(
+            model=model,
+            prompt="Test reasoning",
+            provider_options=original_provider_options,
+            reasoning={"effort": "high"},
+        )
+
+        assert result.text == "Done"
+        assert provider.last_provider_options == {
+            "other": {"value": 1},
+            "mock": {"effort": "high"},
+        }
+        assert original_provider_options == {"other": {"value": 1}}
+
+    @pytest.mark.asyncio
+    async def test_reasoning_unsupported_provider_raises(self):
+        """generate_text should fail clearly when provider does not support reasoning."""
+        provider = MockProvider(responses=[make_response(text="Done")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        with pytest.raises(ValueError, match="does not support normalized reasoning"):
+            await generate_text(
+                model=model,
+                prompt="Test reasoning",
+                reasoning={"effort": "high"},
+            )
+
 
 # =============================================================================
 # Tool Calling Tests

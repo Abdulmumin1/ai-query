@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Add normalized reasoning controls and provider-level token compatibility"
+}

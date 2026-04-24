@@ -16,6 +16,8 @@ from ai_query.types import (
     StopCondition,
     step_count_is,
     has_tool_call,
+    ReasoningConfig,
+    ReasoningEffort,
 )
 from ai_query.model import LanguageModel, EmbeddingModel
 from ai_query.core import (
@@ -58,6 +60,8 @@ __all__ = [
     "TextStreamResult",
     "EmbedResult",
     "EmbedManyResult",
+    "ReasoningConfig",
+    "ReasoningEffort",
     # Stop conditions
     "StopCondition",
     "step_count_is",

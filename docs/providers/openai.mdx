@@ -57,12 +57,27 @@ result = await generate_text(
 )
 ```
 
+## Reasoning
+
+OpenAI reasoning models work with ai-query's normalized `reasoning` parameter:
+
+```python
+result = await generate_text(
+    model=openai("gpt-5.4"),
+    prompt="Think this through carefully.",
+    reasoning={"effort": "high"},
+    max_tokens=800,
+)
+```
+
+ai-query keeps `max_tokens` as the public API and maps it to the correct OpenAI request field internally.
+
 ### Supported Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `temperature` | `float` | `1.0` | Randomness (0-2) |
-| `max_tokens` | `int` | Model default | Maximum output tokens |
+| `max_tokens` | `int` | Model default | Maximum output tokens (mapped to the correct OpenAI field internally) |
 | `top_p` | `float` | `1.0` | Nucleus sampling |
 | `frequency_penalty` | `float` | `0.0` | Reduce repetition (-2 to 2) |
 | `presence_penalty` | `float` | `0.0` | Encourage new topics (-2 to 2) |
