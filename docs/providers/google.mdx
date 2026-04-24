@@ -76,7 +76,17 @@ result = await generate_text(
 
 ### Thinking Config (Reasoning Models)
 
-For reasoning models like Gemini 3, enable thinking:
+For normalized reasoning-depth control, use `reasoning={"budget": ...}`:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.5-pro"),
+    prompt="Solve this carefully.",
+    reasoning={"budget": 1024},
+)
+```
+
+For provider-specific Gemini thinking options, use raw `provider_options`:
 
 ```python
 result = await generate_text(

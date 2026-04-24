@@ -7,7 +7,7 @@ import json
 import os
 from typing import Any, AsyncIterator
 
-from ai_query.providers.base import BaseProvider
+from ai_query.providers.base import BaseProvider, ReasoningCapabilities
 from ai_query.types import (
     GenerateTextResult,
     Message,
@@ -103,6 +103,7 @@ class OpenAIProvider(BaseProvider):
     """OpenAI provider adapter using direct HTTP API."""
 
     name = "openai"
+    _upstream_max_tokens_param = "max_completion_tokens"
 
     def __init__(self, api_key: str | None = None, **kwargs: Any):
         """Initialize OpenAI provider.
@@ -342,6 +343,76 @@ class OpenAIProvider(BaseProvider):
             headers["OpenAI-Organization"] = self.organization
         return headers
 
+    def reasoning_capabilities(self, model: str | None = None) -> ReasoningCapabilities:
+        return ReasoningCapabilities(
+            supported=True,
+            supports_effort=True,
+            allowed_efforts=("none", "minimal", "low", "medium", "high", "xhigh"),
+        )
+
+    def _build_request_options(
+        self,
+        kwargs: dict[str, Any],
+        provider_options: dict[str, Any],
+    ) -> dict[str, Any]:
+        token_entries: list[tuple[str, Any]] = []
+        for source_name, source in (("kwargs", kwargs), (f"provider_options['{self.name}']", provider_options)):
+            for key in ("max_tokens", "max_completion_tokens"):
+                if key in source:
+                    token_entries.append((f"{source_name}.{key}", source[key]))
+
+        distinct_token_values = {value for _, value in token_entries}
+        if len(distinct_token_values) > 1:
+            conflict_keys = [key for key, _ in token_entries]
+            raise ValueError(
+                f"Conflicting token limit settings for {self.name}: {', '.join(conflict_keys)}. "
+                "Use a single output token limit value."
+            )
+
+        merged_kwargs = dict(kwargs)
+        merged_provider_options = dict(provider_options)
+        for key in ("max_tokens", "max_completion_tokens"):
+            merged_kwargs.pop(key, None)
+            merged_provider_options.pop(key, None)
+
+        request_options = {
+            **merged_kwargs,
+            **merged_provider_options,
+        }
+
+        if token_entries:
+            request_options[self._upstream_max_tokens_param] = token_entries[-1][1]
+
+        return request_options
+
+    def apply_reasoning(
+        self,
+        provider_options: ProviderOptions | None,
+        reasoning: dict[str, Any],
+        *,
+        model: str,
+    ) -> ProviderOptions | None:
+        if not reasoning:
+            return provider_options
+
+        unsupported = [key for key in reasoning if key != "effort"]
+        if unsupported:
+            raise ValueError(
+                f"{self.name} provider does not support normalized reasoning fields: {', '.join(sorted(unsupported))}. "
+                f"Use provider_options['{self.name}'] for provider-specific controls."
+            )
+
+        updated, options = self._get_or_create_provider_options_namespace(provider_options)
+        conflicts = [key for key in ["reasoning_effort"] if key in options]
+        if conflicts:
+            self._raise_reasoning_conflict(model=model, conflicting_keys=conflicts)
+
+        effort = reasoning.get("effort")
+        if effort is not None:
+            options["reasoning_effort"] = effort
+
+        return updated
+
     async def generate(
         self,
         *,
@@ -359,12 +430,13 @@ class OpenAIProvider(BaseProvider):
         # Convert messages
         converted_messages = await self._convert_messages(messages)
 
+        request_options = self._build_request_options(kwargs, openai_options)
+
         # Build request parameters
         request_body: dict[str, Any] = {
             "model": model,
             "messages": converted_messages,
-            **kwargs,
-            **openai_options,
+            **request_options,
         }
 
         # Add tools if provided
@@ -436,14 +508,15 @@ class OpenAIProvider(BaseProvider):
         # Convert messages
         converted_messages = await self._convert_messages(messages)
 
+        request_options = self._build_request_options(kwargs, openai_options)
+
         # Build request parameters with streaming enabled
         request_body: dict[str, Any] = {
             "model": model,
             "messages": converted_messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            **kwargs,
-            **openai_options,
+            **request_options,
         }
 
         # Add tools if provided

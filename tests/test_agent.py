@@ -299,6 +299,23 @@ class TestAgentChat:
         await agent.stop()
 
     @pytest.mark.asyncio
+    async def test_chat_passes_default_reasoning(self, mock_stream_text, mock_model):
+        """chat() should forward agent-level default reasoning to stream_text."""
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=mock_model,
+            reasoning={"effort": "high"},
+        )
+        await agent.start()
+
+        await agent.chat("Hello")
+
+        _, kwargs = mock_stream_text.call_args
+        assert kwargs["reasoning"] == {"effort": "high"}
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_chat_persists_tool_messages(self):
         """chat() should persist tool calls and tool results."""
 
@@ -421,6 +438,24 @@ class TestAgentStream:
             pass
 
         assert len(agent.messages) == 2
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_stream_passes_default_reasoning(self, mock_stream_text, mock_model):
+        """stream() should forward agent-level default reasoning to stream_text."""
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=mock_model,
+            reasoning={"effort": "medium"},
+        )
+        await agent.start()
+
+        async for _ in agent.stream("Hello"):
+            pass
+
+        _, kwargs = mock_stream_text.call_args
+        assert kwargs["reasoning"] == {"effort": "medium"}
         await agent.stop()
 
     @pytest.mark.asyncio

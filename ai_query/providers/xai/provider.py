@@ -12,6 +12,7 @@ class XAIProvider(OpenAIProvider):
     """xAI provider - wraps OpenAI provider with xAI's base URL."""
 
     name = "xai"
+    _upstream_max_tokens_param = "max_tokens"
 
     def __init__(self, api_key: str | None = None, **kwargs):
         resolved_api_key = api_key or os.environ.get("XAI_API_KEY")

@@ -12,6 +12,7 @@ class LlamaProvider(OpenAIProvider):
     """Meta Llama provider - wraps OpenAI provider with Llama's base URL."""
 
     name = "llama"
+    _upstream_max_tokens_param = "max_tokens"
 
     def __init__(self, api_key: str | None = None, **kwargs):
         resolved_api_key = api_key or os.environ.get("LLAMA_API_KEY")

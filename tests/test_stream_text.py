@@ -121,6 +121,46 @@ class TestStreamTextBasic:
         assert reason == "stop"
 
     @pytest.mark.asyncio
+    async def test_reasoning_is_mapped_into_stream_provider_options(self):
+        """stream_text should map normalized reasoning before provider invocation."""
+
+        class ReasoningMockProvider(MockProvider):
+            def reasoning_capabilities(self, model=None):
+                from ai_query.providers.base import ReasoningCapabilities
+
+                return ReasoningCapabilities(supported=True, supports_effort=True)
+
+            def apply_reasoning(self, provider_options, reasoning, *, model):
+                options = self._clone_provider_options(provider_options)
+                options.setdefault(self.name, {})["effort"] = reasoning["effort"]
+                return options
+
+        provider = ReasoningMockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="Hello"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ]
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            prompt="Test reasoning",
+            provider_options={"other": {"value": 1}},
+            reasoning={"effort": "high"},
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        assert provider.last_provider_options == {
+            "other": {"value": 1},
+            "mock": {"effort": "high"},
+        }
+
+    @pytest.mark.asyncio
     async def test_stream_direct_iteration(self):
         """stream_text result should be directly iterable."""
         provider = MockProvider(stream_chunks=[
