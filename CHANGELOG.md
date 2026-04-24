@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.26
+
+- patch: Add a Cloudflare Workers AI provider using the OpenAI-compatible API
+
 ## 1.7.25
 
 - patch: Harden Cloudflare env binding handling and serialize tool parts in the messages endpoint
