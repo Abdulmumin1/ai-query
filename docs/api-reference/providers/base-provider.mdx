@@ -1,0 +1,226 @@
+---
+title: "BaseProvider"
+description: "Abstract base class for custom provider implementations"
+---
+
+`BaseProvider` is the core extension point for implementing custom model providers in ai-query.
+
+## Import
+
+```python
+from ai_query.providers.base import BaseProvider
+```
+
+## Constructor
+
+```python
+def __init__(
+    self,
+    api_key: str | None = None,
+    transport: HTTPTransport | None = None,
+    **kwargs: Any,
+)
+```
+
+### Parameters
+
+<ParamField path="api_key" type="str">
+  Optional provider API key.
+</ParamField>
+
+<ParamField path="transport" type="HTTPTransport">
+  Optional custom HTTP transport.
+</ParamField>
+
+<ParamField path="kwargs" type="Any">
+  Additional provider-specific configuration stored on `self.config`.
+</ParamField>
+
+## Required Attributes
+
+### `name`
+
+```python
+name: str
+```
+
+Provider identifier used for `provider_options` lookup.
+
+Example:
+
+```python
+class MyProvider(BaseProvider):
+    name = "my_provider"
+```
+
+## Required Methods
+
+### `generate()`
+
+```python
+@abstractmethod
+async def generate(
+    self,
+    *,
+    model: str,
+    messages: list[Message],
+    tools: ToolSet | None = None,
+    provider_options: ProviderOptions | None = None,
+    **kwargs: Any,
+) -> GenerateTextResult
+```
+
+Generate a complete response.
+
+### `stream()`
+
+```python
+@abstractmethod
+async def stream(
+    self,
+    *,
+    model: str,
+    messages: list[Message],
+    tools: ToolSet | None = None,
+    provider_options: ProviderOptions | None = None,
+    **kwargs: Any,
+) -> AsyncIterator[StreamChunk]
+```
+
+Stream a response incrementally.
+
+The final yielded chunk should set `is_final=True` and include usage and finish metadata when available.
+
+## Optional Methods
+
+### `embed()`
+
+```python
+async def embed(
+    self,
+    *,
+    model: str,
+    value: str,
+    provider_options: ProviderOptions | None = None,
+    **kwargs: Any,
+) -> EmbedResult
+```
+
+Override this if the provider supports embeddings.
+
+### `embed_many()`
+
+```python
+async def embed_many(
+    self,
+    *,
+    model: str,
+    values: list[str],
+    provider_options: ProviderOptions | None = None,
+    **kwargs: Any,
+) -> EmbedManyResult
+```
+
+Batch embedding method. The base class default implementation runs `embed()` in parallel.
+
+## Properties
+
+### `transport`
+
+```python
+transport: HTTPTransport
+```
+
+Returns the transport passed to the constructor or auto-detects the default transport for the current runtime.
+
+## Helper Methods
+
+### `get_provider_options()`
+
+```python
+def get_provider_options(
+    self,
+    provider_options: ProviderOptions | None,
+) -> dict[str, Any]
+```
+
+Extracts the options for the current provider using `self.name`.
+
+### `_fetch_resource_as_base64()`
+
+```python
+async def _fetch_resource_as_base64(url: str) -> tuple[str, str]
+```
+
+Fetch a remote resource and convert it to base64 plus media type. Useful for multimodal providers.
+
+### `_parse_sse_line()`
+
+```python
+def _parse_sse_line(line: bytes | str) -> str | None
+```
+
+Extract the `data:` payload from an SSE line.
+
+### `_parse_sse_json()`
+
+```python
+def _parse_sse_json(line: bytes | str) -> dict[str, Any] | None
+```
+
+Parse an SSE `data:` line as JSON.
+
+### `_accumulate_usage()`
+
+```python
+def _accumulate_usage(total: Usage, delta: Usage) -> None
+```
+
+Accumulate usage counters in-place.
+
+## Minimal Example
+
+```python
+from typing import Any, AsyncIterator
+
+from ai_query.providers.base import BaseProvider
+from ai_query.types import GenerateTextResult, Message, StreamChunk, ToolSet, Usage
+
+
+class EchoProvider(BaseProvider):
+    name = "echo"
+
+    async def generate(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        tools: ToolSet | None = None,
+        provider_options=None,
+        **kwargs: Any,
+    ) -> GenerateTextResult:
+        return GenerateTextResult(
+            text="hello",
+            finish_reason="stop",
+            usage=Usage(total_tokens=0),
+            response={},
+        )
+
+    async def stream(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        tools: ToolSet | None = None,
+        provider_options=None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        yield StreamChunk(text="hello")
+        yield StreamChunk(is_final=True, usage=Usage(total_tokens=0), finish_reason="stop")
+```
+
+## Related Docs
+
+- [Custom Providers Guide](/providers/custom-providers)
+- [Transport Base Classes](/api-reference/transport-base)
+- [Results](/api-reference/types/results)
