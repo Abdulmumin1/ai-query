@@ -276,10 +276,10 @@ class TestWorkersAIProvider:
                 "CLOUDFLARE_API_TOKEN": "test-token",
             },
         ):
-            model = workers_ai("@cf/meta/llama-3.1-8b-instruct")
+            model = workers_ai("@cf/moonshotai/kimi-k2.5")
 
         assert isinstance(model, LanguageModel)
-        assert model.model_id == "@cf/meta/llama-3.1-8b-instruct"
+        assert model.model_id == "@cf/moonshotai/kimi-k2.5"
         assert model.provider.name == "workers_ai"
         assert (
             model.provider.base_url
@@ -291,7 +291,7 @@ class TestWorkersAIProvider:
         from ai_query.providers import workers_ai
 
         model = workers_ai(
-            "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/moonshotai/kimi-k2.5",
             api_key="token",
             base_url="https://gateway.ai.cloudflare.com/v1/account/gateway/workers-ai",
         )

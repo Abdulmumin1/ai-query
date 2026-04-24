@@ -25,7 +25,7 @@ class _WorkersAINamespace:
 
     Example:
         >>> from ai_query.providers import workers_ai
-        >>> model = workers_ai("@cf/meta/llama-3.1-8b-instruct")
+        >>> model = workers_ai("@cf/moonshotai/kimi-k2.5")
         >>> embedding_model = workers_ai.embedding("@cf/baai/bge-large-en-v1.5")
     """
 
