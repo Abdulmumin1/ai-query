@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Add a Cloudflare Workers AI provider using the OpenAI-compatible API"
-}
