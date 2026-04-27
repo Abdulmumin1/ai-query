@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from dataclasses import dataclass, field
 from typing import (
@@ -36,7 +37,14 @@ from ai_query.types import (
 if TYPE_CHECKING:
     from ai_query.agents.events import EventBus
     from ai_query.agents.transport import AgentTransport
-    from ai_query.types import ProviderOptions, ReasoningConfig, StopCondition, ToolSet
+    from ai_query.types import (
+        OnReasoningEvent,
+        ProviderOptions,
+        ReasoningConfig,
+        ReasoningEvent,
+        StopCondition,
+        ToolSet,
+    )
     from pydantic import BaseModel
 
 
@@ -178,6 +186,7 @@ class Agent(Generic[StateT]):
         stop_when: Union[StopCondition, List[StopCondition], None] = None,
         provider_options: Union[ProviderOptions, None] = None,
         reasoning: Union[ReasoningConfig, None] = None,
+        on_reasoning_event: Union[OnReasoningEvent, None] = None,
         transport: Union[AgentTransport, None] = None,
         event_bus: Union[EventBus, None] = None,
     ) -> None:
@@ -199,6 +208,7 @@ class Agent(Generic[StateT]):
         self.stop_when = stop_when
         self.provider_options = provider_options
         self.reasoning = reasoning
+        self.on_reasoning_event = on_reasoning_event
 
         # Agent state
         self._state: Union[StateT, None] = None
@@ -388,6 +398,22 @@ class Agent(Generic[StateT]):
 
         return await result.steps
 
+    async def _handle_reasoning_event(self, event: "ReasoningEvent") -> None:
+        if self.on_reasoning_event:
+            callback_result = self.on_reasoning_event(event)
+            if inspect.isawaitable(callback_result):
+                await callback_result
+
+        await self.emit(
+            "reasoning",
+            {
+                "kind": event.kind,
+                "provider": event.provider,
+                "text": event.text,
+                "data": event.data,
+            },
+        )
+
     # ─── Chat & Streaming ──────────────────────────────────────────────────
 
     async def chat(
@@ -444,6 +470,7 @@ class Agent(Generic[StateT]):
             stop_when=self.stop_when,
             provider_options=self.provider_options,
             reasoning=self.reasoning,
+            on_reasoning_event=self._handle_reasoning_event,
         )
 
         full_response = ""
@@ -486,6 +513,7 @@ class Agent(Generic[StateT]):
             stop_when=self.stop_when,
             provider_options=self.provider_options,
             reasoning=self.reasoning,
+            on_reasoning_event=self._handle_reasoning_event,
         )
 
         full_response = ""

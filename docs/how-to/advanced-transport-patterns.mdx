@@ -1,0 +1,153 @@
+---
+title: "Advanced Transport Patterns"
+description: "Orchestration, load balancing, and custom transports for multi-agent systems"
+---
+
+This guide covers advanced patterns for building robust multi-agent systems with the transport layer.
+
+## Agent Chain Orchestration
+
+Chain multiple agents together to create processing pipelines:
+
+```python
+# orchestration.py
+from ai_query.agents.remote import connect
+
+class AgentChain:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.agents = {}
+
+    async def connect_agent(self, name: str, agent_id: str):
+        self.agents[name] = connect(f"{self.base_url}/agent/{agent_id}")
+
+    async def process_pipeline(self, input_text: str) -> str:
+        # 1. Research
+        research = await self.agents["researcher"].chat(f"Research: {input_text}")
+
+        # 2. Write
+        draft = await self.agents["writer"].chat(f"Write about: {research}")
+
+        # 3. Edit
+        edited = await self.agents["editor"].chat(f"Improve: {draft}")
+
+        # 4. Summarize
+        summary = await self.agents["summarizer"].chat(f"Summarize: {edited}")
+
+        return summary
+
+async def demo_pipeline():
+    chain = AgentChain("http://localhost:8080")
+    await chain.connect_agent("researcher", "research-1")
+    await chain.connect_agent("writer", "writer-1")
+    await chain.connect_agent("editor", "editor-1")
+    await chain.connect_agent("summarizer", "summarizer")
+
+    result = await chain.process_pipeline("artificial intelligence trends 2025")
+    print(f"Final result: {result}")
+```
+
+## Load Balancing
+
+Distribute requests across multiple agent instances for scale and resilience:
+
+```python
+# load_balancer.py
+import random
+from ai_query.agents.remote import connect
+
+class LoadBalancer:
+    def __init__(self, agent_urls: list[str]):
+        self.agents = [connect(url) for url in agent_urls]
+        self.current = 0
+
+    async def invoke(self, message: str) -> str:
+        # Round-robin selection
+        agent = self.agents[self.current]
+        self.current = (self.current + 1) % len(self.agents)
+
+        try:
+            return await agent.chat(message)
+        except Exception:
+            # Fallback to random agent
+            backup = random.choice(self.agents)
+            return await backup.chat(message)
+
+# Usage
+balancer = LoadBalancer([
+    "http://localhost:8080/agent/worker-1",
+    "http://localhost:8080/agent/worker-2",
+    "http://localhost:8080/agent/worker-3"
+])
+
+result = await balancer.invoke("Process this data")
+```
+
+## Retry with Exponential Backoff
+
+Wrap transports with automatic retry for unreliable connections:
+
+```python
+# retry_transport.py
+import asyncio
+from ai_query.agents.transport import HTTPTransport, AgentTransport
+
+class RetryTransport(AgentTransport):
+    def __init__(self, base_url: str, max_retries: int = 3):
+        self.base_transport = HTTPTransport(base_url)
+        self.max_retries = max_retries
+
+    async def invoke(self, agent_id: str, payload: dict, timeout: float = 30.0):
+        last_error = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await self.base_transport.invoke(agent_id, payload, timeout)
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    delay = 2 ** attempt  # Exponential backoff
+                    await asyncio.sleep(delay)
+
+        raise last_error
+
+# Usage in registry
+from ai_query.agents import AgentRegistry
+
+registry = AgentRegistry()
+registry.register("flaky-agent", RetryTransport(
+    "https://unreliable-api.com/agents",
+    max_retries=5
+))
+```
+
+## Connection Pooling
+
+Reuse HTTP connections for performance:
+
+```python
+# pooled_transport.py
+import httpx
+from ai_query.agents.transport import HTTPTransport
+
+class PooledHTTPTransport(HTTPTransport):
+    def __init__(self, base_url: str, pool_size: int = 10):
+        self.client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=pool_size),
+            base_url=base_url
+        )
+        super().__init__(base_url, client=self.client)
+
+# Usage with registry
+registry = AgentRegistry()
+registry.register("pooled-agent", PooledHTTPTransport(
+    "https://api.myapp.com/agents",
+    pool_size=20
+))
+```
+
+## Related
+
+- [About the Unified Transport Layer](/explanation/unified-transport-layer) — Architecture and design
+- [Tutorial: Complete Multi-Agent Setup](/tutorials/complete-multi-agent-setup) — Build a system from scratch
+- [HTTP Transport Reference](/reference/http-transport) — API reference

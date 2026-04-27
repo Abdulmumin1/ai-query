@@ -1,0 +1,243 @@
+---
+title: "Profile Research Agent"
+description: "OSINT Intelligence Tool with Durable SSE Streaming"
+---
+
+A professional-grade profile investigation agent with:
+
+- **Server-Sent Events (SSE)** for real-time streaming
+- **Durability by Default** - research continues if you disconnect
+- **Event Replay** - never miss an update by reconnecting with `last_event_id`
+
+This example demonstrates how `enable_event_log=True` enables automatic event replay on reconnection.
+
+## The Agent
+
+```python
+import os
+import asyncio
+from datetime import datetime
+from ai_query.agents import Agent, AgentServer
+from ai_query.agents import AgentServerConfig, SQLiteStorage, tool, Field, step_count_is
+from ai_query.providers import google
+
+# You'll need TAVILY_API_KEY env var for this example
+# https://tavily.com
+from tavily import TavilyClient
+
+tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY", ""))
+
+class ProfileResearchAgent(Agent):
+    """
+    OSINT investigator that researches individuals.
+
+    Features:
+    - Persistent SQLite storage
+    - Built-in event log for connection recovery
+    - Web search capabilities
+    """
+
+    # Enable event persistence for replay on reconnect
+    enable_event_log = True
+
+    def __init__(self):
+        @tool(description="Search the web for information about a person")
+        async def search_web(
+            query: str = Field(description="Search query"),
+        ) -> str:
+            # Emit status event - delivered to all connected clients
+            await self.emit("status", {"text": f"Searching: {query}"})
+
+            try:
+                response = tavily.search(query, max_results=5)
+                results = [
+                    f"- [{r['title']}]({r['url']}): {r['content'][:200]}..."
+                    for r in response['results']
+                ]
+                return "\n".join(results)
+            except Exception as e:
+                await self.emit("error", {"message": f"Search failed: {e}"})
+                return f"Search failed: {e}"
+
+        @tool(description="Save a discovered profile URL")
+        async def save_profile(
+            platform: str = Field(description="Platform name (LinkedIn, Twitter, etc.)"),
+            url: str = Field(description="Profile URL")
+        ) -> str:
+            profiles = self.state.get("profiles_found", []) + [{"platform": platform, "url": url}]
+
+            await self.update_state(
+                profiles_found=profiles,
+                last_updated=datetime.now().isoformat()
+            )
+
+            await self.emit("profile_saved", {"platform": platform, "url": url})
+            return f"Saved {platform} profile: {url}"
+
+        super().__init__(
+            "profile-researcher",
+            model=google("gemini-2.0-flash"),
+            system="""You are a Profile Research Agent - an expert OSINT investigator.
+
+            METHODOLOGY:
+            1. Search for the person's name + context (company, location)
+            2. Find social media profiles (LinkedIn, Twitter, GitHub)
+            3. Analyze recent activity and interests
+            4. Compile a comprehensive dossier
+
+            Always cite sources with [Source Name](url).
+            """,
+            storage=SQLiteStorage("./data/profiles.db"),
+            initial_state={
+                "status": "idle",
+                "profiles_found": [],
+                "last_updated": None
+            },
+            tools={"search_web": search_web, "save_profile": save_profile},
+            stop_when=step_count_is(10)
+        )
+
+    async def on_message(self, connection, message):
+        """Handle incoming research requests."""
+        # Emit start event
+        await self.emit("research_start", {"query": message})
+
+        # Stream the response, emitting chunks
+        async for chunk in self.stream(message):
+            await self.emit("chunk", {"content": chunk})
+
+        # Emit completion
+        await self.emit("research_complete", {
+            "profiles_found": len(self.state.get("profiles_found", []))
+        })
+
+
+# Start the server
+if __name__ == "__main__":
+    os.makedirs("./data", exist_ok=True)
+
+    config = AgentServerConfig(
+        idle_timeout=1800,
+        allowed_origins=["*"]
+    )
+
+    print("Profile Research Agent running on port 8080")
+    AgentServer(ProfileResearchAgent(), config=config).serve(port=8080)
+```
+
+## Client Implementation (Reconnection)
+
+Here is how a frontend client handles reconnection using `Last-Event-ID`.
+
+```javascript
+const AGENT_ID = "investigation-001";
+let evtSource = null;
+let lastEventId = null;
+
+function connect() {
+  let url = `http://localhost:8080/agent/${AGENT_ID}/events`;
+
+  // Append last_event_id if we have one (Automatic Replay!)
+  if (lastEventId) {
+    url += `?last_event_id=${lastEventId}`;
+  }
+
+  console.log(`Connecting to ${url}...`);
+  evtSource = new EventSource(url);
+
+  evtSource.addEventListener("chunk", (e) => {
+    // Update last ID for resume
+    if (e.lastEventId) lastEventId = e.lastEventId;
+
+    const data = JSON.parse(e.data);
+    appendLog(data.content);
+  });
+
+  evtSource.addEventListener("status", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
+
+    const data = JSON.parse(e.data);
+    updateStatus(data.text);
+  });
+
+  evtSource.addEventListener("profile_saved", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
+
+    const data = JSON.parse(e.data);
+    addProfileLink(data.platform, data.url);
+  });
+
+  evtSource.addEventListener("research_start", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
+    showSpinner(true);
+  });
+
+  evtSource.addEventListener("research_complete", (e) => {
+    if (e.lastEventId) lastEventId = e.lastEventId;
+
+    const data = JSON.parse(e.data);
+    showSpinner(false);
+    console.log(`Found ${data.profiles_found} profiles`);
+  });
+
+  evtSource.onerror = (err) => {
+    console.log("Connection lost. Reconnecting in 3s...");
+    evtSource.close();
+    setTimeout(connect, 3000);
+  };
+}
+
+// Start research via POST
+async function startResearch(name) {
+  await fetch(`http://localhost:8080/agent/${AGENT_ID}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: `Research ${name}` }),
+  });
+  // Events will start flowing via SSE
+}
+```
+
+## How Event Replay Works
+
+```
+Client connects, receives events 1, 2, 3
+Client disconnects (network issue)
+
+─── Agent continues working, emits events 4, 5, 6 ───
+
+Client reconnects with last_event_id=3
+Server replays events 4, 5, 6
+Client is caught up!
+```
+
+The `enable_event_log = True` setting persists all emitted events to storage. When a client reconnects with `last_event_id`, the server replays missed events before streaming new ones.
+
+## Why This Works Well
+
+1. **Simple API**: Just `await self.emit("event_type", data)` ([docs](/explanation/events)) - no complex output adapters
+2. **Transport-Agnostic**: Agent emits events, transport layer delivers them (WebSocket, SSE, etc.)
+3. **True Durability**: SQLiteStorage persists state, messages, and event log to disk
+4. **Standard SSE**: Uses standard `Last-Event-ID` mechanism for reconnection
+
+## Running the Example
+
+```bash
+# Install dependencies
+pip install ai-query tavily-python
+
+# Set your API keys
+export TAVILY_API_KEY="your-key"
+export GOOGLE_API_KEY="your-key"
+
+# Run the server
+python profile_agent.py
+
+# In another terminal, test it
+curl -X POST http://localhost:8080/agent/test/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Research Elon Musk"}'
+
+# Watch events
+curl http://localhost:8080/agent/test/events
+```

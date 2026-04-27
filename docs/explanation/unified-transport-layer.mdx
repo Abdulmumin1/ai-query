@@ -1,0 +1,87 @@
+---
+title: "About the Unified Transport Layer"
+description: "Architecture and design of the multi-agent transport layer"
+---
+
+The unified transport layer enables building scalable multi-agent systems that can run anywhere — from a single process to distributed microservices and serverless functions.
+
+## Architecture
+
+The transport layer consists of these components:
+
+1. **AgentRegistry** — Maps agent IDs to implementations (local classes or remote transports)
+2. **AgentServer** — Unified server that serves both local and remote agents
+3. **HTTPTransport** — Communicates with remote agents via HTTP
+4. **RemoteAgent** — Client-side proxy for remote agents
+5. **Serverless Adapters** — Deploy agents on FastAPI, Vercel, AWS Lambda
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Client App    │    │   AgentServer   │    │  Remote Agents  │
+│                 │    │   (Registry)    │    │                 │
+│  RemoteAgent    │◄──►│  - chatbot      │◄──►│  - AWS Lambda   │
+│  HTTPTransport  │    │  - writer-.*    │    │  - Vercel       │
+│                 │    │  - summarizer   │    │  - FastAPI      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Why a Unified Transport Layer?
+
+The architecture is designed around a few key principles:
+
+**Location transparency** — A `RemoteAgent` client talks to a local agent and a serverless Lambda function with the same API. The registry and transport abstract away whether an agent runs in-process or on another continent.
+
+**Pattern-based routing** — The registry supports regex patterns (`writer-.*`, `research-.*`) so you can spin up multiple instances of the same agent type and address them dynamically.
+
+**Consistent wire protocol** — All communication uses the same HTTP-based protocol regardless of platform. This is what lets serverless adapters on FastAPI, Vercel, and Lambda interoperate with a single `AgentServer`.
+
+**Pluggable transports** — The transport interface is extensible. You can wrap `HTTPTransport` with retry logic, connection pooling, or custom load balancing without changing the registry or agents.
+
+## Quick Overview
+
+### Single Agent (Simplest Case)
+
+```python
+from ai_query.agents import Agent, AgentServer
+from ai_query.providers import openai, MemoryStorage
+
+agent = Agent("chatbot", model=openai("gpt-4o"), storage=MemoryStorage())
+AgentServer(agent).serve(port=8080)
+```
+
+### Multi-Agent with Registry
+
+```python
+from ai_query.agents import AgentRegistry, AgentServer
+from ai_query.agents.transport import HTTPTransport
+
+registry = AgentRegistry()
+registry.register("chatbot", ChatBot)
+registry.register("writer-.*", WriterAgent)        # Regex routing
+registry.register("summarizer", HTTPTransport(     # Remote agent
+    "https://lambda.execute-api.amazonaws.com/prod"
+))
+
+AgentServer(registry).serve(port=8080)
+```
+
+The same registry can mix local Python classes and remote HTTP endpoints. Clients connect identically to both.
+
+## How It Works
+
+When a request arrives at `AgentServer`, the server:
+
+1. Extracts the agent ID from the URL path
+2. Looks it up in the registry (including regex pattern matching)
+3. If the target is a local class, instantiates and invokes it directly
+4. If the target is an `HTTPTransport`, forwards the request to the remote endpoint
+5. Returns the response through the same wire protocol
+
+This means the decision of _where_ an agent runs is deferred to configuration time, not code time. You can develop locally with all agents in one process, then move specific agents to Lambda or Vercel for production by changing only the registry configuration.
+
+## Related
+
+- [Deploying Agents](/how-to/deployment) — Step-by-step deployment guides
+- [Serverless Adapters Reference](/reference/serverless-adapters/fastapi) — FastAPI, Vercel, and Lambda adapters
+- [Tutorial: Complete Multi-Agent Setup](/tutorials/complete-multi-agent-setup) — Build a system from scratch
+- [Advanced Transport Patterns](/how-to/advanced-transport-patterns) — Load balancing, retry, orchestration

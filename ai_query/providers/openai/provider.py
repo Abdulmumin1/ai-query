@@ -12,6 +12,7 @@ from ai_query.types import (
     GenerateTextResult,
     Message,
     ProviderOptions,
+    ReasoningEvent,
     Usage,
     StreamChunk,
     ToolSet,
@@ -557,6 +558,54 @@ class OpenAIProvider(BaseProvider):
                         finish_reason = choice["finish_reason"]
 
                     delta = choice.get("delta", {})
+
+                    reasoning_events = []
+                    for key in ("reasoning_content", "thinking", "thought"):
+                        value = delta.get(key)
+                        if value:
+                            reasoning_events.append(
+                                ReasoningEvent(
+                                    kind="delta",
+                                    provider=self.name,
+                                    text=str(value),
+                                    data={"field": key},
+                                )
+                            )
+
+                    reasoning = delta.get("reasoning")
+                    if reasoning:
+                        if isinstance(reasoning, str):
+                            reasoning_events.append(
+                                ReasoningEvent(
+                                    kind="delta",
+                                    provider=self.name,
+                                    text=reasoning,
+                                    data={"field": "reasoning"},
+                                )
+                            )
+                        else:
+                            reasoning_events.append(
+                                ReasoningEvent(
+                                    kind="state",
+                                    provider=self.name,
+                                    data={"field": "reasoning", "value": reasoning},
+                                )
+                            )
+
+                    reasoning_summary = delta.get("reasoning_summary")
+                    if reasoning_summary:
+                        reasoning_events.append(
+                            ReasoningEvent(
+                                kind="summary",
+                                provider=self.name,
+                                text=str(reasoning_summary),
+                                data={"field": "reasoning_summary"},
+                            )
+                        )
+
+                    if reasoning_events:
+                        yield StreamChunk(reasoning_events=reasoning_events)
+
                     content = delta.get("content")
                     if content:
                         yield StreamChunk(text=content)

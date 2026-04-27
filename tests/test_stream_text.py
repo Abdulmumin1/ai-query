@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from ai_query import stream_text, tool, Field, step_count_is
 from ai_query.types import (
     Message,
+    ReasoningEvent,
     Usage,
     StreamChunk,
     ToolCall,
@@ -159,6 +160,73 @@ class TestStreamTextBasic:
             "other": {"value": 1},
             "mock": {"effort": "high"},
         }
+
+    @pytest.mark.asyncio
+    async def test_reasoning_events_are_forwarded_separately(self):
+        """stream_text should forward reasoning events without mixing them into text."""
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(
+                    reasoning_events=[
+                        ReasoningEvent(
+                            kind="delta",
+                            provider="mock",
+                            text="thinking",
+                        )
+                    ]
+                ),
+                StreamChunk(text="Answer"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ]
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        reasoning_events = []
+
+        result = stream_text(
+            model=model,
+            prompt="Test reasoning stream",
+            on_reasoning_event=reasoning_events.append,
+        )
+
+        chunks = []
+        async for chunk in result.text_stream:
+            chunks.append(chunk)
+
+        assert chunks == ["Answer"]
+        assert len(reasoning_events) == 1
+        assert reasoning_events[0].kind == "delta"
+        assert reasoning_events[0].text == "thinking"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_event_callback_can_be_async(self):
+        """stream_text should await async reasoning event callbacks."""
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(
+                    reasoning_events=[
+                        ReasoningEvent(kind="summary", provider="mock", text="summary")
+                    ]
+                ),
+                StreamChunk(text="Answer"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ]
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        reasoning_events = []
+
+        async def on_reasoning_event(event):
+            reasoning_events.append(event)
+
+        result = stream_text(
+            model=model,
+            prompt="Test async reasoning stream",
+            on_reasoning_event=on_reasoning_event,
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        assert [event.text for event in reasoning_events] == ["summary"]
 
     @pytest.mark.asyncio
     async def test_stream_direct_iteration(self):

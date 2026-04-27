@@ -26,6 +26,7 @@ from ai_query.types import (
     StepFinishEvent,
     OnStepStart,
     OnStepFinish,
+    OnReasoningEvent,
     EmbedResult,
     EmbedManyResult,
     EmbeddingUsage,
@@ -255,6 +256,7 @@ def stream_text(
     stop_when: StopCondition | list[StopCondition] | None = None,
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
+    on_reasoning_event: OnReasoningEvent | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
@@ -330,6 +332,12 @@ def stream_text(
             step_finish_reason = None
 
             async for chunk in stream:
+                if chunk.reasoning_events and on_reasoning_event:
+                    for event in chunk.reasoning_events:
+                        callback_result = on_reasoning_event(event)
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
+
                 if chunk.is_final:
                     if chunk.usage:
                         total_usage.input_tokens += chunk.usage.input_tokens

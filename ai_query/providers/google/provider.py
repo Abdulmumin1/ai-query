@@ -11,6 +11,7 @@ from ai_query.types import (
     GenerateTextResult,
     Message,
     ProviderOptions,
+    ReasoningEvent,
     Usage,
     StreamChunk,
     ToolSet,
@@ -603,13 +604,52 @@ class GoogleProvider(BaseProvider):
                     content = candidate.get("content", {})
                     for part in content.get("parts", []):
                         if "text" in part:
-                            yield StreamChunk(text=part["text"])
+                            text = part["text"]
+                            if part.get("thought"):
+                                yield StreamChunk(
+                                    reasoning_events=[
+                                        ReasoningEvent(
+                                            kind="delta",
+                                            provider=self.name,
+                                            text=text,
+                                            data={"field": "thought"},
+                                        )
+                                    ]
+                                )
+                            else:
+                                yield StreamChunk(text=text)
+
+                            if "thoughtSignature" in part:
+                                yield StreamChunk(
+                                    reasoning_events=[
+                                        ReasoningEvent(
+                                            kind="signature",
+                                            provider=self.name,
+                                            data={
+                                                "field": "thoughtSignature",
+                                                "signature": part["thoughtSignature"],
+                                            },
+                                        )
+                                    ]
+                                )
                         elif "functionCall" in part:
                             fc = part["functionCall"]
                             # Capture thoughtSignature for Gemini 3 models
                             metadata = {}
                             if "thoughtSignature" in part:
                                 metadata["thought_signature"] = part["thoughtSignature"]
+                                yield StreamChunk(
+                                    reasoning_events=[
+                                        ReasoningEvent(
+                                            kind="signature",
+                                            provider=self.name,
+                                            data={
+                                                "field": "thoughtSignature",
+                                                "signature": part["thoughtSignature"],
+                                            },
+                                        )
+                                    ]
+                                )
                             tool_calls.append(
                                 ToolCall(
                                     id=f"call_{len(tool_calls)}",  # Google doesn't provide IDs

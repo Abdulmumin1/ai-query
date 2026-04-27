@@ -12,6 +12,7 @@ from ai_query.types import (
     Message,
     ProviderOptions,
     Usage,
+    ReasoningEvent,
     StreamChunk,
     ToolSet,
     ToolCall,
@@ -527,6 +528,32 @@ class AnthropicProvider(BaseProvider):
                         text = delta.get("text", "")
                         if text:
                             yield StreamChunk(text=text)
+
+                    elif delta.get("type") == "thinking_delta":
+                        text = delta.get("thinking", "")
+                        if text:
+                            yield StreamChunk(
+                                reasoning_events=[
+                                    ReasoningEvent(
+                                        kind="delta",
+                                        provider=self.name,
+                                        text=text,
+                                    )
+                                ]
+                            )
+
+                    elif delta.get("type") == "signature_delta":
+                        signature = delta.get("signature")
+                        if signature:
+                            yield StreamChunk(
+                                reasoning_events=[
+                                    ReasoningEvent(
+                                        kind="signature",
+                                        provider=self.name,
+                                        data={"signature": signature},
+                                    )
+                                ]
+                            )
 
                     elif delta.get("type") == "input_json_delta":
                         if (
