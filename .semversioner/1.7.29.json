@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Route OpenAI reasoning-with-tools requests through the Responses API.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-04-27T19:59:35+00:00",
+  "version": "1.7.29"
+}

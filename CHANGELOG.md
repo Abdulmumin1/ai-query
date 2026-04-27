@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.29
+
+- patch: Route OpenAI reasoning-with-tools requests through the Responses API.
+
 ## 1.7.28
 
 - patch: Add normalized reasoning controls and provider-level token compatibility
