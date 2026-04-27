@@ -418,6 +418,48 @@ class TestAnthropicProvider:
                 model="claude-opus-4-7",
             )
 
+    @pytest.mark.asyncio
+    async def test_anthropic_stream_emits_reasoning_events(self):
+        """Anthropic stream should expose thinking deltas as reasoning events."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}\n',
+                    b'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"think"}}\n',
+                    b'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}\n',
+                    b'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Answer"}}\n',
+                    b'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+        provider = AnthropicProvider(api_key="test", transport=FakeTransport())
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="claude-sonnet-4-20250514",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        reasoning_events = [
+            event
+            for chunk in chunks
+            for event in (chunk.reasoning_events or [])
+        ]
+
+        assert chunks[2].text == "Answer"
+        assert reasoning_events[0].kind == "delta"
+        assert reasoning_events[0].text == "think"
+        assert reasoning_events[1].kind == "signature"
+        assert reasoning_events[1].data == {"signature": "sig"}
+        assert chunks[-1].is_final is True
+
 
 # =============================================================================
 # Workers AI Provider Tests
@@ -482,6 +524,52 @@ class TestWorkersAIProvider:
 
         assert transport.last_json["max_tokens"] == 123
         assert "max_completion_tokens" not in transport.last_json
+
+    @pytest.mark.asyncio
+    async def test_workers_ai_stream_emits_openai_compatible_reasoning_events(self):
+        """Workers AI should expose OpenAI-compatible reasoning deltas."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"choices":[{"delta":{"reasoning_content":"think"}}]}\n',
+                    b'data: {"choices":[{"delta":{"content":"Answer"}}]}\n',
+                    b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = WorkersAIProvider(
+            api_key="token",
+            account_id="account-123",
+            transport=FakeTransport(),
+        )
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="@cf/moonshotai/kimi-k2.5",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        reasoning_events = [
+            event
+            for chunk in chunks
+            for event in (chunk.reasoning_events or [])
+        ]
+
+        assert chunks[1].text == "Answer"
+        assert reasoning_events[0].kind == "delta"
+        assert reasoning_events[0].provider == "workers_ai"
+        assert reasoning_events[0].text == "think"
+        assert reasoning_events[0].data == {"field": "reasoning_content"}
 
     def test_workers_ai_with_custom_base_url(self):
         """workers_ai() should accept custom base URL without account_id."""
@@ -554,6 +642,51 @@ class TestGoogleReasoningProvider:
 
         with pytest.raises(ValueError, match="does not support normalized reasoning.effort"):
             provider.apply_reasoning(None, {"effort": "high"}, model="gemini-2.5-pro")
+
+    @pytest.mark.asyncio
+    async def test_google_stream_emits_thought_reasoning_events(self):
+        """Google stream should expose thought parts as reasoning events."""
+        from ai_query.providers.google import GoogleProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"candidates":[{"content":{"parts":[{"text":"think","thought":true,"thoughtSignature":"sig"}]}}]}\n',
+                    b'data: {"candidates":[{"content":{"parts":[{"text":"Answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"totalTokenCount":3}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = GoogleProvider(api_key="test", transport=FakeTransport())
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="gemini-2.5-pro",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        reasoning_events = [
+            event
+            for chunk in chunks
+            for event in (chunk.reasoning_events or [])
+        ]
+
+        assert chunks[2].text == "Answer"
+        assert reasoning_events[0].kind == "delta"
+        assert reasoning_events[0].provider == "google"
+        assert reasoning_events[0].text == "think"
+        assert reasoning_events[1].kind == "signature"
+        assert reasoning_events[1].data == {
+            "field": "thoughtSignature",
+            "signature": "sig",
+        }
 
 
 # =============================================================================

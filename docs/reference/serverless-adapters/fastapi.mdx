@@ -1,0 +1,226 @@
+---
+title: "FastAPI Adapter"
+description: "API reference for the FastAPI AgentRouter adapter"
+---
+
+The FastAPI adapter enables deploying agents as REST endpoints using the FastAPI framework.
+
+## Import
+
+```python
+from ai_query.adapters.fastapi import AgentRouter
+
+# For type hints
+from ai_query.agents import Agent, AgentRegistry
+```
+
+---
+
+## AgentRouter
+
+The `AgentRouter` class provides a FastAPI router that serves agents or agent registries with REST endpoints.
+
+### Constructor
+
+```python
+def __init__(
+    self,
+    target: Agent | AgentRegistry,
+    **kwargs: Any
+) -> None
+```
+
+#### Parameters
+
+<ParamField path="target" type="Agent | AgentRegistry" required>
+  Either a single Agent instance or an AgentRegistry for multi-agent routing.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional keyword arguments passed to FastAPI's `APIRouter`.
+</ParamField>
+
+#### Raises
+
+- `ImportError`: If FastAPI is not installed.
+
+### Endpoints
+
+#### Single Agent Routes
+- `POST /chat` - Chat with the agent
+- `POST /invoke` - RPC method calls
+- `GET /state` - Get agent state
+- `POST /` - Generic request handler
+
+#### Registry Routes (with agent_id parameter)
+- `POST /{agent_id}/chat` - Chat with specific agent
+- `POST /{agent_id}/invoke` - RPC calls to specific agent
+- `GET /{agent_id}/state` - Get state of specific agent
+- `POST /{agent_id}` - Generic request to specific agent
+
+### Examples
+
+#### Single Agent FastAPI App
+
+```python
+from fastapi import FastAPI
+from ai_query.agents import Agent
+from ai_query.adapters.fastapi import AgentRouter
+from ai_query.providers import openai, MemoryStorage
+
+# Create agent
+agent = Agent(
+    "chatbot",
+    model=openai("gpt-4o"),
+    system="You are a helpful assistant.",
+    storage=MemoryStorage()
+)
+
+# Create FastAPI app
+app = FastAPI(title="Agent API")
+
+# Add agent router
+app.include_router(AgentRouter(agent), prefix="/agent")
+
+# Health check
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+```
+
+#### Multi-Agent Registry FastAPI App
+
+```python
+from fastapi import FastAPI
+from ai_query.agents import AgentRegistry, AgentRouter
+from ai_query.agents.transport import HTTPTransport
+from my_agents import ChatBot, WriterAgent, ResearchAgent
+
+# Create registry with mixed local and remote agents
+registry = AgentRegistry()
+registry.register("chatbot", ChatBot)
+registry.register("writer-.*", WriterAgent)
+registry.register("research-.*", ResearchAgent)
+
+# Add remote serverless agent
+registry.register("summarizer", HTTPTransport(
+    "https://lambda.execute-api.amazonaws.com/prod/summarizer"
+))
+
+# Create FastAPI app
+app = FastAPI(title="Multi-Agent API")
+
+# Add registry router
+app.include_router(AgentRouter(registry), prefix="/agents")
+
+# Available endpoints:
+# POST /agents/chatbot/chat
+# POST /agents/writer-1/chat
+# POST /agents/research-ai/chat
+# POST /agents/summarizer/chat (routes to Lambda)
+```
+
+#### With Custom Prefix and Tags
+
+```python
+from fastapi import FastAPI
+from ai_query.adapters.fastapi import AgentRouter
+
+app = FastAPI()
+
+# Custom routing
+agent_router = AgentRouter(
+    my_agent,
+    prefix="/v1/bot",
+    tags=["chatbot"],
+    responses={404: {"description": "Not found"}}
+)
+app.include_router(agent_router)
+```
+
+#### Streaming Support
+
+```python
+# The router automatically supports streaming via query parameter
+# POST /agent/chat?stream=true
+# Returns: text/event-stream with Server-Sent Events
+
+import httpx
+
+async def stream_from_fastapi():
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            "http://localhost:8000/agent/chat?stream=true",
+            json={"message": "Tell me a story"},
+            headers={"Accept": "text/event-stream"}
+        ) as response:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    chunk = line[6:]
+                    print(chunk, end="", flush=True)
+```
+
+---
+
+## Complete Application Example
+
+```python
+# main.py
+from fastapi import FastAPI
+from ai_query.agents import AgentRegistry, AgentRouter
+from ai_query.agents.transport import HTTPTransport
+from my_agents import ChatAgent, DataAgent, CreativeAgent
+from ai_query.providers import openai
+
+# Create app
+app = FastAPI(
+    title="Multi-Agent API Service",
+    description="FastAPI service with ai-query agents",
+    version="1.0.0"
+)
+
+# Configure agents
+registry = AgentRegistry()
+registry.register("chat", ChatAgent)
+registry.register("data", DataAgent)
+registry.register("creative", CreativeAgent)
+
+# Add remote agents
+registry.register("summarizer", HTTPTransport(
+    "https://lambda.execute-api.amazonaws.com/prod/summarizer"
+))
+
+# Include router
+app.include_router(
+    AgentRouter(registry),
+    prefix="/api/v1/agents",
+    tags=["agents"]
+)
+
+# Documentation endpoints
+@app.get("/")
+async def root():
+    return {
+        "message": "Multi-Agent API Service",
+        "agents": ["chat", "data", "creative", "summarizer"],
+        "endpoints": {
+            "chat": "POST /api/v1/agents/chat/chat",
+            "data": "POST /api/v1/agents/data/invoke",
+            "creative": "POST /api/v1/agents/creative/chat",
+            "summarizer": "POST /api/v1/agents/summarizer/chat"
+        }
+    }
+```
+
+---
+
+## Error Handling
+
+The FastAPI adapter returns JSON with error details:
+
+```json
+{"error": "Invalid JSON body"}
+```
+
+For custom error handling, wrap the agent or use FastAPI middleware.

@@ -11,6 +11,8 @@ from ai_query.types import (
     Field,
     StepStartEvent,
     StepFinishEvent,
+    ReasoningEvent,
+    OnReasoningEvent,
     OnStepStart,
     OnStepFinish,
     StopCondition,
@@ -62,6 +64,7 @@ __all__ = [
     "EmbedManyResult",
     "ReasoningConfig",
     "ReasoningEffort",
+    "ReasoningEvent",
     # Stop conditions
     "StopCondition",
     "step_count_is",
@@ -71,4 +74,5 @@ __all__ = [
     "StepFinishEvent",
     "OnStepStart",
     "OnStepFinish",
+    "OnReasoningEvent",
 ]

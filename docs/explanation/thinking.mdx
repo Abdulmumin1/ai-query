@@ -1,0 +1,180 @@
+---
+title: "Thinking"
+description: "Control reasoning depth and receive provider thinking output safely"
+---
+
+ai-query treats thinking as two separate concerns:
+
+- `reasoning=...` controls how much reasoning a model should use
+- `on_reasoning_event=...` receives provider reasoning output during streaming when the provider exposes it
+
+This separation is intentional. Thinking output is not mixed into assistant text, and not every provider exposes the same kind of data.
+
+## 1. Control Thinking Depth
+
+Use the top-level `reasoning` parameter for portable reasoning controls:
+
+```python
+from ai_query import generate_text
+from ai_query.providers import openai, google
+
+openai_result = await generate_text(
+    model=openai("gpt-5.4"),
+    prompt="Solve this carefully.",
+    reasoning={"effort": "high"},
+)
+
+google_result = await generate_text(
+    model=google("gemini-2.5-pro"),
+    prompt="Solve this carefully.",
+    reasoning={"budget": 1024},
+)
+```
+
+Current normalized support:
+
+| Provider | Normalized control |
+|----------|--------------------|
+| OpenAI / OpenAI-compatible | `reasoning={"effort": ...}` |
+| Google | `reasoning={"budget": ...}` |
+| Anthropic | `reasoning={"effort": ...}` and `reasoning={"budget": ...}` |
+
+If you need provider-specific options like Gemini `include_thoughts` or Anthropic visibility controls, keep using `provider_options`.
+
+## 2. Receive Thinking Output While Streaming
+
+Use `stream_text(..., on_reasoning_event=...)` to receive provider reasoning output separately from assistant text:
+
+```python
+from ai_query import stream_text
+from ai_query.providers import google
+
+def on_reasoning(event):
+    print(f"[{event.provider}:{event.kind}]", event.text or event.data)
+
+result = stream_text(
+    model=google("gemini-2.5-pro"),
+    prompt="Explain binary search.",
+    provider_options={
+        "google": {
+            "thinking_config": {
+                "thinking_budget": 1024,
+                "include_thoughts": True,
+            }
+        }
+    },
+    on_reasoning_event=on_reasoning,
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+`text_stream` still contains only assistant-visible text.
+
+## ReasoningEvent
+
+Streaming thinking output is delivered as `ReasoningEvent` objects:
+
+```python
+class ReasoningEvent:
+    kind: Literal["summary", "delta", "signature", "state"]
+    provider: str
+    text: str | None
+    data: dict[str, Any]
+```
+
+Typical meanings:
+
+| Kind | Meaning |
+|------|---------|
+| `delta` | Incremental thinking text |
+| `summary` | Provider-generated summary of reasoning |
+| `signature` | Continuity or verification metadata |
+| `state` | Opaque provider reasoning state |
+
+## Provider Differences
+
+Thinking output is not portable in the same way as assistant text.
+
+### OpenAI and OpenAI-compatible
+
+- normalized control: `reasoning.effort`
+- output events depend on what the provider actually streams
+- ai-query currently looks for OpenAI-compatible fields such as:
+  - `delta.reasoning_content`
+  - `delta.reasoning`
+  - `delta.thinking`
+  - `delta.thought`
+  - `delta.reasoning_summary`
+
+If a provider only streams final assistant text, `on_reasoning_event` will not fire.
+
+### Google
+
+- normalized control: `reasoning.budget`
+- visible thought output is provider-specific and should be enabled with:
+
+```python
+provider_options={
+    "google": {
+        "thinking_config": {
+            "thinking_budget": 1024,
+            "include_thoughts": True,
+        }
+    }
+}
+```
+
+- ai-query emits reasoning events for Gemini thought parts and thought signatures
+
+### Anthropic
+
+- normalized control: `reasoning.effort` and `reasoning.budget`
+- ai-query emits reasoning events for streaming thinking deltas and signatures when Claude returns them
+
+## Agents
+
+Agents support the same split between reasoning control and thinking output:
+
+```python
+from ai_query import Agent
+from ai_query.providers import google
+
+def on_reasoning(event):
+    print(event.kind, event.text or event.data)
+
+agent = Agent(
+    "assistant",
+    model=google("gemini-2.5-pro"),
+    reasoning={"budget": 1024},
+    on_reasoning_event=on_reasoning,
+)
+```
+
+When an agent receives a `ReasoningEvent`, it also emits an agent event:
+
+```python
+await agent.emit("reasoning", {
+    "kind": event.kind,
+    "provider": event.provider,
+    "text": event.text,
+    "data": event.data,
+})
+```
+
+That means thinking output can flow through local callbacks and agent transports such as SSE/WebSocket. The agent's `chat()` and `stream()` methods still return/yield only assistant text.
+
+## Important Guidance
+
+- Do not assume every reasoning-capable model exposes visible thinking output.
+- Do not mix reasoning events into user-facing assistant text by default.
+- Treat `signature` and `state` events as provider metadata, not natural-language output.
+- Prefer summaries or explicit UI affordances if you choose to display thinking.
+
+## See Also
+
+- [`Generating Text`](/explanation/generate-text)
+- [`Streaming`](/explanation/streaming)
+- [`stream_text`](/reference/stream-text)
+- [`Results`](/reference/types/results)

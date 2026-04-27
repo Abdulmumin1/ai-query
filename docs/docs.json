@@ -17,35 +17,49 @@
         "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting Started",
+            "group": "Start Here",
             "pages": [
               "index",
-              "quickstart"
+              "tutorials/quickstart"
             ]
           },
           {
-            "group": "Core Concepts",
+            "group": "Core Flow",
             "pages": [
-              "core/generate-text",
-              "core/streaming",
-              "core/embeddings",
-              "core/conversations",
-              "core/tools",
-              "core/agents",
-              "core/abort",
-              "core/mcp"
+              "explanation/generate-text",
+              "explanation/thinking",
+              "explanation/streaming",
+              "explanation/tools",
+              "explanation/agents",
+              "explanation/embeddings",
+              "explanation/mcp",
+              "explanation/abort"
             ]
           },
           {
             "group": "Stateful Agents",
             "pages": [
-              "core/stateful-agents",
-              "core/agent-server",
-              "core/transports",
-              "core/events",
-              "core/agent-rpc",
-              "core/deployment",
-              "guides/cloudflare-durable-objects"
+              "explanation/stateful-agents",
+              "explanation/conversations",
+              "explanation/events",
+              "explanation/agent-server",
+              "explanation/transports",
+              "explanation/agent-rpc"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "how-to/deployment",
+              "how-to/fastapi-integration",
+              "how-to/cloudflare-workers",
+              "how-to/cloudflare-durable-objects"
+            ]
+          },
+          {
+            "group": "Deep Dives",
+            "pages": [
+              "explanation/unified-transport-layer"
             ]
           }
         ]
@@ -56,49 +70,33 @@
           {
             "group": "Overview",
             "pages": [
-              "providers/index"
+              "explanation/providers"
             ]
           },
           {
             "group": "Native Providers",
             "pages": [
-              "providers/openai",
-              "providers/anthropic",
-              "providers/google"
+              "how-to/providers/openai",
+              "how-to/providers/anthropic",
+              "how-to/providers/google"
             ]
           },
           {
             "group": "OpenAI-Compatible",
             "pages": [
-              "providers/openrouter",
-              "providers/deepseek",
-              "providers/groq",
-              "providers/workers-ai",
-              "providers/custom-providers",
-              "providers/llama",
-              "providers/xai"
+              "how-to/providers/openrouter",
+              "how-to/providers/deepseek",
+              "how-to/providers/groq",
+              "how-to/providers/workers-ai",
+              "how-to/providers/custom-providers",
+              "how-to/providers/llama",
+              "how-to/providers/xai"
             ]
           },
           {
             "group": "Cloud Providers",
             "pages": [
-              "providers/bedrock"
-            ]
-          },
-          {
-            "group": "API Reference",
-            "pages": [
-              "api-reference/providers/openai",
-              "api-reference/providers/anthropic",
-              "api-reference/providers/google",
-              "api-reference/providers/openrouter",
-              "api-reference/providers/deepseek",
-              "api-reference/providers/groq",
-              "api-reference/providers/workers-ai",
-              "api-reference/providers/base-provider",
-              "api-reference/providers/llama",
-              "api-reference/providers/xai",
-              "api-reference/providers/bedrock"
+              "how-to/providers/bedrock"
             ]
           }
         ]
@@ -107,40 +105,56 @@
         "tab": "API Reference",
         "groups": [
           {
-            "group": "Functions",
+            "group": "Core Functions",
             "pages": [
-              "api-reference/generate-text",
-              "api-reference/stream-text",
-              "api-reference/embed",
-              "api-reference/mcp"
+              "reference/generate-text",
+              "reference/stream-text",
+              "reference/embed",
+              "reference/mcp"
             ]
           },
           {
             "group": "Agent Classes",
             "pages": [
-              "api-reference/agent",
-              "api-reference/agent-backends",
-              "api-reference/agent-server",
-              "api-reference/agent-registry"
+              "reference/agent",
+              "reference/agent-backends",
+              "reference/agent-server",
+              "reference/agent-registry"
             ]
           },
           {
             "group": "Transport Layer",
             "pages": [
-              "api-reference/http-transport",
-              "api-reference/remote-agent",
-              "api-reference/transport-base",
-              "api-reference/serverless-adapters"
+              "reference/http-transport",
+              "reference/remote-agent",
+              "reference/transport-base",
+              "reference/serverless-adapters/fastapi",
+              "reference/serverless-adapters/vercel",
+              "reference/serverless-adapters/aws-lambda"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "reference/providers/base-provider",
+              "reference/providers/openai",
+              "reference/providers/anthropic",
+              "reference/providers/google",
+              "reference/providers/openrouter",
+              "reference/providers/deepseek",
+              "reference/providers/groq",
+              "reference/providers/workers-ai",
+              "reference/providers/bedrock"
             ]
           },
           {
             "group": "Types",
             "pages": [
-              "api-reference/types/message",
-              "api-reference/types/tool",
-              "api-reference/types/usage",
-              "api-reference/types/results",
-              "api-reference/types/stop-conditions"
+              "reference/types/message",
+              "reference/types/tool",
+              "reference/types/usage",
+              "reference/types/results",
+              "reference/types/stop-conditions"
             ]
           }
         ]
@@ -149,41 +163,44 @@
         "tab": "Cookbook",
         "groups": [
           {
+            "group": "Overview",
+            "pages": [
+              "how-to/index"
+            ]
+          },
+          {
             "group": "Core Patterns",
             "pages": [
-              "cookbook/index",
-              "cookbook/stateless-generation",
-              "cookbook/multimodal-chatbot",
-              "cookbook/structured-output"
+              "tutorials/stateless-generation",
+              "tutorials/multimodal-chatbot",
+              "tutorials/structured-output"
             ]
           },
           {
-            "group": "Agents & Servers",
+            "group": "Stateful Apps",
             "pages": [
-              "cookbook/profile-research-agent",
-              "cookbook/wikipedia-agent",
-              "cookbook/fastapi-integration",
-              "cookbook/persistent-chatbot",
-              "cookbook/per-user-assistant",
-              "cookbook/serverless-agents",
-              "guides/cloudflare-durable-objects"
+              "tutorials/persistent-chatbot",
+              "tutorials/per-user-assistant",
+              "how-to/profile-research-agent"
             ]
           },
           {
-            "group": "Transport Layer",
+            "group": "Deployment & Scaling",
             "pages": [
-              "guides/unified-transport-layer",
-              "examples/complete-multi-agent-setup"
+              "tutorials/complete-multi-agent-setup",
+              "how-to/serverless-agents",
+              "how-to/advanced-transport-patterns"
             ]
           },
           {
-            "group": "Tools & Tasks",
+            "group": "Tools & Workflows",
             "pages": [
-              "cookbook/task-planner",
-              "cookbook/code-executor",
-              "cookbook/rag-agent",
-              "cookbook/multi-agent-workflow",
-              "cookbook/mcp-agent"
+              "how-to/task-planner",
+              "how-to/code-executor",
+              "how-to/rag-agent",
+              "how-to/multi-agent-workflow",
+              "how-to/mcp-agent",
+              "how-to/wikipedia-agent"
             ]
           }
         ]
@@ -211,7 +228,7 @@
   "navbar": {
     "primary": {
       "type": "button",
-      "label": "Star on Github ★",
+      "label": "Star on Github",
       "href": "https://github.com/Abdulmumin1/ai-query"
     }
   },

@@ -12,6 +12,7 @@ from ai_query.agents import (
 )
 from ai_query.types import (
     Message,
+    ReasoningEvent,
     StreamChunk,
     ToolCall,
     ToolCallPart,
@@ -316,6 +317,64 @@ class TestAgentChat:
         await agent.stop()
 
     @pytest.mark.asyncio
+    async def test_chat_forwards_and_emits_reasoning_events(self, mock_model):
+        """chat() should forward reasoning events to callback and emit them."""
+
+        async def text_stream():
+            yield "Answer"
+
+        def fake_stream_text(**kwargs):
+            callback = kwargs["on_reasoning_event"]
+
+            async def result_stream():
+                await callback(ReasoningEvent(
+                    kind="delta",
+                    provider="mock",
+                    text="thinking",
+                    data={"field": "thought"},
+                ))
+                async for chunk in text_stream():
+                    yield chunk
+
+            mock_result = MagicMock()
+            mock_result.text_stream = result_stream()
+            return mock_result
+
+        reasoning_events = []
+        emitted_events = []
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=mock_model,
+            on_reasoning_event=reasoning_events.append,
+        )
+        agent._emit_handler = AsyncMock(
+            side_effect=lambda event_type, data, event_id: emitted_events.append(
+                (event_type, data)
+            )
+        )
+        await agent.start()
+
+        with patch("ai_query.stream_text", side_effect=fake_stream_text):
+            response = await agent.chat("Hello")
+
+        assert response == "Answer"
+        assert len(reasoning_events) == 1
+        assert reasoning_events[0].text == "thinking"
+        assert emitted_events == [
+            (
+                "reasoning",
+                {
+                    "kind": "delta",
+                    "provider": "mock",
+                    "text": "thinking",
+                    "data": {"field": "thought"},
+                },
+            )
+        ]
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_chat_persists_tool_messages(self):
         """chat() should persist tool calls and tool results."""
 
@@ -456,6 +515,60 @@ class TestAgentStream:
 
         _, kwargs = mock_stream_text.call_args
         assert kwargs["reasoning"] == {"effort": "medium"}
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_stream_forwards_and_emits_reasoning_events(self, mock_model):
+        """stream() should forward reasoning events while yielding only text."""
+
+        def fake_stream_text(**kwargs):
+            callback = kwargs["on_reasoning_event"]
+
+            async def result_stream():
+                await callback(ReasoningEvent(
+                    kind="summary",
+                    provider="mock",
+                    text="summary",
+                ))
+                yield "Answer"
+
+            mock_result = MagicMock()
+            mock_result.text_stream = result_stream()
+            return mock_result
+
+        reasoning_events = []
+        emitted_events = []
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=mock_model,
+            on_reasoning_event=reasoning_events.append,
+        )
+        agent._emit_handler = AsyncMock(
+            side_effect=lambda event_type, data, event_id: emitted_events.append(
+                (event_type, data)
+            )
+        )
+        await agent.start()
+
+        chunks = []
+        with patch("ai_query.stream_text", side_effect=fake_stream_text):
+            async for chunk in agent.stream("Hello"):
+                chunks.append(chunk)
+
+        assert chunks == ["Answer"]
+        assert [event.text for event in reasoning_events] == ["summary"]
+        assert emitted_events == [
+            (
+                "reasoning",
+                {
+                    "kind": "summary",
+                    "provider": "mock",
+                    "text": "summary",
+                    "data": {},
+                },
+            )
+        ]
         await agent.stop()
 
     @pytest.mark.asyncio

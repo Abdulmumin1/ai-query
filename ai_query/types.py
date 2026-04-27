@@ -728,6 +728,20 @@ class StreamTextResult:
     usage: Union[Usage, None] = None
 
 
+ReasoningEventKind = Literal["summary", "delta", "signature", "state"]
+
+
+@dataclass
+class ReasoningEvent:
+    kind: ReasoningEventKind
+    provider: str
+    text: Union[str, None] = None
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+OnReasoningEvent = Callable[[ReasoningEvent], Union[None, Awaitable[None]]]
+
+
 @dataclass
 class StreamChunk:
     text: str = ""
@@ -735,6 +749,7 @@ class StreamChunk:
     usage: Union[Usage, None] = None
     finish_reason: Union[str, None] = None
     tool_calls: Union[list[ToolCall], None] = None
+    reasoning_events: Union[list[ReasoningEvent], None] = None
 
 
 class TextStreamResult:

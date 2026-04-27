@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Expose provider thinking events across streaming and agents."
+}

@@ -1,0 +1,183 @@
+---
+title: "Google"
+description: "Use Gemini models with ai-query"
+---
+
+The Google provider gives you access to Gemini models, Google's multimodal AI models with strong performance across various tasks.
+
+## Setup
+
+Set your API key as an environment variable:
+
+```bash
+export GOOGLE_API_KEY="..."
+```
+
+## Usage
+
+```python
+from ai_query import generate_text
+from ai_query.providers import google
+
+result = await generate_text(
+    model=google("gemini-2.5-flash"),
+    prompt="Summarize the key features of Python."
+)
+```
+
+## Available Models
+
+| Model | Description |
+|-------|-------------|
+| `gemini-3-pro` | Gemini 3 Pro - most capable |
+| `gemini-3-flash` | Gemini 3 Flash - fast and powerful |
+| `gemini-2.5-pro` | Gemini 2.5 Pro - advanced reasoning |
+| `gemini-2.5-flash` | Gemini 2.5 Flash - balanced performance |
+| `gemini-2.5-flash-lite` | Gemini 2.5 Flash-Lite - lightweight |
+| `gemma-3-27b-it` | Gemma 3 (27B) - open weights |
+
+## Provider Options
+
+Customize Google-specific parameters:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a story.",
+    provider_options={
+        "google": {
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 2048,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "seed": 42
+        }
+    }
+)
+```
+
+### Available Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `temperature` | `float` | `1.0` | Randomness (0-2) |
+| `max_output_tokens` | `int` | Model default | Maximum output tokens |
+| `top_p` | `float` | `0.95` | Nucleus sampling |
+| `top_k` | `int` | `40` | Top-k sampling |
+| `candidate_count` | `int` | `1` | Number of responses |
+| `stop_sequences` | `list[str]` | `[]` | Stop generation at these sequences |
+| `presence_penalty` | `float` | `0.0` | Penalize repeated tokens |
+| `frequency_penalty` | `float` | `0.0` | Penalize frequent tokens |
+| `seed` | `int` | - | Random seed for reproducibility |
+| `response_mime_type` | `str` | - | Output format (e.g., `"application/json"`) |
+| `response_schema` | `dict` | - | JSON schema for structured output |
+
+### Thinking Config (Reasoning Models)
+
+For normalized reasoning-depth control, use `reasoning={"budget": ...}`:
+
+```python
+result = await generate_text(
+    model=google("gemini-2.5-pro"),
+    prompt="Solve this carefully.",
+    reasoning={"budget": 1024},
+)
+```
+
+For provider-specific Gemini thinking options, use raw `provider_options`:
+
+```python
+result = await generate_text(
+    model=google("gemini-3-flash"),
+    prompt="Solve this complex math problem...",
+    provider_options={
+        "google": {
+            "thinking_config": {
+                "include_thoughts": True,
+                "thinking_budget": 1024
+            }
+        }
+    }
+)
+```
+
+If you want Gemini thought text to arrive as reasoning events during streaming, `include_thoughts` must be enabled. See [`Thinking`](/explanation/thinking) for the streaming callback model.
+
+### Safety Settings
+
+Configure content safety thresholds. You can use either dict or list format:
+
+```python
+# Dict format (shorthand)
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a thriller story.",
+    provider_options={
+        "google": {
+            "safety_settings": {
+                "HARM_CATEGORY_VIOLENCE": "BLOCK_ONLY_HIGH",
+                "HARM_CATEGORY_HATE_SPEECH": "BLOCK_MEDIUM_AND_ABOVE"
+            }
+        }
+    }
+)
+
+# List format (official API format)
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Write a thriller story.",
+    provider_options={
+        "google": {
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        }
+    }
+)
+```
+
+Available thresholds: `BLOCK_NONE`, `BLOCK_ONLY_HIGH`, `BLOCK_MEDIUM_AND_ABOVE`, `BLOCK_LOW_AND_ABOVE`
+
+## Tool Calling
+
+Gemini models support tool calling:
+
+```python
+from ai_query import generate_text
+from ai_query.providers import google, tool, Field
+
+@tool(description="Get current stock price")
+async def get_stock_price(
+    symbol: str = Field(description="Stock ticker symbol")
+) -> str:
+    # Simulated stock data
+    prices = {"GOOGL": 175.50, "AAPL": 150.25}
+    price = prices.get(symbol.upper(), 0)
+    return f"${price:.2f}"
+
+result = await generate_text(
+    model=google("gemini-2.0-flash"),
+    prompt="What's the stock price of Google?",
+    tools={"get_stock_price": get_stock_price}
+)
+```
+
+## Streaming
+
+```python
+from ai_query import stream_text
+from ai_query.providers import google
+
+result = stream_text(
+    model=google("gemini-2.0-flash"),
+    prompt="Explain how neural networks learn."
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```

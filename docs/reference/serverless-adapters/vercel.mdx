@@ -1,0 +1,148 @@
+---
+title: "Vercel Adapter"
+description: "API reference for the Vercel handle_vercel adapter"
+---
+
+The Vercel adapter enables deploying agents as serverless functions on Vercel's edge platform.
+
+## Import
+
+```python
+from ai_query.adapters.vercel import handle_vercel
+```
+
+---
+
+## handle_vercel
+
+The `handle_vercel` function bridges Vercel's HTTP handler to the agent system.
+
+### Function Signature
+
+```python
+def handle_vercel(agent: Agent, handler: BaseHTTPRequestHandler) -> None
+```
+
+#### Parameters
+
+<ParamField path="agent" type="Agent" required>
+  The agent instance to handle requests.
+</ParamField>
+
+<ParamField path="handler" type="BaseHTTPRequestHandler" required>
+  Vercel's HTTP handler instance.
+</ParamField>
+
+### Usage Examples
+
+#### Basic Vercel API Route
+
+```python
+# api/index.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+# Create agent
+agent = Agent(
+    "vercel-bot",
+    model=openai("gpt-4o"),
+    system="You are a Vercel-hosted assistant."
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+
+    def do_GET(self):
+        handle_vercel(agent, self)
+```
+
+#### Multiple Endpoints
+
+```python
+# api/chat.py
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+chat_agent = Agent("chat-agent", model=openai("gpt-4o"))
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(chat_agent, self)
+
+# api/research.py
+research_agent = Agent("research-agent", model=openai("gpt-4o"))
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(research_agent, self)
+```
+
+#### With Environment Variables
+
+```python
+import os
+from http.server import BaseHTTPRequestHandler
+from ai_query.agents import Agent
+from ai_query.adapters.vercel import handle_vercel
+from ai_query.providers import openai
+
+agent = Agent(
+    "vercel-agent",
+    model=openai(os.getenv("OPENAI_MODEL", "gpt-4o")),
+    system=os.getenv("SYSTEM_PROMPT", "You are helpful.")
+)
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+```
+
+---
+
+## Project Structure
+
+```
+my-vercel-app/
+├── api/
+│   ├── index.py          # Main agent
+│   ├── chat.py           # Chat agent
+│   └── research.py       # Research agent
+├── agents/
+│   ├── __init__.py
+│   ├── chat_agent.py
+│   └── research_agent.py
+├── package.json
+└── vercel.json
+```
+
+```python
+# api/index.py
+from http.server import BaseHTTPRequestHandler
+from agents.chat_agent import create_chat_agent
+from ai_query.adapters.vercel import handle_vercel
+
+agent = create_chat_agent()
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        handle_vercel(agent, self)
+    def do_GET(self):
+        handle_vercel(agent, self)
+```
+
+---
+
+## Error Handling
+
+The Vercel adapter returns a plain text error response:
+
+```
+"Invalid JSON body"
+```
+
+For custom error handling, wrap the agent in your handler class.

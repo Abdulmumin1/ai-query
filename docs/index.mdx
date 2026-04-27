@@ -1,5 +1,5 @@
 ---
-title: "Introduction"
+title: "ai-query"
 description: "Build stateful AI agents in Python"
 ---
 
@@ -7,12 +7,12 @@ description: "Build stateful AI agents in Python"
 
 ## Why ai-query?
 
-- **Stateful by Design** - Agents remember conversations, maintain state, and resume after restarts
-- **Real-time Events** - Emit events during work with automatic replay on reconnection
-- **Durable Identity** - Persist every event and agent state for robust connection recovery
-- **Built-in Server** - WebSocket, SSE, and REST endpoints with one line: `agent.serve()`
-- **Multi-Provider** - Same interface for OpenAI, Anthropic, Google, and more
-- **Production Ready** - Storage, multi-user routing, serverless support
+- **Stateful by Design** — Agents remember conversations, maintain state, and resume after restarts
+- **Real-time Events** — Emit events during work with automatic replay on reconnection
+- **Durable Identity** — Persist every event and agent state for robust connection recovery
+- **Built-in Server** — WebSocket, SSE, and REST endpoints with one line: `agent.serve()`
+- **Multi-Provider** — Same interface for OpenAI, Anthropic, Google, and more
+- **Production Ready** — Storage, multi-user routing, serverless support
 
 ## Quick Example
 
@@ -52,101 +52,44 @@ curl -X POST http://localhost:8080/chat \
 curl http://localhost:8080/events
 ```
 
-## Get Started
+## Start Here
+
+If you're new to `ai-query`, follow this path from first install to a deployed stateful agent.
 
 <CardGroup cols={2}>
-  <Card
-    title="Quickstart"
-    icon="rocket"
-    href="/quickstart"
-  >
-    Install ai-query and build your first agent.
+  <Card title="1. Quickstart" icon="rocket" href="/tutorials/quickstart">
+    Install ai-query and make your first request.
   </Card>
-  <Card
-    title="Stateful Agents"
-    icon="database"
-    href="/core/stateful-agents"
-  >
-    Persistence, state management, and lifecycle hooks.
+  <Card title="2. Generate Text" icon="message" href="/explanation/generate-text">
+    Learn the core text generation API before you reach for agents.
   </Card>
-  <Card
-    title="Agent Events"
-    icon="bolt"
-    href="/api-reference/agent#emit"
-  >
-    Real-time events with automatic replay on reconnection.
+  <Card title="3. Tools and Agents" icon="wrench" href="/explanation/agents">
+    Understand tools, agent structure, and how requests become workflows.
   </Card>
-  <Card
-    title="Agent Server"
-    icon="server"
-    href="/core/agent-server"
-  >
-    Multi-agent routing and production deployment.
+  <Card title="4. Stateful Agents" icon="database" href="/explanation/stateful-agents">
+    Add memory, conversations, event logs, and persistence.
+  </Card>
+  <Card title="5. Agent Server" icon="server" href="/explanation/agent-server">
+    Expose your agent over HTTP, SSE, and multi-agent routing.
+  </Card>
+  <Card title="6. Deployment" icon="cloud-arrow-up" href="/how-to/deployment">
+    Ship to FastAPI, Vercel, AWS Lambda, or Cloudflare.
   </Card>
 </CardGroup>
 
-## Core Building Blocks
+## Browse By Need
 
 <CardGroup cols={2}>
-  <Card
-    title="Generate Text"
-    icon="message"
-    href="/core/generate-text"
-  >
-    One-off completions without agent overhead.
+  <Card title="Providers" icon="plug" href="/explanation/providers">
+    Pick a model provider and see how each one is configured.
   </Card>
-  <Card
-    title="Tools"
-    icon="wrench"
-    href="/core/tools"
-  >
-    Type-safe function calling with automatic execution.
+  <Card title="Cookbook" icon="book" href="/how-to/index">
+    Start from working recipes for chatbots, RAG, MCP, and multi-agent apps.
   </Card>
-  <Card
-    title="Streaming"
-    icon="water"
-    href="/core/streaming"
-  >
-    Stream responses chunk by chunk.
+  <Card title="API Reference" icon="brackets" href="/reference/generate-text">
+    Look up functions, agent classes, transports, and types.
   </Card>
-  <Card
-    title="Providers"
-    icon="plug"
-    href="/providers"
-  >
-    OpenAI, Anthropic, Google, and OpenAI-compatible APIs.
-  </Card>
-</CardGroup>
-
-## Cookbook
-
-<CardGroup cols={2}>
-  <Card
-    title="Profile Research Agent"
-    icon="user-secret"
-    href="/cookbook/profile-research-agent"
-  >
-    OSINT agent with durable SSE streaming and event replay.
-  </Card>
-  <Card
-    title="FastAPI Integration"
-    icon="bolt"
-    href="/cookbook/fastapi-integration"
-  >
-    Custom endpoints, middleware, and serverless patterns.
-  </Card>
-  <Card
-    title="Stateless Generation"
-    icon="function"
-    href="/cookbook/stateless-generation"
-  >
-    Use generate_text and stream_text directly.
-  </Card>
-  <Card
-    title="Browse All Recipes"
-    icon="book"
-    href="/cookbook/index"
-  >
-    Chatbots, task planners, multi-agent workflows, and more.
+  <Card title="Architecture" icon="blueprint" href="/explanation/unified-transport-layer">
+    Understand how state, transports, registries, and remote agents fit together.
   </Card>
 </CardGroup>
