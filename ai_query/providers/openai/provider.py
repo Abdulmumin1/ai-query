@@ -386,6 +386,24 @@ class OpenAIProvider(BaseProvider):
 
         return request_options
 
+    def _validate_chat_completions_request(
+        self,
+        *,
+        model: str,
+        tools: ToolSet | None,
+        request_options: dict[str, Any],
+    ) -> None:
+        if self.name != "openai":
+            return
+
+        if tools and "reasoning_effort" in request_options:
+            raise ValueError(
+                f"OpenAI model {model} does not support reasoning.effort with tools "
+                "through ai-query's current /v1/chat/completions provider path. "
+                "Use either tools without reasoning, reasoning without tools, or a "
+                "model/provider path that supports OpenAI's /v1/responses API."
+            )
+
     def apply_reasoning(
         self,
         provider_options: ProviderOptions | None,
@@ -432,6 +450,11 @@ class OpenAIProvider(BaseProvider):
         converted_messages = await self._convert_messages(messages)
 
         request_options = self._build_request_options(kwargs, openai_options)
+        self._validate_chat_completions_request(
+            model=model,
+            tools=tools,
+            request_options=request_options,
+        )
 
         # Build request parameters
         request_body: dict[str, Any] = {
@@ -510,6 +533,11 @@ class OpenAIProvider(BaseProvider):
         converted_messages = await self._convert_messages(messages)
 
         request_options = self._build_request_options(kwargs, openai_options)
+        self._validate_chat_completions_request(
+            model=model,
+            tools=tools,
+            request_options=request_options,
+        )
 
         # Build request parameters with streaming enabled
         request_body: dict[str, Any] = {

@@ -306,6 +306,74 @@ class TestOpenAIProvider:
                 max_completion_tokens=200,
             )
 
+    @pytest.mark.asyncio
+    async def test_openai_generate_rejects_reasoning_effort_with_tools(self):
+        """OpenAI chat completions should fail early for tools with reasoning_effort."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class CaptureTransport:
+            async def post(self, url, json, headers=None):
+                raise AssertionError("request should not be sent")
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = OpenAIProvider(api_key="test", transport=CaptureTransport())
+        tools = {
+            "greet": Tool(
+                description="Greet someone",
+                parameters={"type": "object", "properties": {}},
+                execute=lambda: "hello",
+            )
+        }
+
+        with pytest.raises(ValueError, match="does not support reasoning.effort with tools"):
+            await provider.generate(
+                model="gpt-5.4",
+                messages=[Message(role="user", content="Hello")],
+                tools=tools,
+                provider_options={"openai": {"reasoning_effort": "high"}},
+            )
+
+    @pytest.mark.asyncio
+    async def test_openai_stream_rejects_reasoning_effort_with_tools(self):
+        """OpenAI streaming should fail early for tools with reasoning_effort."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class CaptureTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                raise AssertionError("request should not be sent")
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = OpenAIProvider(api_key="test", transport=CaptureTransport())
+        tools = {
+            "greet": Tool(
+                description="Greet someone",
+                parameters={"type": "object", "properties": {}},
+                execute=lambda: "hello",
+            )
+        }
+
+        with pytest.raises(ValueError, match="does not support reasoning.effort with tools"):
+            async for _ in provider.stream(
+                model="gpt-5.4",
+                messages=[Message(role="user", content="Hello")],
+                tools=tools,
+                provider_options={"openai": {"reasoning_effort": "high"}},
+            ):
+                pass
+
 
 # =============================================================================
 # Anthropic Provider Tests
