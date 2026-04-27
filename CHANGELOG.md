@@ -1,6 +1,11 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.28
+
+- patch: Add normalized reasoning controls and provider-level token compatibility
+- patch: Expose provider thinking events across streaming and agents.
+
 ## 1.7.27
 
 - patch: Add normalized reasoning controls and provider-level token compatibility
