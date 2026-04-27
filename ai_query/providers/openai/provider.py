@@ -334,6 +334,110 @@ class OpenAIProvider(BaseProvider):
             )
         return result
 
+    def _convert_tools_for_responses(self, tools: ToolSet) -> list[dict[str, Any]]:
+        """Convert ToolSet to OpenAI Responses function tool format."""
+        result = []
+        for name, tool in tools.items():
+            result.append(
+                {
+                    "type": "function",
+                    "name": name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            )
+        return result
+
+    def _extract_text_from_responses_output(self, response: dict[str, Any]) -> str:
+        if response.get("output_text"):
+            return response["output_text"]
+
+        text_parts: list[str] = []
+        for item in response.get("output", []):
+            if item.get("type") != "message":
+                continue
+            for content in item.get("content", []):
+                if content.get("type") in {"output_text", "text"}:
+                    text_parts.append(content.get("text", ""))
+        return "".join(text_parts)
+
+    async def _convert_messages_for_responses(
+        self, messages: list[Message]
+    ) -> list[dict[str, Any]]:
+        """Convert ai-query messages to OpenAI Responses input items."""
+        input_items: list[dict[str, Any]] = []
+
+        for msg in messages:
+            if isinstance(msg.content, str):
+                input_items.append({"role": msg.role, "content": msg.content})
+                continue
+
+            if msg.role == "tool":
+                for part in msg.content:
+                    tool_result = None
+                    if isinstance(part, ToolResultPart):
+                        tool_result = part.tool_result
+                    elif isinstance(part, dict) and part.get("type") == "tool_result":
+                        tool_result = part.get("tool_result")
+
+                    if tool_result:
+                        input_items.append(
+                            {
+                                "type": "function_call_output",
+                                "call_id": tool_result.tool_call_id,
+                                "output": str(tool_result.result),
+                            }
+                        )
+                continue
+
+            if msg.role == "assistant":
+                response_items: list[dict[str, Any]] = []
+                text_parts: list[str] = []
+
+                for part in msg.content:
+                    tool_call = None
+                    if isinstance(part, ToolCallPart):
+                        tool_call = part.tool_call
+                    elif isinstance(part, dict) and part.get("type") == "tool_call":
+                        tool_call = part.get("tool_call")
+
+                    if tool_call:
+                        stored_items = tool_call.metadata.get("openai_response_output")
+                        if stored_items:
+                            response_items.extend(stored_items)
+                        else:
+                            response_items.append(
+                                {
+                                    "type": "function_call",
+                                    "call_id": tool_call.id,
+                                    "name": tool_call.name,
+                                    "arguments": json.dumps(tool_call.arguments),
+                                }
+                            )
+                        continue
+
+                    if isinstance(part, TextPart):
+                        text_parts.append(part.text)
+                    elif isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+
+                if response_items:
+                    input_items.extend(response_items)
+                elif text_parts:
+                    input_items.append({"role": "assistant", "content": "".join(text_parts)})
+                continue
+
+            content_parts: list[dict[str, Any]] = []
+            for part in msg.content:
+                if isinstance(part, TextPart):
+                    content_parts.append({"type": "input_text", "text": part.text})
+                elif isinstance(part, dict) and part.get("type") == "text":
+                    content_parts.append({"type": "input_text", "text": part.get("text", "")})
+
+            input_items.append({"role": msg.role, "content": content_parts})
+
+        return input_items
+
     def _get_headers(self) -> dict[str, str]:
         """Get headers for OpenAI API requests."""
         headers = {
@@ -386,6 +490,100 @@ class OpenAIProvider(BaseProvider):
 
         return request_options
 
+    def _should_use_responses_api(
+        self,
+        *,
+        tools: ToolSet | None,
+        request_options: dict[str, Any],
+    ) -> bool:
+        return self.name == "openai" and bool(tools) and "reasoning_effort" in request_options
+
+    def _build_responses_request_options(
+        self, request_options: dict[str, Any]
+    ) -> dict[str, Any]:
+        responses_options = dict(request_options)
+
+        reasoning_effort = responses_options.pop("reasoning_effort", None)
+        if reasoning_effort is not None:
+            reasoning = dict(responses_options.get("reasoning") or {})
+            reasoning["effort"] = reasoning_effort
+            responses_options["reasoning"] = reasoning
+
+        max_completion_tokens = responses_options.pop("max_completion_tokens", None)
+        if max_completion_tokens is not None:
+            responses_options["max_output_tokens"] = max_completion_tokens
+
+        return responses_options
+
+    async def _generate_with_responses(
+        self,
+        *,
+        model: str,
+        messages: list[Message],
+        tools: ToolSet,
+        request_options: dict[str, Any],
+    ) -> GenerateTextResult:
+        url = f"{self.base_url}/responses"
+        response = await self.transport.post(
+            url,
+            {
+                "model": model,
+                "input": await self._convert_messages_for_responses(messages),
+                "tools": self._convert_tools_for_responses(tools),
+                **self._build_responses_request_options(request_options),
+            },
+            headers=self._get_headers(),
+        )
+
+        usage = None
+        usage_data = response.get("usage")
+        if usage_data:
+            input_details = usage_data.get("input_tokens_details", {})
+            usage = Usage(
+                input_tokens=usage_data.get("input_tokens", 0),
+                output_tokens=usage_data.get("output_tokens", 0),
+                cached_tokens=input_details.get("cached_tokens", 0),
+                total_tokens=usage_data.get("total_tokens", 0),
+            )
+
+        output_items = response.get("output", [])
+        reasoning_items = [item for item in output_items if item.get("type") == "reasoning"]
+        tool_calls: list[ToolCall] = []
+        for item in output_items:
+            if item.get("type") != "function_call":
+                continue
+            try:
+                arguments = json.loads(item.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+
+            call_id = item.get("call_id") or item.get("id") or f"call_{len(tool_calls)}"
+            response_output = [*reasoning_items, item] if not tool_calls else [item]
+            tool_calls.append(
+                ToolCall(
+                    id=call_id,
+                    name=item.get("name", ""),
+                    arguments=arguments,
+                    metadata={
+                        "openai_response_output": response_output,
+                    },
+                )
+            )
+
+        response_with_tools = dict(response)
+        response_with_tools["tool_calls"] = tool_calls
+
+        return GenerateTextResult(
+            text=self._extract_text_from_responses_output(response),
+            finish_reason="tool_use" if tool_calls else response.get("status"),
+            usage=usage,
+            response=response_with_tools,
+            provider_metadata={
+                "model": response.get("model"),
+                "id": response.get("id"),
+            },
+        )
+
     def apply_reasoning(
         self,
         provider_options: ProviderOptions | None,
@@ -432,6 +630,16 @@ class OpenAIProvider(BaseProvider):
         converted_messages = await self._convert_messages(messages)
 
         request_options = self._build_request_options(kwargs, openai_options)
+        if tools and self._should_use_responses_api(
+            tools=tools,
+            request_options=request_options,
+        ):
+            return await self._generate_with_responses(
+                model=model,
+                messages=messages,
+                tools=tools,
+                request_options=request_options,
+            )
 
         # Build request parameters
         request_body: dict[str, Any] = {
@@ -510,6 +718,25 @@ class OpenAIProvider(BaseProvider):
         converted_messages = await self._convert_messages(messages)
 
         request_options = self._build_request_options(kwargs, openai_options)
+        if tools and self._should_use_responses_api(
+            tools=tools,
+            request_options=request_options,
+        ):
+            result = await self._generate_with_responses(
+                model=model,
+                messages=messages,
+                tools=tools,
+                request_options=request_options,
+            )
+            if result.text:
+                yield StreamChunk(text=result.text)
+            yield StreamChunk(
+                is_final=True,
+                usage=result.usage,
+                finish_reason=result.finish_reason,
+                tool_calls=result.response.get("tool_calls") or None,
+            )
+            return
 
         # Build request parameters with streaming enabled
         request_body: dict[str, Any] = {

@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Route OpenAI reasoning-with-tools requests through the Responses API."
+}

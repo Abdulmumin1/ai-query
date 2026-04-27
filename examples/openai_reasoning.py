@@ -2,6 +2,7 @@
 
 Demonstrates:
 - Using the normalized `reasoning` parameter with the OpenAI provider
+- Confirming OpenAI reasoning + tools works through the Responses API path
 - Comparing different reasoning effort levels
 - Streaming a reasoning-capable response
 - Why OpenAI streaming may not emit reasoning events with this provider
@@ -12,8 +13,50 @@ Demonstrates:
 
 import asyncio
 
-from ai_query import generate_text, stream_text
+from ai_query import Field, generate_text, step_count_is, stream_text, tool
 from ai_query.providers import google, openai
+
+
+@tool(description="Add two integers exactly")
+def add_numbers(
+    a: int = Field(description="First integer"),
+    b: int = Field(description="Second integer"),
+) -> int:
+    return a + b
+
+
+async def openai_reasoning_with_tools_smoke_test() -> None:
+    """Confirm OpenAI reasoning + tools works.
+
+    This exercises the `/v1/responses` fallback because OpenAI rejects
+    `reasoning_effort` with function tools on `/v1/chat/completions` for GPT-5
+    reasoning models.
+    """
+    model = openai("gpt-5.4")
+
+    print("OpenAI Reasoning + Tools Smoke Test")
+    print("=" * 60)
+
+    try:
+        result = await generate_text(
+            model=model,
+            system="You must use the add_numbers tool before answering.",
+            prompt="Use the tool to add 17 and 25, then answer with only the sum.",
+            tools={"add_numbers": add_numbers},
+            reasoning={"effort": "high"},
+            stop_when=step_count_is(5),
+            max_tokens=500,
+        )
+
+        if not result.tool_calls:
+            raise AssertionError("Expected OpenAI to call add_numbers, but no tool call was returned")
+
+        print(result.text)
+        print(f"\nPASS: reasoning + tools worked ({len(result.tool_calls)} tool call(s))")
+        if result.usage:
+            print(f"[{result.usage.total_tokens} total tokens]")
+    finally:
+        await model.provider.transport.close()
 
 
 async def compare_effort_levels() -> None:
@@ -110,8 +153,9 @@ async def main() -> None:
     print("Set GOOGLE_API_KEY for the Google thinking stream.")
     print()
 
+    await openai_reasoning_with_tools_smoke_test()
     # await compare_effort_levels()
-    await streaming_example()
+    # await streaming_example()
 
 
 if __name__ == "__main__":
