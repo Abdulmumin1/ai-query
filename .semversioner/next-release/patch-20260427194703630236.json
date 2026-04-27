@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Reject OpenAI chat-completions requests that combine reasoning effort with tools."
+}
