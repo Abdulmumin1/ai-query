@@ -1,4 +1,4 @@
 {
   "type": "patch",
-  "description": "Reject OpenAI chat-completions requests that combine reasoning effort with tools."
+  "description": "Route OpenAI reasoning-with-tools requests through the Responses API."
 }

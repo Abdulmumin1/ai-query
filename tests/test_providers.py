@@ -307,13 +307,34 @@ class TestOpenAIProvider:
             )
 
     @pytest.mark.asyncio
-    async def test_openai_generate_rejects_reasoning_effort_with_tools(self):
-        """OpenAI chat completions should fail early for tools with reasoning_effort."""
+    async def test_openai_generate_uses_responses_for_reasoning_effort_with_tools(self):
+        """OpenAI should route tools with reasoning_effort through Responses."""
         from ai_query.providers.openai import OpenAIProvider
 
         class CaptureTransport:
+            def __init__(self):
+                self.last_url = None
+                self.last_json = None
+
             async def post(self, url, json, headers=None):
-                raise AssertionError("request should not be sent")
+                self.last_url = url
+                self.last_json = json
+                return {
+                    "id": "resp_1",
+                    "model": "gpt-5.4",
+                    "status": "completed",
+                    "output": [
+                        {"type": "reasoning", "id": "rs_1", "summary": []},
+                        {
+                            "type": "function_call",
+                            "id": "fc_1",
+                            "call_id": "call_1",
+                            "name": "greet",
+                            "arguments": "{}",
+                        },
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                }
 
             async def stream(self, url, json, headers=None):
                 if False:
@@ -322,7 +343,8 @@ class TestOpenAIProvider:
             async def get(self, url, headers=None):
                 return b"", "application/octet-stream"
 
-        provider = OpenAIProvider(api_key="test", transport=CaptureTransport())
+        transport = CaptureTransport()
+        provider = OpenAIProvider(api_key="test", transport=transport)
         tools = {
             "greet": Tool(
                 description="Greet someone",
@@ -331,22 +353,57 @@ class TestOpenAIProvider:
             )
         }
 
-        with pytest.raises(ValueError, match="does not support reasoning.effort with tools"):
-            await provider.generate(
-                model="gpt-5.4",
-                messages=[Message(role="user", content="Hello")],
-                tools=tools,
-                provider_options={"openai": {"reasoning_effort": "high"}},
-            )
+        result = await provider.generate(
+            model="gpt-5.4",
+            messages=[Message(role="user", content="Hello")],
+            tools=tools,
+            provider_options={"openai": {"reasoning_effort": "high"}},
+            max_tokens=123,
+        )
+
+        assert transport.last_url.endswith("/responses")
+        assert transport.last_json["reasoning"] == {"effort": "high"}
+        assert transport.last_json["max_output_tokens"] == 123
+        assert transport.last_json["tools"] == [
+            {
+                "type": "function",
+                "name": "greet",
+                "description": "Greet someone",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+        assert result.response["tool_calls"][0].id == "call_1"
+        assert result.response["tool_calls"][0].metadata["openai_response_output"][0]["type"] == "reasoning"
 
     @pytest.mark.asyncio
-    async def test_openai_stream_rejects_reasoning_effort_with_tools(self):
-        """OpenAI streaming should fail early for tools with reasoning_effort."""
+    async def test_openai_stream_uses_responses_for_reasoning_effort_with_tools(self):
+        """OpenAI streaming should use Responses fallback for tools with reasoning."""
         from ai_query.providers.openai import OpenAIProvider
 
         class CaptureTransport:
+            def __init__(self):
+                self.last_url = None
+
             async def post(self, url, json, headers=None):
-                return {}
+                self.last_url = url
+                return {
+                    "id": "resp_1",
+                    "model": "gpt-5.4",
+                    "status": "completed",
+                    "output_text": "Hello from a tool-capable reasoning response.",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "Hello from a tool-capable reasoning response.",
+                                }
+                            ],
+                        }
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                }
 
             async def stream(self, url, json, headers=None):
                 raise AssertionError("request should not be sent")
@@ -356,7 +413,8 @@ class TestOpenAIProvider:
             async def get(self, url, headers=None):
                 return b"", "application/octet-stream"
 
-        provider = OpenAIProvider(api_key="test", transport=CaptureTransport())
+        transport = CaptureTransport()
+        provider = OpenAIProvider(api_key="test", transport=transport)
         tools = {
             "greet": Tool(
                 description="Greet someone",
@@ -365,14 +423,88 @@ class TestOpenAIProvider:
             )
         }
 
-        with pytest.raises(ValueError, match="does not support reasoning.effort with tools"):
-            async for _ in provider.stream(
-                model="gpt-5.4",
-                messages=[Message(role="user", content="Hello")],
-                tools=tools,
-                provider_options={"openai": {"reasoning_effort": "high"}},
-            ):
-                pass
+        chunks = []
+        async for chunk in provider.stream(
+            model="gpt-5.4",
+            messages=[Message(role="user", content="Hello")],
+            tools=tools,
+            provider_options={"openai": {"reasoning_effort": "high"}},
+        ):
+            chunks.append(chunk)
+
+        assert transport.last_url.endswith("/responses")
+        assert chunks[0].text == "Hello from a tool-capable reasoning response."
+        assert chunks[-1].is_final is True
+
+    @pytest.mark.asyncio
+    async def test_openai_responses_round_trips_reasoning_items_with_tool_outputs(self):
+        """OpenAI Responses tool loops should preserve reasoning items across turns."""
+        from ai_query import Field, generate_text, step_count_is, tool
+        from ai_query.providers.openai import OpenAIProvider
+
+        class CaptureTransport:
+            def __init__(self):
+                self.requests = []
+
+            async def post(self, url, json, headers=None):
+                self.requests.append(json)
+                if len(self.requests) == 1:
+                    return {
+                        "id": "resp_1",
+                        "model": "gpt-5.4",
+                        "status": "completed",
+                        "output": [
+                            {"type": "reasoning", "id": "rs_1", "summary": []},
+                            {
+                                "type": "function_call",
+                                "id": "fc_1",
+                                "call_id": "call_1",
+                                "name": "greet",
+                                "arguments": '{"name":"Ada"}',
+                            },
+                        ],
+                    }
+                return {
+                    "id": "resp_2",
+                    "model": "gpt-5.4",
+                    "status": "completed",
+                    "output_text": "Hello Ada.",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "Hello Ada."}],
+                        }
+                    ],
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        @tool(description="Greet someone")
+        def greet(name: str = Field(description="Name")) -> str:
+            return f"Hello {name}."
+
+        transport = CaptureTransport()
+        provider = OpenAIProvider(api_key="test", transport=transport)
+        model = LanguageModel(provider=provider, model_id="gpt-5.4")
+
+        result = await generate_text(
+            model=model,
+            prompt="Greet Ada",
+            tools={"greet": greet},
+            reasoning={"effort": "high"},
+            stop_when=step_count_is(10),
+        )
+
+        second_input = transport.requests[1]["input"]
+        assert result.text == "Hello Ada."
+        assert any(item.get("type") == "reasoning" for item in second_input)
+        assert any(item.get("type") == "function_call" for item in second_input)
+        assert any(item.get("type") == "function_call_output" for item in second_input)
 
 
 # =============================================================================
