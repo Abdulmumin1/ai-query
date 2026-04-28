@@ -848,14 +848,14 @@ class OpenAIProvider(BaseProvider):
                                     "arguments": "",
                                 }
 
-                            if "id" in tc:
+                            if tc.get("id"):
                                 current_tool_calls[idx]["id"] += tc["id"]
 
                             if "function" in tc:
                                 fn = tc["function"]
-                                if "name" in fn:
+                                if fn.get("name"):
                                     current_tool_calls[idx]["name"] += fn["name"]
-                                if "arguments" in fn:
+                                if fn.get("arguments"):
                                     current_tool_calls[idx]["arguments"] += fn[
                                         "arguments"
                                     ]
