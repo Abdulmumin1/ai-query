@@ -784,7 +784,9 @@ class OpenAIProvider(BaseProvider):
                     if choice.get("finish_reason"):
                         finish_reason = choice["finish_reason"]
 
-                    delta = choice.get("delta", {})
+                    delta = choice.get("delta") or {}
+                    if not isinstance(delta, dict):
+                        delta = {}
 
                     reasoning_events = []
                     for key in ("reasoning_content", "thinking", "thought"):
@@ -840,7 +842,13 @@ class OpenAIProvider(BaseProvider):
                     # Handle tool calls
                     if "tool_calls" in delta and delta["tool_calls"]:
                         for tc in delta["tool_calls"]:
-                            idx = tc["index"]
+                            if not isinstance(tc, dict):
+                                continue
+
+                            idx = tc.get("index")
+                            if idx is None:
+                                continue
+
                             if idx not in current_tool_calls:
                                 current_tool_calls[idx] = {
                                     "id": "",
@@ -852,7 +860,9 @@ class OpenAIProvider(BaseProvider):
                                 current_tool_calls[idx]["id"] += tc["id"]
 
                             if "function" in tc:
-                                fn = tc["function"]
+                                fn = tc["function"] or {}
+                                if not isinstance(fn, dict):
+                                    continue
                                 if fn.get("name"):
                                     current_tool_calls[idx]["name"] += fn["name"]
                                 if fn.get("arguments"):
