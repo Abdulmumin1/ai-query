@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Tolerate null tool-call fragments in OpenAI-compatible streams.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-04-28T14:51:53+00:00",
+  "version": "1.7.30"
+}

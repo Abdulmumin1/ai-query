@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Tolerate null tool-call fragments in OpenAI-compatible streams."
-}
