@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.31
+
+- patch: Tolerate null delta and function fragments in OpenAI-compatible streams.
+
 ## 1.7.30
 
 - patch: Tolerate null tool-call fragments in OpenAI-compatible streams.

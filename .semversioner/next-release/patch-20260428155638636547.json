@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Tolerate null delta and function fragments in OpenAI-compatible streams."
-}
