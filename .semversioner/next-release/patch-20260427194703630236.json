@@ -1,4 +1,4 @@
 {
   "type": "patch",
-  "description": "Route OpenAI reasoning-with-tools requests through the Responses API."
+  "description": "Route OpenAI reasoning-with-tools requests through the Responses API and tolerate null tool-call fragments in OpenAI-compatible streams."
 }

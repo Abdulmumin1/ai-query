@@ -771,6 +771,46 @@ class TestWorkersAIProvider:
         assert reasoning_events[0].text == "think"
         assert reasoning_events[0].data == {"field": "reasoning_content"}
 
+    @pytest.mark.asyncio
+    async def test_workers_ai_stream_tolerates_null_tool_call_fragments(self):
+        """Workers AI should ignore null tool call fragments in streamed deltas."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":null,"function":{"name":"inspect","arguments":null}}]}}]}\n',
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":null,"arguments":"{\\\"path\\\":\\\"README.md\\\"}"}}]}}]}\n',
+                    b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = WorkersAIProvider(
+            api_key="token",
+            account_id="account-123",
+            transport=FakeTransport(),
+        )
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="@cf/moonshotai/kimi-k2.5",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        assert chunks[-1].is_final is True
+        assert chunks[-1].tool_calls is not None
+        assert chunks[-1].tool_calls[0].id == "call_1"
+        assert chunks[-1].tool_calls[0].name == "inspect"
+        assert chunks[-1].tool_calls[0].arguments == {"path": "README.md"}
+
     def test_workers_ai_with_custom_base_url(self):
         """workers_ai() should accept custom base URL without account_id."""
         from ai_query.providers import workers_ai

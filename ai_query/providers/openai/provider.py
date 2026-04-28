@@ -848,17 +848,19 @@ class OpenAIProvider(BaseProvider):
                                     "arguments": "",
                                 }
 
-                            if "id" in tc:
-                                current_tool_calls[idx]["id"] += tc["id"]
+                            tool_call_id = tc.get("id")
+                            if tool_call_id:
+                                current_tool_calls[idx]["id"] += tool_call_id
 
                             if "function" in tc:
                                 fn = tc["function"]
-                                if "name" in fn:
-                                    current_tool_calls[idx]["name"] += fn["name"]
-                                if "arguments" in fn:
-                                    current_tool_calls[idx]["arguments"] += fn[
-                                        "arguments"
-                                    ]
+                                function_name = fn.get("name")
+                                if function_name:
+                                    current_tool_calls[idx]["name"] += function_name
+
+                                function_arguments = fn.get("arguments")
+                                if function_arguments:
+                                    current_tool_calls[idx]["arguments"] += function_arguments
 
         # Process accumulated tool calls
         final_tool_calls = []
