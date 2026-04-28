@@ -810,6 +810,45 @@ class TestWorkersAIProvider:
         assert chunks[-1].tool_calls[0].name == "add"
         assert chunks[-1].tool_calls[0].arguments == {"a": 1, "b": 2}
 
+    @pytest.mark.asyncio
+    async def test_workers_ai_stream_ignores_null_delta_and_function(self):
+        """Workers AI should ignore null delta and function objects in streamed chunks."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"choices":[{"delta":null}]}\n',
+                    b'data: {"choices":[{"delta":{"tool_calls":[null,{"index":0,"function":null}]}}]}\n',
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"add","arguments":"{\\"a\\":1,\\"b\\":2}"}}]}}]}\n',
+                    b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = WorkersAIProvider(
+            api_key="token",
+            account_id="account-123",
+            transport=FakeTransport(),
+        )
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="@cf/moonshotai/kimi-k2.5",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        assert chunks[-1].tool_calls[0].id == "call_1"
+        assert chunks[-1].tool_calls[0].name == "add"
+        assert chunks[-1].tool_calls[0].arguments == {"a": 1, "b": 2}
+
     def test_workers_ai_with_custom_base_url(self):
         """workers_ai() should accept custom base URL without account_id."""
         from ai_query.providers import workers_ai
