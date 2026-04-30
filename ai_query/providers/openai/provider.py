@@ -361,6 +361,18 @@ class OpenAIProvider(BaseProvider):
                     text_parts.append(content.get("text", ""))
         return "".join(text_parts)
 
+    def _extract_reasoning_summaries_from_responses_output(
+        self, response: dict[str, Any]
+    ) -> list[str]:
+        summaries: list[str] = []
+        for item in response.get("output", []):
+            if item.get("type") != "reasoning":
+                continue
+            for part in item.get("summary") or []:
+                if isinstance(part, dict) and part.get("text"):
+                    summaries.append(str(part["text"]))
+        return summaries
+
     async def _convert_messages_for_responses(
         self, messages: list[Message]
     ) -> list[dict[str, Any]]:
@@ -507,6 +519,7 @@ class OpenAIProvider(BaseProvider):
         if reasoning_effort is not None:
             reasoning = dict(responses_options.get("reasoning") or {})
             reasoning["effort"] = reasoning_effort
+            reasoning.setdefault("summary", "auto")
             responses_options["reasoning"] = reasoning
 
         max_completion_tokens = responses_options.pop("max_completion_tokens", None)
@@ -728,6 +741,19 @@ class OpenAIProvider(BaseProvider):
                 tools=tools,
                 request_options=request_options,
             )
+            for summary in self._extract_reasoning_summaries_from_responses_output(
+                result.response
+            ):
+                yield StreamChunk(
+                    reasoning_events=[
+                        ReasoningEvent(
+                            kind="summary",
+                            provider=self.name,
+                            text=summary,
+                            data={"field": "reasoning.summary"},
+                        )
+                    ]
+                )
             if result.text:
                 yield StreamChunk(text=result.text)
             yield StreamChunk(
