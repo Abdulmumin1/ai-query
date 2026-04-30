@@ -163,7 +163,10 @@ class GoogleProvider(BaseProvider):
 
         budget = reasoning.get("budget")
         if budget is not None:
-            options["thinking_config"] = {"thinking_budget": budget}
+            options["thinking_config"] = {
+                "thinking_budget": budget,
+                "include_thoughts": True,
+            }
 
         return updated
 
