@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Forward OpenAI Responses reasoning summaries in streaming tool fallbacks.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-04-30T14:30:56+00:00",
+  "version": "1.7.32"
+}

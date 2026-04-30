@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Forward OpenAI Responses reasoning summaries in streaming tool fallbacks."
-}
