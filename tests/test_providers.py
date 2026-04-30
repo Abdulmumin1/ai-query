@@ -912,7 +912,14 @@ class TestGoogleReasoningProvider:
 
         options = provider.apply_reasoning(None, {"budget": 1024}, model="gemini-2.5-pro")
 
-        assert options == {"google": {"thinking_config": {"thinking_budget": 1024}}}
+        assert options == {
+            "google": {
+                "thinking_config": {
+                    "thinking_budget": 1024,
+                    "include_thoughts": True,
+                }
+            }
+        }
 
     def test_google_apply_reasoning_rejects_conflict(self):
         """Google provider should reject overlapping raw thinking config."""
