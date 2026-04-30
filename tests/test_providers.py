@@ -362,7 +362,10 @@ class TestOpenAIProvider:
         )
 
         assert transport.last_url.endswith("/responses")
-        assert transport.last_json["reasoning"] == {"effort": "high"}
+        assert transport.last_json["reasoning"] == {
+            "effort": "high",
+            "summary": "auto",
+        }
         assert transport.last_json["max_output_tokens"] == 123
         assert transport.last_json["tools"] == [
             {
@@ -392,6 +395,13 @@ class TestOpenAIProvider:
                     "status": "completed",
                     "output_text": "Hello from a tool-capable reasoning response.",
                     "output": [
+                        {
+                            "type": "reasoning",
+                            "id": "rs_1",
+                            "summary": [
+                                {"type": "summary_text", "text": "Checked the tool path."}
+                            ],
+                        },
                         {
                             "type": "message",
                             "content": [
@@ -433,7 +443,12 @@ class TestOpenAIProvider:
             chunks.append(chunk)
 
         assert transport.last_url.endswith("/responses")
-        assert chunks[0].text == "Hello from a tool-capable reasoning response."
+        assert chunks[0].reasoning_events is not None
+        assert chunks[0].reasoning_events[0].kind == "summary"
+        assert chunks[0].reasoning_events[0].provider == "openai"
+        assert chunks[0].reasoning_events[0].text == "Checked the tool path."
+        assert chunks[0].reasoning_events[0].data == {"field": "reasoning.summary"}
+        assert chunks[1].text == "Hello from a tool-capable reasoning response."
         assert chunks[-1].is_final is True
 
     @pytest.mark.asyncio
