@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.33
+
+- patch: Include Google thought parts when normalized reasoning budgets are enabled.
+
 ## 1.7.32
 
 - patch: Forward OpenAI Responses reasoning summaries in streaming tool fallbacks.
