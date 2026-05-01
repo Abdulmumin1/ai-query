@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Ignore malformed provider response fragments while parsing generated and streamed output.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-01T10:30:42+00:00",
+  "version": "1.7.34"
+}

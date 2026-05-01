@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.34
+
+- patch: Ignore malformed provider response fragments while parsing generated and streamed output.
+
 ## 1.7.33
 
 - patch: Include Google thought parts when normalized reasoning budgets are enabled.

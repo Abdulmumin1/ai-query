@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Ignore malformed provider response fragments while parsing generated and streamed output."
-}
