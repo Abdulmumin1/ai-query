@@ -232,9 +232,10 @@ class BaseProvider(ABC):
         if data == "[DONE]":
             return None
         try:
-            return json.loads(data)
+            parsed = json.loads(data)
         except json.JSONDecodeError:
             return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _accumulate_usage(self, total: Usage, delta: Usage) -> None:
         """Accumulate usage statistics in-place.
