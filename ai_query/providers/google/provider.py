@@ -487,13 +487,20 @@ class GoogleProvider(BaseProvider):
         text = ""
         tool_calls: list[ToolCall] = []
         candidates = response.get("candidates", [])
-        if candidates:
-            content = candidates[0].get("content", {})
+        candidate = candidates[0] if candidates else None
+        if isinstance(candidate, dict):
+            content = candidate.get("content", {})
+            if not isinstance(content, dict):
+                content = {}
             for i, part in enumerate(content.get("parts", [])):
+                if not isinstance(part, dict):
+                    continue
                 if "text" in part:
                     text += part["text"]
                 elif "functionCall" in part:
                     fc = part["functionCall"]
+                    if not isinstance(fc, dict):
+                        continue
                     # Capture thoughtSignature for Gemini 3 models
                     metadata = {}
                     if "thoughtSignature" in part:
@@ -510,6 +517,8 @@ class GoogleProvider(BaseProvider):
         # Build usage info if available
         usage = None
         usage_metadata = response.get("usageMetadata", {})
+        if not isinstance(usage_metadata, dict):
+            usage_metadata = {}
         if usage_metadata:
             usage = Usage(
                 input_tokens=usage_metadata.get("promptTokenCount", 0),
@@ -520,8 +529,8 @@ class GoogleProvider(BaseProvider):
 
         # Determine finish reason
         finish_reason = None
-        if candidates:
-            finish_reason = candidates[0].get("finishReason")
+        if isinstance(candidate, dict):
+            finish_reason = candidate.get("finishReason")
 
         # Build response dict with tool_calls for the execution loop
         response_with_tools = dict(response)
@@ -589,6 +598,8 @@ class GoogleProvider(BaseProvider):
 
                 # Check for usage metadata
                 usage_metadata = parsed.get("usageMetadata", {})
+                if not isinstance(usage_metadata, dict):
+                    usage_metadata = {}
                 if usage_metadata:
                     usage = Usage(
                         input_tokens=usage_metadata.get("promptTokenCount", 0),
@@ -600,12 +611,19 @@ class GoogleProvider(BaseProvider):
                 candidates = parsed.get("candidates", [])
                 if candidates:
                     candidate = candidates[0]
+                    if not isinstance(candidate, dict):
+                        continue
+
                     # Check for finish reason
                     if candidate.get("finishReason"):
                         finish_reason = candidate["finishReason"]
 
                     content = candidate.get("content", {})
+                    if not isinstance(content, dict):
+                        content = {}
                     for part in content.get("parts", []):
+                        if not isinstance(part, dict):
+                            continue
                         if "text" in part:
                             text = part["text"]
                             if part.get("thought"):
@@ -637,6 +655,8 @@ class GoogleProvider(BaseProvider):
                                 )
                         elif "functionCall" in part:
                             fc = part["functionCall"]
+                            if not isinstance(fc, dict):
+                                continue
                             # Capture thoughtSignature for Gemini 3 models
                             metadata = {}
                             if "thoughtSignature" in part:

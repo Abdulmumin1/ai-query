@@ -452,6 +452,37 @@ class TestOpenAIProvider:
         assert chunks[-1].is_final is True
 
     @pytest.mark.asyncio
+    async def test_openai_generate_ignores_malformed_choice_and_usage(self):
+        """OpenAI-compatible generate should ignore malformed choices and usage."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {
+                    "choices": [None],
+                    "usage": None,
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = OpenAIProvider(api_key="test", transport=FakeTransport())
+
+        result = await provider.generate(
+            model="gpt-4o",
+            messages=[Message(role="user", content="Hello")],
+        )
+
+        assert result.text == ""
+        assert result.finish_reason is None
+        assert result.usage is None
+        assert result.response["tool_calls"] == []
+
+    @pytest.mark.asyncio
     async def test_openai_responses_round_trips_reasoning_items_with_tool_outputs(self):
         """OpenAI Responses tool loops should preserve reasoning items across turns."""
         from ai_query import Field, generate_text, step_count_is, tool
@@ -864,6 +895,44 @@ class TestWorkersAIProvider:
         assert chunks[-1].tool_calls[0].name == "add"
         assert chunks[-1].tool_calls[0].arguments == {"a": 1, "b": 2}
 
+    @pytest.mark.asyncio
+    async def test_workers_ai_stream_ignores_null_choice(self):
+        """Workers AI should ignore null choice entries in streamed chunks."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"choices":[null]}\n',
+                    b'data: {"choices":[{"delta":{"content":"Answer"}}]}\n',
+                    b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = WorkersAIProvider(
+            api_key="token",
+            account_id="account-123",
+            transport=FakeTransport(),
+        )
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="@cf/moonshotai/kimi-k2.5",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        assert chunks[0].text == "Answer"
+        assert chunks[-1].is_final is True
+        assert chunks[-1].finish_reason == "stop"
+
     def test_workers_ai_with_custom_base_url(self):
         """workers_ai() should accept custom base URL without account_id."""
         from ai_query.providers import workers_ai
@@ -899,6 +968,29 @@ class TestWorkersAIProvider:
 
         with pytest.raises(ValueError, match="Cloudflare account ID is missing"):
             WorkersAIProvider(api_key="token")
+
+
+class TestProviderSSEParsing:
+    """Tests for shared provider SSE parsing."""
+
+    def test_parse_sse_json_ignores_non_object_payloads(self):
+        """SSE JSON parsing should ignore valid JSON payloads that are not objects."""
+        from ai_query.providers.base import BaseProvider
+
+        class ConcreteProvider(BaseProvider):
+            async def generate(self, **kwargs):
+                raise NotImplementedError
+
+            async def stream(self, **kwargs):
+                raise NotImplementedError
+                if False:
+                    yield
+
+        provider = ConcreteProvider(api_key="test")
+
+        assert provider._parse_sse_json(b"data: null") is None
+        assert provider._parse_sse_json(b"data: []") is None
+        assert provider._parse_sse_json(b"data: \"text\"") is None
 
 
 class TestGoogleReasoningProvider:
@@ -987,6 +1079,80 @@ class TestGoogleReasoningProvider:
             "field": "thoughtSignature",
             "signature": "sig",
         }
+
+    @pytest.mark.asyncio
+    async def test_google_stream_ignores_malformed_candidate_parts(self):
+        """Google stream should ignore null candidates and non-dict parts."""
+        from ai_query.providers.google import GoogleProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {}
+
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b"data: null\n",
+                    b'data: {"candidates":[null]}\n',
+                    b'data: {"candidates":[{"content":null}]}\n',
+                    b'data: {"candidates":[{"content":{"parts":[null,{"functionCall":null},{"text":"Answer"}]},"finishReason":"STOP"}]}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = GoogleProvider(api_key="test", transport=FakeTransport())
+
+        chunks = []
+        async for chunk in provider.stream(
+            model="gemini-2.5-pro",
+            messages=[Message(role="user", content="Hello")],
+        ):
+            chunks.append(chunk)
+
+        assert chunks[0].text == "Answer"
+        assert chunks[-1].is_final is True
+        assert chunks[-1].finish_reason == "STOP"
+
+    @pytest.mark.asyncio
+    async def test_google_generate_ignores_malformed_candidate_parts(self):
+        """Google generate should ignore null candidates and malformed parts."""
+        from ai_query.providers.google import GoogleProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    None,
+                                    {"functionCall": None},
+                                    {"text": "Answer"},
+                                ]
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = GoogleProvider(api_key="test", transport=FakeTransport())
+
+        result = await provider.generate(
+            model="gemini-2.5-pro",
+            messages=[Message(role="user", content="Hello")],
+        )
+
+        assert result.text == "Answer"
+        assert result.finish_reason == "STOP"
 
 
 # =============================================================================

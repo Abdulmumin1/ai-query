@@ -307,17 +307,25 @@ class BedrockProvider(BaseProvider):
 
         # Extract result
         output = response.get("output", {})
+        if not isinstance(output, dict):
+            output = {}
         message = output.get("message", {})
+        if not isinstance(message, dict):
+            message = {}
         content_blocks = message.get("content", [])
 
         text = ""
         tool_calls: list[ToolCall] = []
 
         for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
             if "text" in block:
                 text += block["text"]
             elif "toolUse" in block:
                 tu = block["toolUse"]
+                if not isinstance(tu, dict):
+                    continue
                 tool_calls.append(ToolCall(
                     id=tu["toolUseId"],
                     name=tu["name"],
@@ -327,6 +335,8 @@ class BedrockProvider(BaseProvider):
         # Build usage info
         usage = None
         usage_data = response.get("usage", {})
+        if not isinstance(usage_data, dict):
+            usage_data = {}
         if usage_data:
             usage = Usage(
                 input_tokens=usage_data.get("inputTokens", 0),
@@ -443,19 +453,34 @@ class BedrockProvider(BaseProvider):
                 yield event
 
         for event in iterate_stream():
+            if not isinstance(event, dict):
+                continue
             if "contentBlockDelta" in event:
-                delta = event["contentBlockDelta"].get("delta", {})
+                content_block_delta = event["contentBlockDelta"]
+                if not isinstance(content_block_delta, dict):
+                    continue
+                delta = content_block_delta.get("delta", {})
+                if not isinstance(delta, dict):
+                    continue
                 if "text" in delta:
                     yield StreamChunk(text=delta["text"])
                 elif "toolUse" in delta:
                     # Tool use delta (partial input)
-                    if current_tool_use is not None:
-                        current_tool_use["input_json"] += delta["toolUse"].get("input", "")
+                    tool_use = delta["toolUse"]
+                    if current_tool_use is not None and isinstance(tool_use, dict):
+                        current_tool_use["input_json"] += tool_use.get("input", "")
 
             elif "contentBlockStart" in event:
-                start = event["contentBlockStart"].get("start", {})
+                content_block_start = event["contentBlockStart"]
+                if not isinstance(content_block_start, dict):
+                    continue
+                start = content_block_start.get("start", {})
+                if not isinstance(start, dict):
+                    continue
                 if "toolUse" in start:
                     tu = start["toolUse"]
+                    if not isinstance(tu, dict):
+                        continue
                     current_tool_use = {
                         "id": tu["toolUseId"],
                         "name": tu["name"],
@@ -478,10 +503,17 @@ class BedrockProvider(BaseProvider):
                     current_tool_use = None
 
             elif "messageStop" in event:
-                finish_reason = event["messageStop"].get("stopReason")
+                message_stop = event["messageStop"]
+                if isinstance(message_stop, dict):
+                    finish_reason = message_stop.get("stopReason")
 
             elif "metadata" in event:
-                usage_data = event["metadata"].get("usage", {})
+                metadata = event["metadata"]
+                if not isinstance(metadata, dict):
+                    continue
+                usage_data = metadata.get("usage", {})
+                if not isinstance(usage_data, dict):
+                    usage_data = {}
                 if usage_data:
                     usage = Usage(
                         input_tokens=usage_data.get("inputTokens", 0),

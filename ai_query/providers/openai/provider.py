@@ -354,9 +354,13 @@ class OpenAIProvider(BaseProvider):
 
         text_parts: list[str] = []
         for item in response.get("output", []):
+            if not isinstance(item, dict):
+                continue
             if item.get("type") != "message":
                 continue
             for content in item.get("content", []):
+                if not isinstance(content, dict):
+                    continue
                 if content.get("type") in {"output_text", "text"}:
                     text_parts.append(content.get("text", ""))
         return "".join(text_parts)
@@ -366,6 +370,8 @@ class OpenAIProvider(BaseProvider):
     ) -> list[str]:
         summaries: list[str] = []
         for item in response.get("output", []):
+            if not isinstance(item, dict):
+                continue
             if item.get("type") != "reasoning":
                 continue
             for part in item.get("summary") or []:
@@ -550,8 +556,10 @@ class OpenAIProvider(BaseProvider):
 
         usage = None
         usage_data = response.get("usage")
-        if usage_data:
+        if isinstance(usage_data, dict):
             input_details = usage_data.get("input_tokens_details", {})
+            if not isinstance(input_details, dict):
+                input_details = {}
             usage = Usage(
                 input_tokens=usage_data.get("input_tokens", 0),
                 output_tokens=usage_data.get("output_tokens", 0),
@@ -560,6 +568,7 @@ class OpenAIProvider(BaseProvider):
             )
 
         output_items = response.get("output", [])
+        output_items = [item for item in output_items if isinstance(item, dict)]
         reasoning_items = [item for item in output_items if item.get("type") == "reasoning"]
         tool_calls: list[ToolCall] = []
         for item in output_items:
@@ -669,28 +678,44 @@ class OpenAIProvider(BaseProvider):
         response = await self.transport.post(url, request_body, headers=self._get_headers())
 
         # Extract result
-        choice = response["choices"][0]
+        choices = response.get("choices", [])
+        choice = choices[0] if choices else {}
+        if not isinstance(choice, dict):
+            choice = {}
+        message = choice.get("message", {})
+        if not isinstance(message, dict):
+            message = {}
         usage = None
-        if "usage" in response:
-            usage_data = response["usage"]
+        usage_data = response.get("usage")
+        if isinstance(usage_data, dict):
+            prompt_details = usage_data.get("prompt_tokens_details", {})
+            if not isinstance(prompt_details, dict):
+                prompt_details = {}
             usage = Usage(
                 input_tokens=usage_data.get("prompt_tokens", 0),
                 output_tokens=usage_data.get("completion_tokens", 0),
-                cached_tokens=usage_data.get("prompt_tokens_details", {}).get(
-                    "cached_tokens", 0
-                ),
+                cached_tokens=prompt_details.get("cached_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
         # Extract tool calls if present
         tool_calls: list[ToolCall] = []
-        if "tool_calls" in choice["message"] and choice["message"]["tool_calls"]:
-            for tc in choice["message"]["tool_calls"]:
+        if message.get("tool_calls"):
+            for tc in message["tool_calls"]:
+                if not isinstance(tc, dict):
+                    continue
+                function = tc.get("function", {})
+                if not isinstance(function, dict):
+                    function = {}
+                try:
+                    arguments = json.loads(function.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    arguments = {}
                 tool_calls.append(
                     ToolCall(
-                        id=tc["id"],
-                        name=tc["function"]["name"],
-                        arguments=json.loads(tc["function"]["arguments"]),
+                        id=tc.get("id", ""),
+                        name=function.get("name", ""),
+                        arguments=arguments,
                     )
                 )
 
@@ -699,7 +724,7 @@ class OpenAIProvider(BaseProvider):
         response_with_tools["tool_calls"] = tool_calls
 
         return GenerateTextResult(
-            text=choice["message"]["content"] or "",
+            text=message.get("content") or "",
             finish_reason=choice.get("finish_reason"),
             usage=usage,
             response=response_with_tools,
@@ -792,20 +817,24 @@ class OpenAIProvider(BaseProvider):
                     continue
 
                 # Check for usage in the chunk (sent at the end)
-                if "usage" in chunk and chunk["usage"]:
-                    usage_data = chunk["usage"]
+                usage_data = chunk.get("usage")
+                if isinstance(usage_data, dict):
+                    prompt_details = usage_data.get("prompt_tokens_details", {})
+                    if not isinstance(prompt_details, dict):
+                        prompt_details = {}
                     usage = Usage(
                         input_tokens=usage_data.get("prompt_tokens", 0),
                         output_tokens=usage_data.get("completion_tokens", 0),
-                        cached_tokens=usage_data.get(
-                            "prompt_tokens_details", {}
-                        ).get("cached_tokens", 0),
+                        cached_tokens=prompt_details.get("cached_tokens", 0),
                         total_tokens=usage_data.get("total_tokens", 0),
                     )
 
                 choices = chunk.get("choices", [])
                 if choices:
                     choice = choices[0]
+                    if not isinstance(choice, dict):
+                        continue
+
                     # Check for finish reason
                     if choice.get("finish_reason"):
                         finish_reason = choice["finish_reason"]
@@ -948,7 +977,10 @@ class OpenAIProvider(BaseProvider):
 
         # Extract result
         embedding = response["data"][0]["embedding"]
-        usage = EmbeddingUsage(tokens=response.get("usage", {}).get("prompt_tokens", 0))
+        usage_data = response.get("usage", {})
+        if not isinstance(usage_data, dict):
+            usage_data = {}
+        usage = EmbeddingUsage(tokens=usage_data.get("prompt_tokens", 0))
 
         return EmbedResult(
             value=value,
@@ -984,7 +1016,10 @@ class OpenAIProvider(BaseProvider):
         data = sorted(response["data"], key=lambda x: x["index"])
         embeddings = [item["embedding"] for item in data]
 
-        usage = EmbeddingUsage(tokens=response.get("usage", {}).get("prompt_tokens", 0))
+        usage_data = response.get("usage", {})
+        if not isinstance(usage_data, dict):
+            usage_data = {}
+        usage = EmbeddingUsage(tokens=usage_data.get("prompt_tokens", 0))
 
         return EmbedManyResult(
             values=values,

@@ -400,6 +400,8 @@ class AnthropicProvider(BaseProvider):
         text = ""
         tool_calls: list[ToolCall] = []
         for block in response.get("content", []):
+            if not isinstance(block, dict):
+                continue
             if block.get("type") == "text":
                 text += block.get("text", "")
             elif block.get("type") == "tool_use":
@@ -413,6 +415,8 @@ class AnthropicProvider(BaseProvider):
 
         # Build usage info
         usage_data = response.get("usage", {})
+        if not isinstance(usage_data, dict):
+            usage_data = {}
         input_tokens = usage_data.get("input_tokens", 0)
         output_tokens = usage_data.get("output_tokens", 0)
         cached_tokens = usage_data.get("cache_read_input_tokens", 0)
@@ -511,6 +515,8 @@ class AnthropicProvider(BaseProvider):
                 if event_type == "content_block_start":
                     index = chunk.get("index")
                     content_block = chunk.get("content_block", {})
+                    if not isinstance(content_block, dict):
+                        continue
                     if content_block.get("type") == "tool_use":
                         current_tool_call = {
                             "index": index,
@@ -523,6 +529,8 @@ class AnthropicProvider(BaseProvider):
                 elif event_type == "content_block_delta":
                     index = chunk.get("index")
                     delta = chunk.get("delta", {})
+                    if not isinstance(delta, dict):
+                        continue
 
                     if delta.get("type") == "text_delta":
                         text = delta.get("text", "")
@@ -588,10 +596,14 @@ class AnthropicProvider(BaseProvider):
                 # message_delta contains stop_reason
                 elif event_type == "message_delta":
                     delta = chunk.get("delta", {})
+                    if not isinstance(delta, dict):
+                        delta = {}
                     if delta.get("stop_reason"):
                         finish_reason = delta["stop_reason"]
                     # Usage is in the message_delta
                     usage_data = chunk.get("usage", {})
+                    if not isinstance(usage_data, dict):
+                        usage_data = {}
                     if usage_data:
                         output_tokens = usage_data.get("output_tokens", 0)
                         # We need input tokens from message_start
@@ -602,7 +614,11 @@ class AnthropicProvider(BaseProvider):
                 # message_start contains input token count
                 elif event_type == "message_start":
                     message = chunk.get("message", {})
+                    if not isinstance(message, dict):
+                        message = {}
                     usage_data = message.get("usage", {})
+                    if not isinstance(usage_data, dict):
+                        usage_data = {}
                     if usage_data:
                         usage = Usage(
                             input_tokens=usage_data.get("input_tokens", 0),
