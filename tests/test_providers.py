@@ -6,7 +6,7 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from ai_query.types import Message, Usage, ToolCall, Tool
+from ai_query.types import Message, Usage, ToolCall, Tool, ImagePart
 from ai_query.model import LanguageModel
 
 
@@ -221,6 +221,62 @@ class TestOpenAIProvider:
         assert len(converted) == 2
         assert converted[0] == {"role": "system", "content": "You are helpful."}
         assert converted[1] == {"role": "user", "content": "Hello!"}
+
+    @pytest.mark.asyncio
+    async def test_openai_convert_messages_for_responses_with_image_part(self):
+        """OpenAI Responses conversion should preserve ImagePart input."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        provider = OpenAIProvider(api_key="test")
+        messages = [
+            Message(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Describe this image."},
+                    ImagePart(image="base64data", media_type="image/png"),
+                ],
+            )
+        ]
+
+        converted = await provider._convert_messages_for_responses(messages)
+
+        assert converted == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Describe this image."},
+                    {"type": "input_image", "image_url": "data:image/png;base64,base64data"},
+                ],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_openai_convert_messages_for_responses_with_dict_image(self):
+        """OpenAI Responses conversion should preserve dict-style image input."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        provider = OpenAIProvider(api_key="test")
+        messages = [
+            Message(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Describe this image."},
+                    {"type": "image", "image": "base64data", "media_type": "image/png"},
+                ],
+            )
+        ]
+
+        converted = await provider._convert_messages_for_responses(messages)
+
+        assert converted == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Describe this image."},
+                    {"type": "input_image", "image_url": "data:image/png;base64,base64data"},
+                ],
+            }
+        ]
 
     def test_openai_apply_reasoning_maps_effort(self):
         """OpenAI provider should map normalized reasoning effort."""
