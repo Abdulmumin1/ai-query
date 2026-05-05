@@ -451,6 +451,36 @@ class OpenAIProvider(BaseProvider):
                     content_parts.append({"type": "input_text", "text": part.text})
                 elif isinstance(part, dict) and part.get("type") == "text":
                     content_parts.append({"type": "input_text", "text": part.get("text", "")})
+                elif isinstance(part, ImagePart):
+                    image_data = part.image
+                    media_type = getattr(part, "media_type", "image/png")
+                    if isinstance(image_data, str) and image_data.startswith(
+                        ("http://", "https://")
+                    ):
+                        image_data, media_type = await self._fetch_resource_as_base64(
+                            image_data
+                        )
+                        image_data = f"data:{media_type};base64,{image_data}"
+                    elif isinstance(image_data, bytes):
+                        image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
+                    elif isinstance(image_data, str) and not image_data.startswith("data:"):
+                        image_data = f"data:{media_type};base64,{image_data}"
+                    content_parts.append({"type": "input_image", "image_url": image_data})
+                elif isinstance(part, dict) and part.get("type") == "image":
+                    image_data = part.get("image")
+                    media_type = part.get("media_type", "image/png")
+                    if isinstance(image_data, str) and image_data.startswith(
+                        ("http://", "https://")
+                    ):
+                        image_data, media_type = await self._fetch_resource_as_base64(
+                            image_data
+                        )
+                        image_data = f"data:{media_type};base64,{image_data}"
+                    elif isinstance(image_data, bytes):
+                        image_data = f"data:{media_type};base64,{base64.b64encode(image_data).decode()}"
+                    elif isinstance(image_data, str) and not image_data.startswith("data:"):
+                        image_data = f"data:{media_type};base64,{image_data}"
+                    content_parts.append({"type": "input_image", "image_url": image_data})
 
             input_items.append({"role": msg.role, "content": content_parts})
 
