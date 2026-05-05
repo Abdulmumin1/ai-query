@@ -3,7 +3,9 @@ title: "Agent"
 description: "API reference for the Agent class"
 ---
 
-The `Agent` class is an Actor-based stateful AI agent that maintains persistent memory, identity, and handles sequential message processing.
+`Agent` is the stateful orchestration class in `ai-query`.
+
+Use it when you need model configuration, tools, persistent state, message history, events, or transport/RPC behavior attached to a stable agent ID.
 
 ## Import
 
@@ -14,122 +16,374 @@ from ai_query.agents import Agent
 ## Constructor
 
 ```python
-Agent(
-    id: str,
-    *,
-    model: LanguageModel | None = None,
-    system: str = "You are a helpful assistant.",
-    tools: ToolSet | None = None,
-    storage: Storage | None = None,
-    initial_state: StateT | None = None,
-    stop_when: StopCondition | list[StopCondition] | None = None,
-    provider_options: ProviderOptions | None = None,
-    reasoning: ReasoningConfig | None = None,
-    on_reasoning_event: Callable[[ReasoningEvent], None] | None = None,
-)
-```
-
-### Typed State (Optional)
-
-`Agent` supports **Pydantic** for typed state. To use it, subclass `Agent` and set `state_model`:
-
-```python
-class MyState(BaseModel):
-    count: int = 0
-
-class MyAgent(Agent[MyState]):
-    state_model = MyState
+class Agent(Generic[StateT]):
+    def __init__(
+        self,
+        id: str,
+        *,
+        model: LanguageModel | None = None,
+        system: str = "You are a helpful assistant.",
+        tools: ToolSet | None = None,
+        storage: Storage | None = None,
+        initial_state: StateT | None = None,
+        stop_when: StopCondition | list[StopCondition] | None = None,
+        provider_options: ProviderOptions | None = None,
+        reasoning: ReasoningConfig | None = None,
+        on_reasoning_event: OnReasoningEvent | None = None,
+        transport: AgentTransport | None = None,
+        event_bus: EventBus | None = None,
+    ) -> None
 ```
 
 ### Parameters
 
 <ParamField path="id" type="str" required>
-  Unique identifier for this agent instance. Used as a key prefix for storage.
+  Stable agent identifier. Used for storage keys, routing, and RPC.
 </ParamField>
 
-<ParamField path="model" type="LanguageModel">
-  The language model to use. Created with provider functions like
-  `openai("gpt-4o")`.
+<ParamField path="model" type="LanguageModel | None">
+  Default model for `chat()`, `stream()`, `run()`, and `turn()`.
 </ParamField>
 
-<ParamField path="storage" type="Storage">
-  Storage backend for persistence. Defaults to `MemoryStorage()`.
+<ParamField path="system" type="str">
+  Default system prompt.
 </ParamField>
 
-<ParamField path="reasoning" type="ReasoningConfig">
-  Default normalized reasoning-depth controls passed to `stream_text()` for `chat()` and `stream()`.
+<ParamField path="tools" type="ToolSet | None">
+  Default tools available to model calls.
 </ParamField>
 
-<ParamField path="on_reasoning_event" type="Callable[[ReasoningEvent], None]">
-  Optional callback for provider thinking output. Agents also emit each reasoning event as an agent event with type `reasoning`.
+<ParamField path="storage" type="Storage | None">
+  Storage backend. Defaults to `MemoryStorage()`.
 </ParamField>
 
-## Methods
+<ParamField path="initial_state" type="StateT | None">
+  State used when storage has no saved state for this agent.
+</ParamField>
 
-### chat
+<ParamField path="stop_when" type="StopCondition | list[StopCondition] | None">
+  Default stop condition for tool loops.
+</ParamField>
+
+<ParamField path="provider_options" type="ProviderOptions | None">
+  Default provider-specific options.
+</ParamField>
+
+<ParamField path="reasoning" type="ReasoningConfig | None">
+  Default reasoning controls.
+</ParamField>
+
+<ParamField path="on_reasoning_event" type="OnReasoningEvent | None">
+  Callback for provider reasoning events. Agent also emits these as `reasoning` events.
+</ParamField>
+
+<ParamField path="transport" type="AgentTransport | None">
+  Transport used for remote agent calls.
+</ParamField>
+
+<ParamField path="event_bus" type="EventBus | None">
+  Optional event bus used by server/transport layers.
+</ParamField>
+
+## Class Attributes
+
+<ParamField path="enable_event_log" type="bool">
+  When `True`, emitted events are persisted for replay.
+</ParamField>
+
+<ParamField path="state" type="dict | BaseModel">
+  Optional subclass blueprint for initial or typed state.
+</ParamField>
+
+## Properties
+
+<ResponseField name="id" type="str">
+  Agent ID.
+</ResponseField>
+
+<ResponseField name="storage" type="Storage">
+  Storage backend.
+</ResponseField>
+
+<ResponseField name="state" type="StateT">
+  Current loaded state. Raises `RuntimeError` before `start()`.
+</ResponseField>
+
+<ResponseField name="messages" type="list[Message]">
+  Current message history.
+</ResponseField>
+
+## start
+
+```python
+async def start(self) -> None
+```
+
+Loads state, messages, event log, action registry, and starts the mailbox processor.
+
+Idempotent and concurrency-safe.
+
+## stop
+
+```python
+async def stop(self) -> None
+```
+
+Stops the mailbox processor and calls `on_stop()`.
+
+## Context Manager
+
+```python
+async with agent:
+    ...
+```
+
+Equivalent to `await agent.start()` followed by `await agent.stop()`.
+
+## chat
 
 ```python
 async def chat(
     self,
-    message: str | list[ContentPart],
+    message: Content,
     *,
     signal: AbortSignal | None = None,
 ) -> str
 ```
 
-Send a message and get a response. Automatically persists history.
+Appends a user message, runs the model/tool loop, persists messages, and returns final text.
 
-### emit
+Raises:
+
+<ResponseField name="ValueError" type="Exception">
+  Raised if `self.model` is not configured.
+</ResponseField>
+
+<ResponseField name="AbortError" type="Exception">
+  Raised if `signal` aborts.
+</ResponseField>
+
+## stream
+
+```python
+async def stream(
+    self,
+    message: Content,
+    *,
+    signal: AbortSignal | None = None,
+) -> AsyncIterator[str]
+```
+
+Streams text chunks while persisting final message history.
+
+Raises the same errors as `chat()`.
+
+## run
+
+```python
+async def run(
+    self,
+    message: Content,
+    *,
+    options: TurnOptions | None = None,
+) -> TurnResult
+```
+
+Runs an `AgentTurn` and returns its structured result.
+
+Use this when you need `steps`, `usage`, `finish_reason`, or `output_message`.
+
+## turn
+
+```python
+def turn(
+    self,
+    message: Content,
+    *,
+    options: TurnOptions | None = None,
+) -> AgentTurn
+```
+
+Creates a live turn. The turn starts lazily when `events()`, `text_stream()`, or `result()` is consumed.
+
+Raises:
+
+<ResponseField name="ValueError" type="Exception">
+  Raised if `self.model` is not configured.
+</ResponseField>
+
+## set_state
+
+```python
+async def set_state(self, state: StateT) -> None
+```
+
+Replaces current state, persists it, and emits a `state` event.
+
+## update_state
+
+```python
+async def update_state(self, **kwargs: Any) -> None
+```
+
+Merges keyword updates into state, persists the state, and emits a `state` event.
+
+For Pydantic state, uses `model_copy(update=kwargs)` when available.
+
+## clear
+
+```python
+async def clear(self) -> None
+```
+
+Clears message history and persists an empty message list.
+
+## emit
 
 ```python
 async def emit(self, event: str, data: dict[str, Any]) -> int
 ```
 
-Emit an event to connected clients. Returns the unique event ID.
-See the [Events Guide](/explanation/events) for a deep dive on persistence and replay.
+Emits an agent event.
 
-Agents automatically emit provider thinking output as `reasoning` events when `stream_text()` receives `ReasoningEvent` objects.
+Returns:
 
-### Parameters
+<ResponseField name="event_id" type="int">
+  Monotonic event ID for this agent instance.
+</ResponseField>
 
-<ParamField path="event" type="str" required>
-  The type of event (e.g., "status", "chunk").
-</ParamField>
+If `enable_event_log = True`, events are persisted to storage.
 
-<ParamField path="data" type="dict" required>
-  The event payload.
-</ParamField>
-
-### call
+## replay_events
 
 ```python
-async def call(
+async def replay_events(self, after_id: int = 0) -> AsyncIterator[Event]
+```
+
+Yields events with `id > after_id` from the in-memory/persisted event log.
+
+## clear_event_log
+
+```python
+async def clear_event_log(self) -> None
+```
+
+Clears event log and resets event counter.
+
+## handle_request
+
+```python
+async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]
+```
+
+Serverless request dispatcher.
+
+Supported actions:
+
+- `chat`
+- `action`
+- `invoke`
+- `state`
+
+## handle_request_stream
+
+```python
+async def handle_request_stream(
     self,
-    agent_id: str,
-    method: str,
-    *,
-    timeout: float = 30.0,
-    **kwargs: Any
-) -> Any
+    request: dict[str, Any],
+) -> AsyncIterator[str]
 ```
 
-Call another agent's method via the transport layer (requires `AgentServer`). This can be an `@action` or a legacy `on_call_*` handler.
+Serverless streaming request handler. Yields SSE-formatted strings for chat requests.
 
-### @action
+## call
 
 ```python
-@action
-async def my_action(self, param1: str) -> dict:
+def call(self, agent_id: str, *, agent_cls: type[T]) -> AgentCallProxy[T]
 ```
 
-Decorator to mark a method as a callable RPC action. See the [Agent RPC & Actions](/explanation/agent-rpc) guide for details.
+Returns a proxy for calling another agent through the configured transport.
+
+## handle_invoke
+
+```python
+async def handle_invoke(self, payload: dict[str, Any]) -> dict[str, Any]
+```
+
+Handles inbound calls from other agents or transports.
+
+Resolution order:
+
+1. registered `@action` method
+2. legacy `on_call_{method}` handler
+3. error response
+
+## serve
+
+```python
+def serve(self, host: str = "localhost", port: int = 8080) -> None
+```
+
+Starts an `AgentServer` for this agent class.
 
 ## Lifecycle Hooks
 
-Override these methods in a subclass:
+Override in subclasses:
 
-- `async def on_start(self)`
-- `async def on_stop(self)`
-- `async def on_connect(self, connection, ctx)`
-- `async def on_message(self, connection, message)`
-- `async def on_call_{method}(self, **kwargs)`
+```python
+async def on_start(self) -> None: ...
+async def on_stop(self) -> None: ...
+async def on_connect(self, connection, ctx) -> None: ...
+async def on_message(self, connection, message) -> None: ...
+async def on_close(self, connection, code: int, reason: str) -> None: ...
+```
+
+## @action
+
+```python
+from ai_query.agents import action
+
+
+@action
+async def method_name(self, **kwargs): ...
+```
+
+Marks an agent method as externally callable via action/RPC routes.
+
+## Examples
+
+### Basic agent
+
+```python
+agent = Agent("assistant", model=openai("gpt-4o"))
+
+async with agent:
+    text = await agent.chat("Hello")
+```
+
+### Persistent agent
+
+```python
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.sqlite3"),
+)
+```
+
+### Live turn
+
+```python
+turn = agent.turn("Fix the failing test")
+
+async for event in turn.events():
+    if event.type == "text.delta":
+        print(event.text, end="")
+```
+
+## See Also
+
+- [AgentTurn](/reference/agent-turn)
+- [Agent Server](/reference/agent-server)
+- [Stateful Agents](/core/stateful-agents)
+- [Live Turns](/core/live-turns)

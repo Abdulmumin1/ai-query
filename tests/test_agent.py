@@ -1,5 +1,6 @@
 """Tests for the Agent class."""
 
+import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,6 +18,7 @@ from ai_query.types import (
     ToolCall,
     ToolCallPart,
     ToolResultPart,
+    Usage,
     step_count_is,
     tool,
 )
@@ -447,6 +449,121 @@ class TestAgentChat:
         assert isinstance(agent_reloaded.messages[1].content[1], ToolCallPart)
         assert isinstance(agent_reloaded.messages[2].content[0], ToolResultPart)
         await agent_reloaded.stop()
+
+
+class TestAgentTurn:
+    """Tests for structured agent turns."""
+
+    @pytest.mark.asyncio
+    async def test_run_returns_structured_result(self):
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="Hello "),
+                    StreamChunk(text="World"),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="stop",
+                        usage=Usage(input_tokens=1, output_tokens=2, total_tokens=3),
+                    ),
+                ]
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent("test", storage=MemoryStorage(), model=model)
+        await agent.start()
+
+        result = await agent.run("Hello")
+
+        assert result.text == "Hello World"
+        assert result.finish_reason == "stop"
+        assert result.usage is not None
+        assert result.usage.total_tokens == 3
+        assert [message.role for message in agent.messages] == ["user", "assistant"]
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_emits_events(self):
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="Hi"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ]
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent("test", storage=MemoryStorage(), model=model)
+        await agent.start()
+
+        turn = agent.turn("Hello")
+        events = []
+        async for event in turn.events():
+            events.append(event.type)
+
+        assert events == [
+            "turn.started",
+            "step.started",
+            "text.delta",
+            "step.finished",
+            "turn.finished",
+        ]
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_send_injects_message_at_next_step(self):
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            await asyncio.sleep(0.01)
+            return value
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"value": "first"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="Done"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(5),
+        )
+        await agent.start()
+
+        turn = agent.turn("Start")
+        send_task = asyncio.create_task(self._send_after_tick(turn))
+        async for event in turn.events():
+            pass
+        await send_task
+
+        assert provider.stream_call_count == 2
+        assert any(
+            message.role == "user" and message.content == "Actually focus on migrations"
+            for message in provider.last_messages
+        )
+        await agent.stop()
+
+    async def _send_after_tick(self, turn):
+        await asyncio.sleep(0)
+        await turn.send("Actually focus on migrations")
 
 
 class TestAgentStream:

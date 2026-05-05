@@ -1,9 +1,9 @@
 ---
-title: "Results"
-description: "Result types returned by ai-query functions"
+title: "Result Types"
+description: "API reference for generation, streaming, step, and turn result objects"
 ---
 
-ai-query returns structured result objects containing the AI response, usage statistics, and tool execution details.
+This page documents result types returned by core generation and agent turn APIs.
 
 ## GenerateTextResult
 
@@ -13,50 +13,50 @@ Returned by `generate_text()`.
 @dataclass
 class GenerateTextResult:
     text: str
-    usage: Usage
-    tool_calls: list[ToolCall]
-    tool_results: list[ToolResult]
-    steps: list[StepResult]
+    steps: list[StepResult] = field(default_factory=list)
+    finish_reason: str | None = None
+    usage: Usage | None = None
+    response: dict[str, Any] = field(default_factory=dict)
+    provider_metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def tool_calls(self) -> list[ToolCall]: ...
+
+    @property
+    def tool_results(self) -> list[ToolResult]: ...
 ```
 
-### Fields
+<ResponseField name="text" type="str">
+  Accumulated generated text.
+</ResponseField>
 
-<ParamField path="text" type="str">
-  The final generated text response.
-</ParamField>
+<ResponseField name="steps" type="list[StepResult]">
+  Step history for the model/tool loop.
+</ResponseField>
 
-<ParamField path="usage" type="Usage">
-  Total token usage across all steps.
-</ParamField>
+<ResponseField name="finish_reason" type="str | None">
+  Finish reason for the final provider response.
+</ResponseField>
 
-<ParamField path="tool_calls" type="list[ToolCall]">
-  All tool calls made during execution.
-</ParamField>
+<ResponseField name="usage" type="Usage | None">
+  Total usage across all steps.
+</ResponseField>
 
-<ParamField path="tool_results" type="list[ToolResult]">
-  Results from all tool executions.
-</ParamField>
+<ResponseField name="response" type="dict[str, Any]">
+  Raw response metadata from the provider implementation.
+</ResponseField>
 
-<ParamField path="steps" type="list[StepResult]">
-  Detailed results from each execution step.
-</ParamField>
+<ResponseField name="provider_metadata" type="dict[str, Any]">
+  Additional provider metadata.
+</ResponseField>
 
-### Example
+<ResponseField name="tool_calls" type="list[ToolCall]">
+  Flattened tool calls from all steps.
+</ResponseField>
 
-```python
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="What's the weather?",
-    tools={"get_weather": get_weather}
-)
-
-print(result.text)              # Final response
-print(result.usage.total_tokens) # Token count
-print(len(result.tool_calls))    # Number of tool calls
-print(len(result.steps))         # Number of steps
-```
-
----
+<ResponseField name="tool_results" type="list[ToolResult]">
+  Flattened tool results from all steps.
+</ResponseField>
 
 ## TextStreamResult
 
@@ -64,248 +64,225 @@ Returned by `stream_text()`.
 
 ```python
 class TextStreamResult:
-    text_stream: AsyncIterator[str]
-    text: Awaitable[str]
-    usage: Awaitable[Usage]
-    tool_calls: Awaitable[list[ToolCall]]
+    @property
+    def text_stream(self) -> AsyncIterator[str]: ...
+
+    @property
+    async def text(self) -> str: ...
+
+    @property
+    async def usage(self) -> Usage | None: ...
+
+    @property
+    async def finish_reason(self) -> str | None: ...
+
+    @property
+    async def steps(self) -> list[StepResult]: ...
+
+    def __aiter__(self) -> AsyncIterator[str]: ...
 ```
 
-### Fields
+<ResponseField name="text_stream" type="AsyncIterator[str]">
+  Async iterator yielding streamed text chunks.
+</ResponseField>
 
-<ParamField path="text_stream" type="AsyncIterator[str]">
-  Async iterator that yields text chunks as they arrive.
-</ParamField>
+<ResponseField name="text" type="Awaitable[str]">
+  Complete accumulated text after stream consumption.
+</ResponseField>
 
-<ParamField path="text" type="Awaitable[str]">
-  The complete text (await after streaming).
-</ParamField>
+<ResponseField name="usage" type="Awaitable[Usage | None]">
+  Usage after stream completion.
+</ResponseField>
 
-<ParamField path="usage" type="Awaitable[Usage]">
-  Token usage (await after streaming).
-</ParamField>
+<ResponseField name="finish_reason" type="Awaitable[str | None]">
+  Finish reason after stream completion.
+</ResponseField>
 
-<ParamField path="tool_calls" type="Awaitable[list[ToolCall]]">
-  Tool calls made (await after streaming).
-</ParamField>
+<ResponseField name="steps" type="Awaitable[list[StepResult]]">
+  Step history after stream completion.
+</ResponseField>
 
-### Example
+## TurnResult
+
+Returned by `Agent.run()`, `AgentTurn.result()`, and `AgentTurn.wait()`.
 
 ```python
-result = stream_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Write a poem."
-)
-
-# Stream chunks
-async for chunk in result.text_stream:
-    print(chunk, end="")
-
-# Get final values (must await)
-full_text = await result.text
-usage = await result.usage
+@dataclass
+class TurnResult:
+    turn_id: str
+    agent_id: str
+    text: str
+    finish_reason: str | None
+    usage: Usage | None
+    steps: list[StepResult]
+    started_at: float
+    ended_at: float
+    output_message: Message
 ```
 
----
+<ResponseField name="turn_id" type="str">
+  ID of the turn.
+</ResponseField>
 
-## ReasoningEvent
+<ResponseField name="agent_id" type="str">
+  ID of the agent that ran the turn.
+</ResponseField>
 
-Reasoning output emitted separately from assistant text during streaming.
+<ResponseField name="text" type="str">
+  Final accumulated assistant text.
+</ResponseField>
 
-```python
-class ReasoningEvent:
-    kind: Literal["summary", "delta", "signature", "state"]
-    provider: str
-    text: str | None
-    data: dict[str, Any]
-```
+<ResponseField name="finish_reason" type="str | None">
+  Final stream finish reason.
+</ResponseField>
 
-Use `stream_text(..., on_reasoning_event=...)` to receive these events. Provider continuity metadata such as signatures or opaque state is exposed through `data` and should not be rendered as assistant text by default.
+<ResponseField name="usage" type="Usage | None">
+  Usage after turn completion.
+</ResponseField>
 
-For the higher-level explanation of reasoning controls vs visible thinking output, see [`Thinking`](/explanation/thinking).
+<ResponseField name="steps" type="list[StepResult]">
+  Step history for this turn.
+</ResponseField>
 
----
+<ResponseField name="started_at" type="float">
+  Unix timestamp when the turn started.
+</ResponseField>
+
+<ResponseField name="ended_at" type="float">
+  Unix timestamp when the turn ended.
+</ResponseField>
+
+<ResponseField name="output_message" type="Message">
+  Final assistant message appended to agent history.
+</ResponseField>
 
 ## StepResult
 
-Result from a single execution step in a multi-step tool loop.
+One model/tool-loop step.
 
 ```python
 @dataclass
 class StepResult:
     text: str
-    usage: Usage
     tool_calls: list[ToolCall]
     tool_results: list[ToolResult]
+    finish_reason: str | None = None
 ```
 
-### Fields
+<ResponseField name="text" type="str">
+  Text produced in the step.
+</ResponseField>
 
-<ParamField path="text" type="str">
-  Text generated in this step (may be empty if tools were called).
-</ParamField>
+<ResponseField name="tool_calls" type="list[ToolCall]">
+  Tool calls requested by the model in the step.
+</ResponseField>
 
-<ParamField path="usage" type="Usage">
-  Token usage for this step only.
-</ParamField>
+<ResponseField name="tool_results" type="list[ToolResult]">
+  Results from executing tool calls in the step.
+</ResponseField>
 
-<ParamField path="tool_calls" type="list[ToolCall]">
-  Tool calls made in this step.
-</ParamField>
+<ResponseField name="finish_reason" type="str | None">
+  Provider finish reason for this step.
+</ResponseField>
 
-<ParamField path="tool_results" type="list[ToolResult]">
-  Results from tools called in this step.
-</ParamField>
+## StreamChunk
 
-### Example
+Provider stream chunk consumed by `stream_text()`.
 
 ```python
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Research and summarize.",
-    tools=tools
-)
-
-for i, step in enumerate(result.steps):
-    print(f"Step {i + 1}:")
-    print(f"  Tokens: {step.usage.total_tokens}")
-    print(f"  Tool calls: {len(step.tool_calls)}")
-    if step.text:
-        print(f"  Response: {step.text[:50]}...")
+@dataclass
+class StreamChunk:
+    text: str = ""
+    is_final: bool = False
+    usage: Usage | None = None
+    finish_reason: str | None = None
+    tool_calls: list[ToolCall] | None = None
+    reasoning_events: list[ReasoningEvent] | None = None
 ```
 
----
+## ReasoningEvent
+
+Provider reasoning/thinking event.
+
+```python
+@dataclass
+class ReasoningEvent:
+    kind: Literal["summary", "delta", "signature", "state"]
+    provider: str
+    text: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+```
+
+## StepControl
+
+Returned from `on_step_start` to control the next step.
+
+```python
+@dataclass
+class StepControl:
+    inject_messages: list[Message] = field(default_factory=list)
+    stop: bool = False
+```
+
+<ResponseField name="inject_messages" type="list[Message]">
+  Messages appended to the current model context before the provider call.
+</ResponseField>
+
+<ResponseField name="stop" type="bool">
+  If true, stops at the step boundary.
+</ResponseField>
+
+## StepStartEvent
+
+Passed to `on_step_start`.
+
+```python
+@dataclass
+class StepStartEvent:
+    step_number: int
+    messages: list[Message]
+    tools: ToolSet | None
+```
+
+## StepFinishEvent
+
+Passed to `on_step_finish`.
+
+```python
+@dataclass
+class StepFinishEvent:
+    step_number: int
+    step: StepResult
+    text: str
+    usage: Usage
+    steps: list[StepResult]
+```
 
 ## ToolCall
-
-Represents a tool invocation requested by the AI.
 
 ```python
 @dataclass
 class ToolCall:
     id: str
     name: str
-    arguments: dict
+    arguments: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
----
-
 ## ToolResult
-
-Result from executing a tool.
 
 ```python
 @dataclass
 class ToolResult:
     tool_call_id: str
-    result: str
+    tool_name: str
+    result: Any
+    is_error: bool = False
 ```
 
----
+## See Also
 
-## StepStartEvent / StepFinishEvent
-
-Events passed to step callbacks.
-
-```python
-@dataclass
-class StepStartEvent:
-    step_number: int
-
-@dataclass
-class StepFinishEvent:
-    step_number: int
-    step_result: StepResult
-```
-
-### Example
-
-```python
-def on_finish(event: StepFinishEvent):
-    print(f"Step {event.step_number} used {event.step_result.usage.total_tokens} tokens")
-
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Do something complex.",
-    tools=tools,
-    on_step_finish=on_finish
-)
-```
-
----
-
-## Stop Conditions
-
-Stop conditions control when the tool execution loop terminates.
-
-### StopCondition Type
-
-```python
-StopCondition = Callable[[StepResult], bool]
-```
-
-A function that receives the current step result and returns `True` to stop the loop.
-
-### step_count_is
-
-Stop after a specific number of steps.
-
-```python
-from ai_query import step_count_is
-
-# Stop after 5 steps
-stop_when=step_count_is(5)
-```
-
-#### Signature
-
-```python
-def step_count_is(n: int) -> StopCondition
-```
-
-<ParamField path="n" type="int" required>
-  The maximum number of steps to execute.
-</ParamField>
-
-### has_tool_call
-
-Stop when a specific tool is called.
-
-```python
-from ai_query import has_tool_call
-
-# Stop when the "finish" tool is called
-stop_when=has_tool_call("finish")
-```
-
-#### Signature
-
-```python
-def has_tool_call(tool_name: str) -> StopCondition
-```
-
-<ParamField path="tool_name" type="str" required>
-  The name of the tool that triggers the stop.
-</ParamField>
-
-### Example
-
-```python
-from ai_query import generate_text
-from ai_query.providers import google, step_count_is, has_tool_call
-
-# Stop after 5 steps
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Research this topic.",
-    tools=tools,
-    stop_when=step_count_is(5)
-)
-
-# Or stop when a specific tool is called
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Complete the task.",
-    tools={"work": work, "finish": finish},
-    stop_when=has_tool_call("finish")
-)
-```
+- [generate_text](/reference/generate-text)
+- [stream_text](/reference/stream-text)
+- [AgentTurn](/reference/agent-turn)
+- [Usage](/reference/types/usage)

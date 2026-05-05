@@ -262,7 +262,9 @@ class ServerHandlers:
             raise web.HTTPBadRequest(text="Invalid JSON")
 
         message = body.get("message", "")
-        if not message:
+        has_payload = bool(body.get("payload"))
+        has_attachments = bool(body.get("attachments"))
+        if not message and not has_payload and not has_attachments:
             raise web.HTTPBadRequest(text="Missing 'message'")
 
         # Streaming check
@@ -275,7 +277,12 @@ class ServerHandlers:
             add_cors_headers(self.server, response, request)
             await response.prepare(request)
 
-            stream_req = {"action": "chat", "message": message, "payload": body.get("payload", {})}
+            stream_req = {
+                **body,
+                "action": "chat",
+                "message": message,
+                "payload": body.get("payload", {}),
+            }
             try:
                 async for chunk in agent.handle_request_stream(stream_req):
                     await response.write(chunk.encode())
@@ -283,7 +290,12 @@ class ServerHandlers:
                 await response.write(f"event: error\ndata: {str(e)}\n\n".encode())
             return response
 
-        result = await agent.handle_request({"action": "chat", "message": message})
+        result = await agent.handle_request({
+            **body,
+            "action": "chat",
+            "message": message,
+            "payload": body.get("payload", {}),
+        })
         return web.json_response(result)
 
     async def handle_invoke(self, request: web.Request) -> web.Response:

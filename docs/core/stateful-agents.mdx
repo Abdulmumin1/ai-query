@@ -1,0 +1,213 @@
+---
+title: "Stateful Agents"
+description: "Add identity, memory, storage, tools, and events to model calls"
+---
+
+An `Agent` is a stateful wrapper around model calls.
+
+Use an agent when your app needs identity, message history, tools, persistent state, or server routes.
+
+## What An Agent Owns
+
+An agent owns:
+
+- an ID
+- a model
+- a system prompt
+- tools
+- message history
+- state
+- storage
+- emitted events
+
+Core generation functions are stateless. Agents are stateful.
+
+## Minimal Agent
+
+```python
+from ai_query.agents import Agent
+from ai_query.providers import openai
+
+
+agent = Agent("assistant", model=openai("gpt-4o"))
+
+async with agent:
+    text = await agent.chat("Hello")
+    print(text)
+```
+
+The `async with` block starts the agent, loads state, and stops background processing when done.
+
+## Conversation Memory
+
+The agent stores messages between calls.
+
+```python
+async with agent:
+    await agent.chat("My name is Alice.")
+    text = await agent.chat("What is my name?")
+```
+
+The second call includes the first user message and assistant response.
+
+## Persistence
+
+Use `SQLiteStorage` for local durable history.
+
+```python
+from ai_query.agents import Agent, SQLiteStorage
+
+
+agent = Agent(
+    "assistant",
+    model=model,
+    storage=SQLiteStorage("agents.sqlite3"),
+)
+```
+
+Storage persists:
+
+- `agent.state`
+- `agent.messages`
+- event logs when `enable_event_log = True`
+
+## Agent State
+
+State is app-owned data attached to the agent.
+
+```python
+agent = Agent(
+    "assistant",
+    model=model,
+    initial_state={"name": None, "plan": []},
+)
+
+async with agent:
+    await agent.update_state(name="Ada")
+    print(agent.state["name"])
+```
+
+Use state for durable facts your application controls. Use messages for conversation history.
+
+## Typed State
+
+You can define state shape on a subclass.
+
+```python
+from pydantic import BaseModel
+
+
+class UserState(BaseModel):
+    name: str = "Anonymous"
+    topic_count: int = 0
+
+
+class UserAgent(Agent[UserState]):
+    state = UserState
+```
+
+## Tools On Agents
+
+Tools work the same way as core generation, but agent history persists tool calls and tool results.
+
+```python
+from ai_query import Field, tool
+
+
+@tool(description="Search docs")
+async def search_docs(query: str = Field(description="Search query")) -> str:
+    return "results"
+
+
+agent = Agent(
+    "researcher",
+    model=model,
+    tools={"search_docs": search_docs},
+)
+```
+
+## Three Ways To Run An Agent
+
+### chat
+
+Use `chat()` when you need final text.
+
+```python
+text = await agent.chat("Summarize the issue")
+```
+
+### run
+
+Use `run()` when you need a structured result.
+
+```python
+result = await agent.run("Investigate the issue")
+print(result.text)
+print(result.steps)
+print(result.usage)
+```
+
+### turn
+
+Use `turn()` when you need events, cancellation, or steering.
+
+```python
+turn = agent.turn("Fix the bug")
+
+async for event in turn.events():
+    if event.type == "text.delta":
+        print(event.text, end="")
+
+await turn.send("Actually, inspect migrations first.")
+```
+
+## Events
+
+Agents can emit application events.
+
+```python
+await agent.emit("status", {"text": "Searching..."})
+```
+
+Enable durable replay:
+
+```python
+class ResearchAgent(Agent):
+    enable_event_log = True
+```
+
+Clients can reconnect and replay missed events by event ID.
+
+## Serving Agents
+
+Use `AgentServer` to expose agents over HTTP, SSE, WebSocket, and RPC.
+
+```python
+from ai_query.agents import AgentServer
+
+
+AgentServer(UserAgent).serve(port=8080)
+```
+
+Read [Agent Server](/core/agent-server) when you are ready to serve many agent instances.
+
+## When To Use Agents
+
+Use agents for:
+
+- user sessions
+- persistent chatbots
+- coding agents
+- research agents
+- tool-using assistants
+- apps that need event streams or replay
+- multi-agent systems
+
+Do not use agents for simple one-off calls. Use `generate_text()` or `stream_text()` instead.
+
+## Related
+
+- [Concepts](/core/overview)
+- [Conversations](/core/conversations)
+- [Live Turns](/core/live-turns)
+- [Agent Reference](/reference/agent)

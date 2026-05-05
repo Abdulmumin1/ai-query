@@ -1,0 +1,341 @@
+---
+title: "AgentTurn"
+description: "API reference for live agent turn execution"
+---
+
+`AgentTurn` represents one live execution of an `Agent`.
+
+Create one with `agent.turn(...)`. Do not instantiate `AgentTurn` directly unless you are extending the framework.
+
+## Import
+
+```python
+from ai_query.agents import AgentTurn, TurnOptions, TurnResult
+```
+
+## Constructor
+
+```python
+AgentTurn(
+    agent: Agent[Any],
+    message: Content,
+    *,
+    options: TurnOptions | None = None,
+) -> None
+```
+
+Normally called internally by:
+
+```python
+turn = agent.turn("Fix the failing test")
+```
+
+## Properties
+
+<ResponseField name="id" type="str">
+  Unique turn ID.
+</ResponseField>
+
+<ResponseField name="agent_id" type="str">
+  ID of the owning agent.
+</ResponseField>
+
+<ResponseField name="agent" type="Agent[Any]">
+  Owning agent instance.
+</ResponseField>
+
+<ResponseField name="message" type="Message">
+  Initial user message for the turn.
+</ResponseField>
+
+<ResponseField name="options" type="TurnOptions">
+  Per-turn options.
+</ResponseField>
+
+<ResponseField name="started" type="bool">
+  `True` after the turn has started.
+</ResponseField>
+
+<ResponseField name="done" type="bool">
+  `True` after the turn finishes, fails, or is aborted.
+</ResponseField>
+
+## events
+
+```python
+async def events(self) -> AsyncIterator[TurnEvent]
+```
+
+Starts the turn if needed and yields typed lifecycle events.
+
+```python
+async for event in turn.events():
+    ...
+```
+
+Returns:
+
+<ResponseField name="AsyncIterator[TurnEvent]" type="AsyncIterator[TurnEvent]">
+  Stream of turn events. The iterator ends after `turn.finished` or `turn.failed`.
+</ResponseField>
+
+## text_stream
+
+```python
+async def text_stream(self) -> AsyncIterator[str]
+```
+
+Convenience stream over `events()` that yields only `text.delta` text.
+
+```python
+async for chunk in turn.text_stream():
+    print(chunk, end="")
+```
+
+## result
+
+```python
+async def result(self) -> TurnResult
+```
+
+Starts the turn if needed and waits for the structured result.
+
+Returns:
+
+<ResponseField name="TurnResult" type="TurnResult">
+  Final structured result.
+</ResponseField>
+
+Raises:
+
+<ResponseField name="AbortError" type="Exception">
+  Raised if the turn is aborted.
+</ResponseField>
+
+<ResponseField name="Exception" type="Exception">
+  Propagates provider, tool, or runtime failures.
+</ResponseField>
+
+## wait
+
+```python
+async def wait(self) -> TurnResult
+```
+
+Alias for `result()`.
+
+## send
+
+```python
+async def send(
+    self,
+    message: Content,
+    *,
+    role: Literal["user", "system"] = "user",
+) -> None
+```
+
+Queues a steering message for the next safe step boundary.
+
+Parameters:
+
+<ParamField path="message" type="Content" required>
+  Message content to inject into the active turn.
+</ParamField>
+
+<ParamField path="role" type="Literal['user', 'system']">
+  Role for the injected message. Defaults to `"user"`.
+</ParamField>
+
+Notes:
+
+- `send()` does not mutate a provider request already in flight.
+- queued messages are injected before the next model call.
+- queued messages are scoped to this turn.
+
+## steer
+
+```python
+async def steer(
+    self,
+    message: Content,
+    *,
+    role: Literal["user", "system"] = "user",
+) -> None
+```
+
+Alias for `send()`.
+
+## abort
+
+```python
+def abort(self, reason: str | None = None) -> None
+```
+
+Aborts the turn.
+
+Parameters:
+
+<ParamField path="reason" type="str | None">
+  Optional abort reason.
+</ParamField>
+
+## TurnOptions
+
+```python
+@dataclass
+class TurnOptions:
+    tools: ToolSet | None = None
+    stop_when: StopCondition | list[StopCondition] | None = None
+    reasoning: ReasoningConfig | None = None
+    provider_options: ProviderOptions | None = None
+    signal: AbortSignal | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+Fields:
+
+<ParamField path="tools" type="ToolSet | None">
+  Per-turn tools. Defaults to the agent's tools.
+</ParamField>
+
+<ParamField path="stop_when" type="StopCondition | list[StopCondition] | None">
+  Per-turn stop conditions. Defaults to the agent's `stop_when`.
+</ParamField>
+
+<ParamField path="reasoning" type="ReasoningConfig | None">
+  Per-turn reasoning controls. Defaults to the agent's `reasoning`.
+</ParamField>
+
+<ParamField path="provider_options" type="ProviderOptions | None">
+  Per-turn provider options. Defaults to the agent's `provider_options`.
+</ParamField>
+
+<ParamField path="signal" type="AbortSignal | None">
+  External abort signal that also aborts the turn.
+</ParamField>
+
+<ParamField path="metadata" type="dict[str, Any]">
+  Application metadata. Not sent to the provider by default.
+</ParamField>
+
+## TurnResult
+
+```python
+@dataclass
+class TurnResult:
+    turn_id: str
+    agent_id: str
+    text: str
+    finish_reason: str | None
+    usage: Usage | None
+    steps: list[StepResult]
+    started_at: float
+    ended_at: float
+    output_message: Message
+```
+
+## TurnEvent
+
+```python
+TurnEvent = (
+    TurnStarted
+    | TextDelta
+    | ReasoningDelta
+    | StepStarted
+    | StepFinished
+    | TurnFinished
+    | TurnFailed
+)
+```
+
+### TurnStarted
+
+```python
+@dataclass
+class TurnStarted:
+    type: Literal["turn.started"]
+    turn_id: str
+    agent_id: str
+    message: Message
+    created_at: float
+```
+
+### TextDelta
+
+```python
+@dataclass
+class TextDelta:
+    type: Literal["text.delta"]
+    text: str
+```
+
+### ReasoningDelta
+
+```python
+@dataclass
+class ReasoningDelta:
+    type: Literal["reasoning.delta"]
+    event: ReasoningEvent
+```
+
+### StepStarted
+
+```python
+@dataclass
+class StepStarted:
+    type: Literal["step.started"]
+    step_number: int
+```
+
+### StepFinished
+
+```python
+@dataclass
+class StepFinished:
+    type: Literal["step.finished"]
+    step_number: int
+    step: StepResult
+    usage: Usage | None
+```
+
+### TurnFinished
+
+```python
+@dataclass
+class TurnFinished:
+    type: Literal["turn.finished"]
+    result: TurnResult
+```
+
+### TurnFailed
+
+```python
+@dataclass
+class TurnFailed:
+    type: Literal["turn.failed"]
+    error: str
+```
+
+## Example
+
+```python
+turn = agent.turn("Fix the failing test")
+
+async for event in turn.events():
+    match event.type:
+        case "text.delta":
+            print(event.text, end="", flush=True)
+        case "step.started":
+            print(f"step {event.step_number}")
+        case "turn.failed":
+            print(event.error)
+
+result = await turn.result()
+```
+
+## See Also
+
+- [Agent](/reference/agent)
+- [Live Turns](/core/live-turns)
+- [Results](/reference/types/results)

@@ -1,0 +1,133 @@
+---
+title: "Navigating ai-query"
+description: "Which API to use first, and when to move deeper"
+---
+
+This page is the map for the framework.
+
+`ai-query` is intentionally layered. You should not learn everything at once.
+
+## Start Here
+
+If you are new, follow this order:
+
+1. [Quickstart](/tutorials/quickstart)
+2. [Concepts](/core/overview)
+3. [Generating Text](/core/generate-text)
+4. [Streaming](/core/streaming)
+5. [Tools](/core/tools)
+6. [Stateful Agents](/core/stateful-agents)
+7. [Live Turns](/core/live-turns)
+
+## The Decision Tree
+
+### I just want to call a model
+
+Use `generate_text()`.
+
+```python
+result = await generate_text(model=model, prompt="Hello")
+```
+
+Read: [Generating Text](/core/generate-text)
+
+### I want streamed model output
+
+Use `stream_text()`.
+
+```python
+result = stream_text(model=model, prompt="Hello")
+async for chunk in result.text_stream:
+    print(chunk, end="")
+```
+
+Read: [Streaming](/core/streaming)
+
+### I want the model to call Python functions
+
+Use tools.
+
+```python
+result = await generate_text(
+    model=model,
+    prompt="What's the weather?",
+    tools={"get_weather": get_weather},
+)
+```
+
+Read: [Tools](/core/tools)
+
+### I want memory or sessions
+
+Use `Agent`.
+
+```python
+agent = Agent("assistant", model=model, storage=SQLiteStorage("agents.sqlite3"))
+text = await agent.chat("Remember this")
+```
+
+Read: [Stateful Agents](/core/stateful-agents)
+
+### I want metadata about an agent response
+
+Use `Agent.run()`.
+
+```python
+result = await agent.run("Investigate this")
+print(result.steps)
+```
+
+Read: [Agent Reference](/reference/agent)
+
+### I am building a CLI or web UI
+
+Use `Agent.turn()`.
+
+```python
+turn = agent.turn("Do the task")
+async for event in turn.events():
+    ...
+```
+
+Read: [Live Turns](/core/live-turns)
+
+### I want to serve many users
+
+Use `AgentServer`.
+
+```python
+AgentServer(UserAgent).serve(port=8080)
+```
+
+Read: [Agent Server](/core/agent-server)
+
+## Import Map
+
+Common imports:
+
+```python
+from ai_query import generate_text, stream_text, tool, Field
+from ai_query.agents import Agent, AgentServer, SQLiteStorage
+from ai_query.providers import openai, anthropic, google
+```
+
+Core types and advanced control:
+
+```python
+from ai_query import StepControl, step_count_is, has_tool_call
+from ai_query.agents import AgentTurn, TurnOptions, TurnResult
+from ai_query.types import AbortSignal, Message
+```
+
+## Product Boundaries
+
+These are the boundaries to keep in your head:
+
+- Providers create models.
+- Core functions run model calls.
+- Tools give models capabilities.
+- Agents add identity, state, storage, and message history.
+- Turns expose one live agent execution.
+- Servers expose agents over HTTP, SSE, WebSocket, and RPC.
+
+If a page does not fit one of those categories, it probably belongs in the Cookbook or API Reference.

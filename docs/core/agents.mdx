@@ -1,0 +1,163 @@
+---
+title: "Tool Loops"
+description: "How ai-query runs multi-step model and tool workflows"
+---
+
+This page is about the core model/tool loop used by `generate_text()` and `stream_text()`.
+
+It is not about the `Agent` class. For persistent stateful agents, read [Stateful Agents](/core/stateful-agents).
+
+## What Is A Tool Loop?
+
+When you pass tools to a model call, the model can ask to call a tool. ai-query executes the tool, sends the result back to the model, and continues until the model produces a final answer or a stop condition fires.
+
+The loop is:
+
+1. send messages and tool definitions to the model
+2. receive text and/or tool calls
+3. execute requested tools
+4. append tool results
+5. call the model again
+6. stop when there are no tool calls or a stop condition is met
+
+## Minimal Example
+
+```python
+from ai_query import Field, generate_text, step_count_is, tool
+
+
+@tool(description="Search documentation")
+async def search_docs(query: str = Field(description="Search query")) -> str:
+    return "Search results..."
+
+
+result = await generate_text(
+    model=model,
+    prompt="Find the install command and summarize it.",
+    tools={"search_docs": search_docs},
+    stop_when=step_count_is(5),
+)
+```
+
+## Stop Conditions
+
+Stop conditions prevent runaway loops.
+
+### Stop after N steps
+
+```python
+from ai_query import step_count_is
+
+stop_when=step_count_is(5)
+```
+
+### Stop when a tool is called
+
+```python
+from ai_query import has_tool_call
+
+stop_when=has_tool_call("finish")
+```
+
+### Combine conditions
+
+```python
+stop_when=[has_tool_call("finish"), step_count_is(10)]
+```
+
+The loop stops when any condition returns `True`.
+
+## Step Results
+
+The result contains every step.
+
+```python
+for step in result.steps:
+    print(step.text)
+    print(step.tool_calls)
+    print(step.tool_results)
+    print(step.finish_reason)
+```
+
+Use step history for debugging, logs, tests, and observability.
+
+## Step Callbacks
+
+Callbacks let you observe or steer the loop at step boundaries.
+
+### Observe start
+
+```python
+def on_step_start(event):
+    print(f"starting step {event.step_number}")
+```
+
+### Observe finish
+
+```python
+def on_step_finish(event):
+    print(f"finished step {event.step_number}")
+    print(event.step.tool_calls)
+```
+
+### Inject at a boundary
+
+```python
+from ai_query import StepControl
+from ai_query.types import Message
+
+
+async def on_step_start(event):
+    if event.step_number == 2:
+        return StepControl(
+            inject_messages=[
+                Message(role="user", content="Be concise in the final answer.")
+            ]
+        )
+    return None
+```
+
+This is a low-level primitive. If you are building an interactive runtime, prefer [Live Turns](/core/live-turns).
+
+## Streaming Tool Loops
+
+Tool loops work with streaming too.
+
+```python
+from ai_query import stream_text
+
+
+result = stream_text(
+    model=model,
+    prompt="Research and summarize this topic.",
+    tools={"search": search},
+    stop_when=step_count_is(3),
+)
+
+async for chunk in result.text_stream:
+    print(chunk, end="", flush=True)
+```
+
+## When To Use This Layer
+
+Use core tool loops when:
+
+- you do not need persistent agent state
+- you are writing a script or background job
+- you want direct control over callbacks and stop conditions
+- you are building a custom abstraction above core generation
+
+Use `Agent` instead when:
+
+- you need message history
+- you need durable state
+- you need server routes
+- you need live turn events or steering
+
+## Related
+
+- [Tools](/core/tools)
+- [Generating Text](/core/generate-text)
+- [Streaming](/core/streaming)
+- [Stateful Agents](/core/stateful-agents)
+- [Live Turns](/core/live-turns)

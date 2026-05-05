@@ -1,95 +1,110 @@
 ---
 title: "ai-query"
-description: "Build stateful AI agents in Python"
+description: "Python primitives for model calls, tools, and stateful agents"
 ---
 
-**ai-query** is a Python SDK for building stateful AI agents that persist across requests, emit real-time events, and scale from prototype to production.
+`ai-query` is a Python SDK for building AI features at three levels:
 
-## Why ai-query?
+- direct model calls
+- stateful agents
+- live controllable runtimes
 
-- **Stateful by Design** — Agents remember conversations, maintain state, and resume after restarts
-- **Real-time Events** — Emit events during work with automatic replay on reconnection
-- **Durable Identity** — Persist every event and agent state for robust connection recovery
-- **Built-in Server** — WebSocket, SSE, and REST endpoints with one line: `agent.serve()`
-- **Multi-Provider** — Same interface for OpenAI, Anthropic, Google, and more
-- **Production Ready** — Storage, multi-user routing, serverless support
+It is not one giant abstraction. It is a ladder.
 
-## Quick Example
-
-A stateful agent with persistent memory and real-time streaming:
+## The Ladder
 
 ```python
-from ai_query.agents import Agent, SQLiteStorage, tool, Field
+await generate_text(...)        # call a model
+stream_text(...)                # stream a model response
+await agent.chat(...)           # persistent conversation
+await agent.run(...)            # structured result with steps and usage
+agent.turn(...)                 # live events, abort, and steering
+```
+
+Start at the top. Move down only when your app needs the extra control.
+
+## First Example
+
+```python
+import asyncio
+
+from ai_query.agents import Agent, SQLiteStorage
 from ai_query.providers import openai
 
-class ResearchAgent(Agent):
-    enable_event_log = True  # Enable event replay on reconnect
 
-    def __init__(self):
-        @tool(description="Search the web")
-        async def search(query: str = Field(description="Search query")) -> str:
-            await self.emit("status", {"text": f"Searching: {query}"})
-            return f"Results for: {query}"
+async def main():
+    agent = Agent(
+        "assistant",
+        model=openai("gpt-4o"),
+        storage=SQLiteStorage("agents.sqlite3"),
+    )
 
-        super().__init__(
-            "researcher",
-            model=openai("gpt-4o"),
-            storage=SQLiteStorage("agent.db"),
-            tools={"search": search}
-        )
+    async with agent:
+        print(await agent.chat("Hi, I'm Ada."))
+        print(await agent.chat("What's my name?"))
 
-# Start server with WebSocket, SSE, and REST endpoints
-ResearchAgent().serve(port=8080)
+
+asyncio.run(main())
 ```
 
-```bash
-# Chat via REST
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Research quantum computing"}'
-
-# Stream events via SSE
-curl http://localhost:8080/events
-```
-
-## Start Here
-
-If you're new to `ai-query`, follow this path from first install to a deployed stateful agent.
+## Learn In Order
 
 <CardGroup cols={2}>
-  <Card title="1. Quickstart" icon="rocket" href="/tutorials/quickstart">
-    Install ai-query and make your first request.
+  <Card title="Quickstart" icon="rocket" href="/tutorials/quickstart">
+    Build from one model call to a stateful agent in a few minutes.
   </Card>
-  <Card title="2. Generate Text" icon="message" href="/explanation/generate-text">
-    Learn the core text generation API before you reach for agents.
+  <Card title="Concepts" icon="map" href="/core/overview">
+    Understand the three layers: core generation, agents, and live turns.
   </Card>
-  <Card title="3. Tools and Agents" icon="wrench" href="/explanation/agents">
-    Understand tools, agent structure, and how requests become workflows.
+  <Card title="Navigating ai-query" icon="signs-post" href="/core/navigating-ai-query">
+    Choose the right primitive for your app.
   </Card>
-  <Card title="4. Stateful Agents" icon="database" href="/explanation/stateful-agents">
-    Add memory, conversations, event logs, and persistence.
-  </Card>
-  <Card title="5. Agent Server" icon="server" href="/explanation/agent-server">
-    Expose your agent over HTTP, SSE, and multi-agent routing.
-  </Card>
-  <Card title="6. Deployment" icon="cloud-arrow-up" href="/how-to/deployment">
-    Ship to FastAPI, Vercel, AWS Lambda, or Cloudflare.
+  <Card title="Generating Text" icon="message" href="/core/generate-text">
+    Learn the raw model call before adding state or servers.
   </Card>
 </CardGroup>
 
-## Browse By Need
+## Core Building Blocks
 
 <CardGroup cols={2}>
-  <Card title="Providers" icon="plug" href="/explanation/providers">
-    Pick a model provider and see how each one is configured.
+  <Card title="Streaming" icon="bolt" href="/core/streaming">
+    Stream model output directly or through an agent.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/core/tools">
+    Expose typed Python functions to models.
+  </Card>
+  <Card title="Tool Loops" icon="rotate" href="/core/agents">
+    Understand multi-step tool execution and stop conditions.
+  </Card>
+  <Card title="Providers" icon="plug" href="/core/providers">
+    Configure OpenAI, Anthropic, Google, OpenRouter, and more.
+  </Card>
+</CardGroup>
+
+## Stateful Agents
+
+<CardGroup cols={2}>
+  <Card title="Stateful Agents" icon="database" href="/core/stateful-agents">
+    Add identity, storage, message history, and state.
+  </Card>
+  <Card title="Conversations" icon="messages" href="/core/conversations">
+    Work with message history and multi-turn context.
+  </Card>
+  <Card title="Live Turns" icon="route" href="/core/live-turns">
+    Build CLIs, UIs, SSE streams, and steerable runtimes.
+  </Card>
+  <Card title="Agent Server" icon="server" href="/core/agent-server">
+    Route many users to persistent agents.
+  </Card>
+</CardGroup>
+
+## Reference And Recipes
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="brackets" href="/reference/agent">
+    Look up classes, functions, types, transports, and providers.
   </Card>
   <Card title="Cookbook" icon="book" href="/how-to/index">
-    Start from working recipes for chatbots, RAG, MCP, and multi-agent apps.
-  </Card>
-  <Card title="API Reference" icon="brackets" href="/reference/generate-text">
-    Look up functions, agent classes, transports, and types.
-  </Card>
-  <Card title="Architecture" icon="blueprint" href="/explanation/unified-transport-layer">
-    Understand how state, transports, registries, and remote agents fit together.
+    Copy working patterns for RAG, tools, MCP, deployment, and workflows.
   </Card>
 </CardGroup>

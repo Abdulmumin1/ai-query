@@ -1,187 +1,193 @@
 ---
 title: "stream_text"
-description: "Stream text responses from AI models in real-time"
+description: "API reference for streaming text generation"
 ---
 
-Stream text completions from AI models for real-time output.
+`stream_text()` starts a streaming model/tool loop and returns a `TextStreamResult` immediately.
+
+It is not an async function. Streaming begins when you iterate over `result.text_stream`.
+
+## Import
+
+```python
+from ai_query import stream_text
+```
 
 ## Signature
 
 ```python
 def stream_text(
+    *,
     model: LanguageModel,
     prompt: str | None = None,
-    messages: list[dict] | list[Message] | None = None,
     system: str | None = None,
-    tools: dict[str, Tool] | None = None,
-    stop_when: StopCondition | None = None,
-    on_step_start: Callable[[StepStartEvent], None] | None = None,
-    on_step_finish: Callable[[StepFinishEvent], None] | None = None,
-    on_reasoning_event: Callable[[ReasoningEvent], None] | None = None,
-    provider_options: dict | None = None,
+    messages: list[Message] | list[dict[str, Any]] | None = None,
+    tools: ToolSet | None = None,
+    stop_when: StopCondition | list[StopCondition] | None = None,
+    on_step_start: OnStepStart | None = None,
+    on_step_finish: OnStepFinish | None = None,
+    on_reasoning_event: OnReasoningEvent | None = None,
+    provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
+    signal: AbortSignal | None = None,
+    **kwargs: Any,
 ) -> TextStreamResult
 ```
-
-<Note>
-Unlike `generate_text`, `stream_text` is **not** an async function. It returns immediately with a `TextStreamResult` object. The actual streaming happens when you iterate over `text_stream`.
-</Note>
 
 ## Parameters
 
 <ParamField path="model" type="LanguageModel" required>
-  The AI model to use. Create with `openai()`, `anthropic()`, or `google()`.
+  Language model instance.
 </ParamField>
 
-<ParamField path="prompt" type="str">
-  Simple user prompt. Use this for single-turn conversations.
+<ParamField path="prompt" type="str | None">
+  Convenience user prompt. Ignored when `messages` is provided.
 </ParamField>
 
-<ParamField path="messages" type="list[dict] | list[Message]">
-  Full conversation history as dicts or Message objects. Use instead of `prompt` for multi-turn conversations.
+<ParamField path="system" type="str | None">
+  Optional system prompt. Only used when `messages` is not provided.
 </ParamField>
 
-<ParamField path="system" type="str">
-  System prompt to set the AI's behavior and context.
+<ParamField path="messages" type="list[Message] | list[dict[str, Any]] | None">
+  Explicit message list. When provided, `prompt` and `system` are ignored.
 </ParamField>
 
-<ParamField path="tools" type="dict[str, Tool]">
-  Dictionary of tools the AI can call.
+<ParamField path="tools" type="ToolSet | None">
+  Mapping of tool name to `Tool`.
 </ParamField>
 
-<ParamField path="stop_when" type="StopCondition">
-  Condition to stop the tool execution loop. Use `step_count_is(n)` or `has_tool_call("name")`.
+<ParamField path="stop_when" type="StopCondition | list[StopCondition] | None">
+  Stop condition or list of stop conditions. Defaults to `step_count_is(1)`.
 </ParamField>
 
-<ParamField path="on_step_start" type="Callable[[StepStartEvent], None]">
-  Callback invoked when each step begins.
+<ParamField path="on_step_start" type="OnStepStart | None">
+  Called before each provider request. May return `StepControl`.
 </ParamField>
 
-<ParamField path="on_step_finish" type="Callable[[StepFinishEvent], None]">
-  Callback invoked when each step completes.
+<ParamField path="on_step_finish" type="OnStepFinish | None">
+  Called after each step completes.
 </ParamField>
 
-<ParamField path="on_reasoning_event" type="Callable[[ReasoningEvent], None]">
-  Optional callback for provider reasoning output such as thinking deltas, summaries, signatures, or opaque state. These events are separate from `text_stream` and are not mixed into assistant text.
+<ParamField path="on_reasoning_event" type="OnReasoningEvent | None">
+  Called for provider reasoning/thinking events. These are not mixed into `text_stream`.
 </ParamField>
 
-<ParamField path="provider_options" type="dict">
-  Provider-specific options.
+<ParamField path="provider_options" type="ProviderOptions | None">
+  Provider-specific options keyed by provider name.
 </ParamField>
 
-<ParamField path="reasoning" type="ReasoningConfig">
-  Normalized reasoning-depth controls like `effort` and `budget`.
+<ParamField path="reasoning" type="ReasoningConfig | None">
+  Provider-agnostic reasoning controls.
 </ParamField>
 
-<Note>
-For the conceptual model and provider-specific behavior of visible thinking output, see [`Thinking`](/explanation/thinking).
-</Note>
+<ParamField path="signal" type="AbortSignal | None">
+  Abort signal used to cancel the streaming loop.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional provider-specific keyword arguments passed to the provider stream call.
+</ParamField>
 
 ## Returns
 
-<ResponseField name="TextStreamResult" type="object">
-  <Expandable title="properties">
-    <ResponseField name="text_stream" type="AsyncIterator[str]">
-      Async iterator yielding text chunks.
-    </ResponseField>
-    <ResponseField name="text" type="Awaitable[str]">
-      The complete text (available after streaming).
-    </ResponseField>
-    <ResponseField name="usage" type="Awaitable[Usage]">
-      Token usage statistics (available after streaming).
-    </ResponseField>
-    <ResponseField name="tool_calls" type="Awaitable[list[ToolCall]]">
-      Tool calls made (available after streaming).
-    </ResponseField>
-  </Expandable>
+<ResponseField name="TextStreamResult" type="TextStreamResult">
+  Lazy streaming result object.
+</ResponseField>
+
+Properties:
+
+<ResponseField name="text_stream" type="AsyncIterator[str]">
+  Async iterator yielding text chunks.
+</ResponseField>
+
+<ResponseField name="text" type="Awaitable[str]">
+  Complete accumulated text. Await after or during stream consumption.
+</ResponseField>
+
+<ResponseField name="usage" type="Awaitable[Usage | None]">
+  Usage after the stream completes.
+</ResponseField>
+
+<ResponseField name="finish_reason" type="Awaitable[str | None]">
+  Finish reason after the stream completes.
+</ResponseField>
+
+<ResponseField name="steps" type="Awaitable[list[StepResult]]">
+  Step history after the stream completes.
+</ResponseField>
+
+## Raises
+
+Errors occur while consuming the stream, not when calling `stream_text()`.
+
+<ResponseField name="ValueError" type="Exception">
+  Raised when neither `prompt` nor `messages` is provided.
+</ResponseField>
+
+<ResponseField name="AbortError" type="Exception">
+  Raised while consuming if `signal` is aborted.
 </ResponseField>
 
 ## Examples
 
-### Basic Streaming
+### Basic stream
 
 ```python
-from ai_query import stream_text
-from ai_query.providers import google
-
 result = stream_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Write a short poem."
+    model=openai("gpt-4o"),
+    prompt="Write a haiku about Python.",
 )
 
 async for chunk in result.text_stream:
     print(chunk, end="", flush=True)
 ```
 
-### Get Usage After Streaming
+### Read final values
 
 ```python
-result = stream_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Explain recursion."
-)
+result = stream_text(model=model, prompt="Explain recursion.")
 
 async for chunk in result.text_stream:
     print(chunk, end="")
 
-# Await usage after streaming completes
+text = await result.text
 usage = await result.usage
-print(f"\nTokens: {usage.total_tokens}")
+steps = await result.steps
 ```
 
-### Get Complete Text
+### Reasoning events
 
 ```python
+async def on_reasoning(event):
+    if event.text:
+        print(f"thinking: {event.text}")
+
+
 result = stream_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Write a haiku."
+    model=model,
+    prompt="Solve this problem step by step.",
+    reasoning={"effort": "high"},
+    on_reasoning_event=on_reasoning,
 )
-
-# Stream to output
-async for chunk in result.text_stream:
-    print(chunk, end="")
-
-# Get full text
-full_text = await result.text
-print(f"\n\nLength: {len(full_text)} chars")
 ```
 
-### Streaming with Tools
+### Streaming with tools
 
 ```python
-from ai_query import stream_text
-from ai_query.providers import google, tool, Field
-
-@tool(description="Search for information")
-async def search(query: str = Field(description="Query")) -> str:
-    return f"Results for: {query}"
-
 result = stream_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Search for Python tutorials and summarize.",
-    tools={"search": search}
+    model=model,
+    prompt="Search docs and summarize installation.",
+    tools={"search_docs": search_docs},
+    stop_when=step_count_is(5),
 )
 
 async for chunk in result.text_stream:
     print(chunk, end="", flush=True)
 ```
 
-### With Callbacks
+## See Also
 
-```python
-from ai_query import stream_text
-from ai_query.providers import google, StepFinishEvent
-
-def on_step_done(event: StepFinishEvent):
-    print(f"\n[Step {event.step_number} complete]")
-
-result = stream_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Research this topic.",
-    tools=tools,
-    on_step_finish=on_step_done
-)
-
-async for chunk in result.text_stream:
-    print(chunk, end="")
-```
+- [generate_text](/reference/generate-text)
+- [Results](/reference/types/results)
+- [Thinking](/core/thinking)
+- [Streaming](/core/streaming)

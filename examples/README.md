@@ -1,106 +1,144 @@
 # ai-query Examples
 
-Real-world agent examples demonstrating different features of ai-query.
+Examples are grouped by API depth.
 
-## Examples
+## Agent APIs
+
+Use these when you want state, message history, tools, or app/runtime behavior.
 
 | Example | Description | Features |
-|---------|-------------|----------|
-| [wikipedia_agent.py](wikipedia_agent.py) | Research agent using Wikipedia API | Async tools, multiple tools, `on_step_finish` |
-| [code_executor.py](code_executor.py) | Agent that executes Python code | Sync tools, sandboxed execution, `on_step_start` |
-| [hackernews_agent.py](hackernews_agent.py) | Hacker News reader and summarizer | `stream_text` with tools, multiple API calls |
-| [task_planner.py](task_planner.py) | Multi-step task executor | `has_tool_call` stop condition, task logging |
-| [multi_provider.py](multi_provider.py) | Compare OpenAI, Anthropic, Google | Multiple providers, streaming comparison |
-| [country_explorer.py](country_explorer.py) | Geography data explorer | REST API integration, `on_step_start` |
-| [unit_converter.py](unit_converter.py) | Unit conversion assistant | Simple sync tools, multiple conversions |
-| [rpc](rpc/) | Interactive Chat Room | Fluent RPC API, WebSocket/SSE support, multiple clients |
+| --- | --- | --- |
+| [multi_agent_research.py](multi_agent_research.py) | Per-user research assistants | `Agent`, tools, state, events, `AgentServer` |
+| [agent_direct.py](agent_direct.py) | Custom agent runtime | `Agent`, manual streaming, custom events |
+| [cloudflare_worker.py](cloudflare_worker.py) | Worker deployment | Cloudflare adapter, actions |
+| [cloudflare-counter](cloudflare-counter/) | Stateful counter agent | WebSocket/SSE, state, actions |
+| [rpc](rpc/) | Interactive chat room | RPC, remote agents, WebSocket/SSE |
+
+## Core Generation APIs
+
+Use these when you want direct model calls without agent state.
+
+| Example | Description | Features |
+| --- | --- | --- |
+| [wikipedia_agent.py](wikipedia_agent.py) | Wikipedia research loop | `generate_text`, async tools, `on_step_finish` |
+| [code_executor.py](code_executor.py) | Python code executor | tools, step callbacks, sandboxed execution |
+| [hackernews_agent.py](hackernews_agent.py) | Hacker News summarizer | `stream_text`, tools, API calls |
+| [task_planner.py](task_planner.py) | Multi-step task executor | stop conditions, task logging |
+| [country_explorer.py](country_explorer.py) | Geography data explorer | REST tools, step callbacks |
+| [unit_converter.py](unit_converter.py) | Unit conversion assistant | sync tools |
+| [multi_provider.py](multi_provider.py) | Provider comparison | OpenAI, Anthropic, Google |
+| [openai_reasoning.py](openai_reasoning.py) | Reasoning controls | reasoning config, streaming |
 
 ## Running Examples
 
-Make sure you have the required API keys set:
+Set the provider keys required by the example you are running:
 
 ```bash
-export GOOGLE_API_KEY="your-key"      # Required for most examples
-export OPENAI_API_KEY="your-key"      # Required for multi_provider.py
-export ANTHROPIC_API_KEY="your-key"   # Required for multi_provider.py
+export GOOGLE_API_KEY="your-key"
+export OPENAI_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key"
 ```
 
-Run any example:
+Run from the repository root:
 
 ```bash
-cd examples
-uv run wikipedia_agent.py
-uv run hackernews_agent.py
-uv run rpc/server.py
+uv run examples/wikipedia_agent.py
+uv run examples/hackernews_agent.py
+uv run examples/rpc/server.py
 ```
 
-## Feature Highlights
+## Common Patterns
 
-### Tool Calling with Execution Loop
+### Simple Agent
+
 ```python
+from ai_query.agents import Agent, SQLiteStorage
+from ai_query.providers import openai
+
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.sqlite3"),
+)
+
+text = await agent.chat("Hello")
+```
+
+### Structured Turn
+
+```python
+result = await agent.run("Investigate the issue")
+
+print(result.text)
+print(result.usage)
+print(result.steps)
+```
+
+### Live Turn Events
+
+```python
+turn = agent.turn("Fix the failing test")
+
+async for event in turn.events():
+    if event.type == "text.delta":
+        print(event.text, end="")
+    elif event.type == "step.started":
+        print(f"step {event.step_number}")
+
+result = await turn.result()
+```
+
+### Mid-Run Steering
+
+```python
+turn = agent.turn("Investigate the bug")
+
+asyncio.create_task(turn.result())
+
+await turn.send("Change direction: inspect migrations first.")
+```
+
+### Tool Calling
+
+```python
+from ai_query import Field, tool
+
+
 @tool(description="Get the current weather for a location")
 async def get_weather(
-    location: str = Field(description="City name")
+    location: str = Field(description="City name"),
 ) -> str:
-    return f"Weather in {location}: 72°F, Sunny"
+    return f"Weather in {location}: 72F, Sunny"
 
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="What's the weather in Tokyo?",
+
+agent = Agent(
+    "weather",
+    model=model,
     tools={"get_weather": get_weather},
-    stop_when=step_count_is(5),
 )
+
+result = await agent.run("What's the weather in Tokyo?")
 ```
 
-### Streaming with Tools
-```python
-@tool(description="Get top stories from Hacker News")
-async def get_stories(limit: int = Field(default=5)) -> str:
-    # ... implementation ...
-    return "Top stories: ..."
+### Core Streaming
 
+```python
 result = stream_text(
-    model=google("gemini-2.0-flash"),
+    model=model,
     prompt="Summarize the top Hacker News stories",
     tools={"get_stories": get_stories},
 )
+
 async for chunk in result.text_stream:
     print(chunk, end="", flush=True)
 ```
 
-### Step Callbacks
-```python
-def on_finish(event: StepFinishEvent):
-    print(f"Step {event.step_number}: {len(event.step.tool_calls)} tool calls")
-    print(f"Tokens so far: {event.usage.total_tokens}")
-
-result = await generate_text(
-    model=model,
-    prompt=prompt,
-    tools=tools,
-    on_step_finish=on_finish,
-)
-```
-
 ### Stop Conditions
-```python
-# Stop when a specific tool is called
-stop_when=has_tool_call("complete_task")
 
-# Stop after N steps
+```python
+from ai_query import has_tool_call, step_count_is
+
 stop_when=step_count_is(5)
-
-# Multiple conditions (stops when any is true)
+stop_when=has_tool_call("complete_task")
 stop_when=[has_tool_call("done"), step_count_is(10)]
-```
-
-### Type-Safe Fluent RPC
-Agents can call each other using a fluent, type-safe API that provides IDE autocompletion.
-
-```python
-# Get a proxy for the target agent
-proxy = client_agent.call("target-agent-id", agent_cls=ChatRoom)
-
-# Call methods directly on the proxy
-history = await proxy.get_history(user_id="alice")
 ```

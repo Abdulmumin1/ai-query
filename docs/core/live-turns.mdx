@@ -1,0 +1,139 @@
+---
+title: "Live Turns"
+description: "Use AgentTurn for events, cancellation, and mid-run steering"
+---
+
+`AgentTurn` is the advanced agent primitive for interactive runtimes.
+
+Use it when `chat()` and `stream()` are too flat and your application needs lifecycle events, a structured final result, cancellation, or the ability to steer the model while it is working.
+
+## Why Turns Exist
+
+Agents already provide simple methods:
+
+```python
+text = await agent.chat("hi")
+async for chunk in agent.stream("hi"):
+    ...
+result = await agent.run("hi")
+```
+
+Those are great for apps that only need a response.
+
+Live runtimes need more:
+
+- emit text as it streams
+- show step status
+- display reasoning events
+- cancel a run
+- inject new user guidance before the next model step
+- wait for the structured final result after streaming events
+
+That is what `agent.turn()` is for.
+
+## Basic Turn
+
+```python
+turn = agent.turn("Fix the failing test")
+
+async for event in turn.events():
+    if event.type == "text.delta":
+        print(event.text, end="", flush=True)
+
+result = await turn.result()
+```
+
+`turn.events()` starts the turn lazily. `turn.result()` also starts it if it has not started yet.
+
+## Event Stream
+
+Current turn events:
+
+| Event | Meaning |
+| --- | --- |
+| `turn.started` | The turn started and the user message was appended |
+| `text.delta` | A text chunk streamed from the assistant |
+| `reasoning.delta` | Provider reasoning/thinking event |
+| `step.started` | A model step is about to begin |
+| `step.finished` | A model step finished |
+| `turn.finished` | The final `TurnResult` is available |
+| `turn.failed` | The turn failed or was aborted |
+
+## Steering
+
+Use `send()` to steer a live turn.
+
+```python
+await turn.send("Actually, focus on the database layer first.")
+```
+
+Steering is safe-boundary control. The message is queued and injected before the next model call. It does not mutate a provider request already in flight, and it does not interrupt a tool that is already running.
+
+`steer()` is an alias for `send()`:
+
+```python
+await turn.steer("Change direction: check pending migrations.")
+```
+
+## Cancellation
+
+```python
+turn.abort("user cancelled")
+```
+
+Aborting signals the active turn. Providers and tools must honor abort signals to stop immediately; otherwise cancellation happens at the next point the runtime checks the signal.
+
+## SSE Example
+
+```python
+async def handle_stream(agent: Agent, message: str):
+    turn = agent.turn(message)
+
+    yield "event: start\ndata: \n\n"
+
+    async for event in turn.events():
+        if event.type == "text.delta":
+            yield f"event: chunk\ndata: {json.dumps(event.text)}\n\n"
+        elif event.type == "step.started":
+            payload = {"step": event.step_number}
+            yield f"event: status\ndata: {json.dumps(payload)}\n\n"
+        elif event.type == "turn.finished":
+            yield f"event: end\ndata: {json.dumps(event.result.text)}\n\n"
+```
+
+## CLI Example
+
+```python
+class CodingAgent(Agent[dict[str, Any]]):
+    async def run_cli_turn(self, message: str) -> str:
+        turn = self.turn(message)
+        self._current_turn = turn
+
+        try:
+            async for event in turn.events():
+                if event.type == "text.delta":
+                    print(event.text, end="", flush=True)
+                elif event.type == "step.started":
+                    await self.emit("status", {"step": event.step_number})
+
+            result = await turn.result()
+            return result.text
+        finally:
+            if self._current_turn is turn:
+                self._current_turn = None
+
+    async def steer_current_turn(self, message: str) -> None:
+        if self._current_turn and not self._current_turn.done:
+            await self._current_turn.send(message)
+```
+
+## When Not To Use Turns
+
+Do not start with `AgentTurn` for simple apps.
+
+Use:
+
+- `chat()` when you only need text
+- `stream()` when you only need streamed text
+- `run()` when you need metadata after completion
+- `turn()` when you need a live runtime

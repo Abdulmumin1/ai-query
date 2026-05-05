@@ -1,0 +1,103 @@
+---
+title: "Concepts"
+description: "The mental model for ai-query"
+---
+
+`ai-query` has three layers. Most confusion disappears once you know which layer you are using.
+
+## The Three Layers
+
+| Layer | Use it when | Main APIs |
+| --- | --- | --- |
+| Core generation | You want a direct model call without persistent state | `generate_text()`, `stream_text()` |
+| Stateful agents | You want memory, tools, storage, and conversation history | `Agent.chat()`, `Agent.stream()`, `Agent.run()` |
+| Live runtimes | You are building a CLI, UI, SSE stream, or controllable agent loop | `Agent.turn()`, `AgentTurn.events()`, `AgentTurn.send()` |
+
+## Core Generation
+
+Core generation is the raw model loop.
+
+```python
+result = await generate_text(
+    model=openai("gpt-4o"),
+    prompt="Summarize this text",
+)
+```
+
+Use this for scripts, background jobs, extraction, summarization, and anywhere you do not need durable conversation state.
+
+## Stateful Agents
+
+Agents add identity and memory.
+
+```python
+agent = Agent(
+    "assistant",
+    model=openai("gpt-4o"),
+    storage=SQLiteStorage("agents.sqlite3"),
+)
+
+async with agent:
+    await agent.chat("My name is Ada")
+    await agent.chat("What is my name?")
+```
+
+Use agents when your app has users, sessions, persistent history, tools, or server routes.
+
+## Live Turns
+
+A turn is one live execution of an agent.
+
+```python
+turn = agent.turn("Fix the failing test")
+
+async for event in turn.events():
+    if event.type == "text.delta":
+        print(event.text, end="")
+
+await turn.send("Actually, inspect migrations first.")
+```
+
+Use turns when you need events, cancellation, steering, or a custom runtime around the agent.
+
+## Tools
+
+Tools are typed Python functions the model can call.
+
+```python
+@tool(description="Search docs")
+async def search_docs(query: str = Field(description="Search query")) -> str:
+    return "results"
+```
+
+Tools work with both core generation and agents.
+
+## Storage
+
+Storage belongs to agents, not core generation.
+
+```python
+Agent("assistant", storage=SQLiteStorage("agents.sqlite3"))
+```
+
+Storage persists state, messages, and optionally events.
+
+## Events
+
+There are two event concepts:
+
+- `agent.emit(...)` is for application events sent to clients and optionally replayed later.
+- `turn.events()` is a live execution stream for text, steps, reasoning, completion, and failure.
+
+## Choosing Correctly
+
+Use the smallest primitive that gives you what you need.
+
+| If you need | Start with |
+| --- | --- |
+| one answer | `generate_text()` |
+| streamed answer | `stream_text()` |
+| a remembered conversation | `Agent.chat()` |
+| response metadata | `Agent.run()` |
+| live UI/runtime controls | `Agent.turn()` |
+| HTTP/SSE/WebSocket serving | `AgentServer` |
