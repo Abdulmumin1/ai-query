@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Add live agent turns, improve chat request passthrough, and restructure the documentation around a clearer learning path."
+}

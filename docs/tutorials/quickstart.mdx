@@ -1,11 +1,19 @@
 ---
 title: "Quickstart"
-description: "Get started with ai-query in minutes"
+description: "Build from a model call to a stateful agent"
 ---
 
-## Installation
+This guide teaches the product in the same order you should use it:
 
-Install ai-query using your preferred package manager:
+1. call a model
+2. stream a response
+3. add a tool
+4. create an agent
+5. persist state
+6. inspect a structured turn
+7. build a live turn
+
+## Install
 
 <CodeGroup>
 
@@ -23,170 +31,195 @@ poetry add ai-query
 
 </CodeGroup>
 
+## 1. Call A Model
 
-## Generate Your First Response
+Use `generate_text()` when you do not need state.
 
 ```python
 import asyncio
+
 from ai_query import generate_text
 from ai_query.providers import openai
+
 
 async def main():
     result = await generate_text(
         model=openai("gpt-4o"),
-        prompt="Explain quantum computing in one sentence."
+        prompt="Explain quantum computing in one sentence.",
     )
     print(result.text)
+
 
 asyncio.run(main())
 ```
 
-## Switch Providers Instantly
+What you learned:
 
-The same code works with any provider:
+- providers create models
+- `generate_text()` runs one model loop
+- the result contains text, usage, finish reason, and steps
 
-<CodeGroup>
+## 2. Stream A Response
 
-```python OpenAI
-from ai_query import generate_text
-from ai_query.providers import openai
-
-result = await generate_text(
-    model=openai("gpt-4o"),
-    prompt="Hello, world!"
-)
-```
-
-```python Anthropic
-from ai_query import generate_text
-from ai_query.providers import anthropic
-
-result = await generate_text(
-    model=anthropic("claude-sonnet-4-20250514"),
-    prompt="Hello, world!"
-)
-```
-
-```python Google
-from ai_query import generate_text
-from ai_query.providers import google
-
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Hello, world!"
-)
-```
-
-</CodeGroup>
-
-## Stream Responses
-
-For real-time output:
+Use `stream_text()` for raw streaming.
 
 ```python
 from ai_query import stream_text
 from ai_query.providers import openai
 
-async for chunk in stream_text(
+
+result = stream_text(
     model=openai("gpt-4o"),
-    prompt="Write a haiku about programming."
-):
+    prompt="Write a haiku about programming.",
+)
+
+async for chunk in result.text_stream:
     print(chunk, end="", flush=True)
 ```
 
-## Add Tools
+Use core streaming for scripts and simple UIs. Use `Agent.turn()` later when you need events and steering.
 
-Give your AI the ability to call functions:
+## 3. Add A Tool
+
+Tools are typed Python functions the model can call.
 
 ```python
-from ai_query import generate_text
-from ai_query.providers import openai, tool, Field
+from ai_query import Field, generate_text, tool
+from ai_query.providers import openai
+
 
 @tool(description="Get the current weather for a location")
 async def get_weather(
-    location: str = Field(description="The city name")
+    location: str = Field(description="The city name"),
 ) -> str:
-    return f"The weather in {location} is 72°F and sunny."
+    return f"The weather in {location} is 72F and sunny."
+
 
 result = await generate_text(
     model=openai("gpt-4o"),
     prompt="What's the weather like in Tokyo?",
-    tools={"get_weather": get_weather}
+    tools={"get_weather": get_weather},
 )
+
 print(result.text)
 ```
 
-## Build a Stateful Agent
+What you learned:
 
-Create an agent that remembers conversations:
+- `@tool` turns a Python function into a model-callable tool
+- tool arguments are described with type hints and `Field`
+- ai-query handles the tool-call loop
+
+## 4. Create An Agent
+
+Use `Agent` when you want memory, state, or persistence.
 
 ```python
 from ai_query.agents import Agent
 from ai_query.providers import openai
 
+
 agent = Agent("assistant", model=openai("gpt-4o"))
 
 async with agent:
     print(await agent.chat("My name is Alice."))
-    print(await agent.chat("What's my name?"))  # Remembers: "Alice"
+    print(await agent.chat("What's my name?"))
 ```
 
-## Add Persistence
+What changed:
 
-Make your agent remember across restarts:
+- the agent has an identity: `assistant`
+- message history is stored on the agent
+- `chat()` appends the user message and assistant response
+
+## 5. Persist Agent History
+
+Use `SQLiteStorage` when you want history to survive restarts.
 
 ```python
 from ai_query.agents import Agent, SQLiteStorage
 from ai_query.providers import openai
 
+
 agent = Agent(
     "assistant",
     model=openai("gpt-4o"),
-    storage=SQLiteStorage("agents.db")
+    storage=SQLiteStorage("agents.sqlite3"),
 )
 
 async with agent:
     print(await agent.chat("Remember: my favorite color is blue."))
-
-# Later, in a new process...
-async with agent:
-    print(await agent.chat("What's my favorite color?"))  # "blue"
 ```
 
-## Cancel Operations
-
-Use abort signals for timeouts and cancellation:
+Later, recreate the same agent ID with the same storage file:
 
 ```python
-from ai_query import generate_text
-from ai_query.providers import openai, AbortSignal
-
-result = await generate_text(
+agent = Agent(
+    "assistant",
     model=openai("gpt-4o"),
-    prompt="Write a long essay",
-    signal=AbortSignal.timeout(30)  # Auto-cancel after 30s
+    storage=SQLiteStorage("agents.sqlite3"),
 )
+
+async with agent:
+    print(await agent.chat("What's my favorite color?"))
 ```
 
-## Next Steps
+## 6. Get A Structured Result
+
+Use `run()` when your app needs more than final text.
+
+```python
+result = await agent.run("Investigate why the tests are failing.")
+
+print(result.text)
+print(result.finish_reason)
+print(result.usage.total_tokens if result.usage else None)
+print(len(result.steps))
+```
+
+Use `chat()` for user-facing responses. Use `run()` when your application logic needs the metadata.
+
+## 7. Build A Live Turn
+
+Use `turn()` for CLIs, web UIs, SSE streams, and controllable runtimes.
+
+```python
+turn = agent.turn("Fix the failing test")
+
+async for event in turn.events():
+    if event.type == "text.delta":
+        print(event.text, end="", flush=True)
+    elif event.type == "step.started":
+        print(f"\nstep {event.step_number}")
+
+result = await turn.result()
+```
+
+Steer a live turn at the next safe step boundary:
+
+```python
+await turn.send("Change direction: inspect database migrations first.")
+```
+
+Abort a live turn:
+
+```python
+turn.abort("user cancelled")
+```
+
+## What To Read Next
 
 <CardGroup cols={2}>
-  <Card title="Providers" icon="server" href="/how-to/providers/openai">
-    Configure and customize AI providers
+  <Card title="Concepts" icon="map" href="/core/overview">
+    Learn the mental model behind the framework.
   </Card>
-  <Card title="Tool Calling" icon="wrench" href="/explanation/tools">
-    Build powerful tools with type safety
+  <Card title="Navigating ai-query" icon="signs-post" href="/core/navigating-ai-query">
+    Choose the right API for your use case.
   </Card>
-  <Card title="Streaming" icon="bolt" href="/explanation/streaming">
-    Learn advanced streaming patterns
+  <Card title="Stateful Agents" icon="database" href="/core/stateful-agents">
+    Go deeper on storage, state, and conversations.
   </Card>
-  <Card title="Stateful Agents" icon="robot" href="/explanation/stateful-agents">
-    Build persistent AI agents
-  </Card>
-  <Card title="Abort/Cancellation" icon="circle-stop" href="/explanation/abort">
-    Control long-running operations
-  </Card>
-  <Card title="Embeddings" icon="cube" href="/explanation/embeddings">
-    Generate vector embeddings
+  <Card title="Live Turns" icon="route" href="/core/live-turns">
+    Build interactive runtimes with events and steering.
   </Card>
 </CardGroup>

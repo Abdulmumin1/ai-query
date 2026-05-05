@@ -284,6 +284,62 @@ class TestAgentServerEndpoints:
             assert data["response"] == "Hello World"
 
     @pytest.mark.asyncio
+    async def test_chat_endpoint_passes_full_body(self, aiohttp_client):
+        """POST /agent/{id}/chat should pass request body fields to agent."""
+
+        class BodyAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            async def handle_request(self, request):
+                return {"request": request}
+
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(BodyAgent, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        body = {
+            "message": "Hi",
+            "payload": {"mode": "test"},
+            "attachments": [{"name": "note.txt"}],
+            "metadata": {"source": "test"},
+        }
+        resp = await client.post("/agent/body/chat", json=body)
+
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["request"] == {**body, "action": "chat"}
+
+    @pytest.mark.asyncio
+    async def test_chat_endpoint_allows_attachment_only_body(self, aiohttp_client):
+        """POST /agent/{id}/chat should allow requests with attachments but no message."""
+
+        class AttachmentAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            async def handle_request(self, request):
+                return {"request": request}
+
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(AttachmentAgent, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        body = {"attachments": [{"name": "image.png"}]}
+        resp = await client.post("/agent/attachment/chat", json=body)
+
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["request"] == {
+            **body,
+            "action": "chat",
+            "message": "",
+            "payload": {},
+        }
+
+    @pytest.mark.asyncio
     async def test_agent_not_found(self, aiohttp_client, agent_class):
         """Endpoints should return 404 for non-existent agents (when required)."""
         config = AgentServerConfig(enable_rest_api=True)
@@ -357,6 +413,57 @@ class TestAgentServerStreaming:
 
         assert "event: start" in content
         assert "event: chunk" in content or "Hello" in content
+
+    @pytest.mark.asyncio
+    async def test_streaming_chat_endpoint_passes_full_body(self, aiohttp_client):
+        """Streaming chat should pass full request body to handle_request_stream."""
+
+        class StreamingBodyAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            async def handle_request_stream(self, request):
+                yield f"event: request\ndata: {json.dumps(request)}\n\n"
+
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(StreamingBodyAgent, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        body = {
+            "message": "Hi",
+            "payload": {"mode": "stream"},
+            "attachments": [{"name": "note.txt"}],
+        }
+        resp = await client.post("/agent/body-stream/chat?stream=true", json=body)
+
+        assert resp.status == 200
+        content = await resp.text()
+        assert json.dumps({**body, "action": "chat"}) in content
+
+    @pytest.mark.asyncio
+    async def test_streaming_chat_endpoint_allows_attachment_only_body(self, aiohttp_client):
+        """Streaming chat should allow attachment-only requests."""
+
+        class AttachmentStreamAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            async def handle_request_stream(self, request):
+                yield f"event: request\ndata: {json.dumps(request)}\n\n"
+
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(AttachmentStreamAgent, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        body = {"attachments": [{"name": "image.png"}]}
+        resp = await client.post("/agent/attach-stream/chat?stream=true", json=body)
+
+        assert resp.status == 200
+        content = await resp.text()
+        expected = {**body, "action": "chat", "message": "", "payload": {}}
+        assert json.dumps(expected) in content
 
 
 class TestAgentServerCORS:

@@ -119,7 +119,19 @@ async def generate_text(
             )
             callback_result = on_step_start(start_event)
             if inspect.isawaitable(callback_result):
-                await callback_result
+                callback_result = await callback_result
+            if callback_result:
+                if callback_result.inject_messages:
+                    current_messages.extend(callback_result.inject_messages)
+                if callback_result.stop:
+                    if steps:
+                        final_result = GenerateTextResult(
+                            text=accumulated_text,
+                            steps=steps,
+                            finish_reason="stop",
+                            usage=total_usage,
+                        )
+                        break
 
         result = await model.provider.generate(
             model=model.model_id,
@@ -317,7 +329,17 @@ def stream_text(
                 )
                 callback_result = on_step_start(start_event)
                 if inspect.isawaitable(callback_result):
-                    await callback_result
+                    callback_result = await callback_result
+                if callback_result:
+                    if callback_result.inject_messages:
+                        current_messages.extend(callback_result.inject_messages)
+                    if callback_result.stop:
+                        yield StreamChunk(
+                            is_final=True,
+                            usage=total_usage,
+                            finish_reason="stop",
+                        )
+                        break
 
             stream = model.provider.stream(
                 model=model.model_id,

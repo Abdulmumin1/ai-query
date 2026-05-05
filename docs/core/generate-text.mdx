@@ -134,7 +134,7 @@ Current first-pass support:
 
 If you need provider-specific thinking visibility or raw provider configuration, continue using `provider_options`.
 
-If you want provider thinking output during streaming, see [`Thinking`](/explanation/thinking). `generate_text()` controls reasoning depth, but thinking output itself is exposed through `stream_text(..., on_reasoning_event=...)`.
+If you want provider thinking output during streaming, see [`Thinking`](/core/thinking). `generate_text()` controls reasoning depth, but thinking output itself is exposed through `stream_text(..., on_reasoning_event=...)`.
 
 ## Error Handling
 
@@ -151,10 +151,10 @@ except Exception as e:
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Streaming" icon="bolt" href="/explanation/streaming">
+  <Card title="Streaming" icon="bolt" href="/core/streaming">
     Stream responses in real-time
   </Card>
-  <Card title="Tools" icon="wrench" href="/explanation/tools">
+  <Card title="Tools" icon="wrench" href="/core/tools">
     Add tool calling capabilities
   </Card>
 </CardGroup>

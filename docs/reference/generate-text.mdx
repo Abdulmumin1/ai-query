@@ -1,164 +1,210 @@
 ---
 title: "generate_text"
-description: "Generate text from AI models with optional tool calling"
+description: "API reference for non-streaming text generation"
 ---
 
-The main function for generating text completions from AI models.
+`generate_text()` runs the model/tool loop and returns a completed `GenerateTextResult`.
+
+Use it for one-off, non-streaming model calls where you do not need agent state.
+
+## Import
+
+```python
+from ai_query import generate_text
+```
 
 ## Signature
 
 ```python
 async def generate_text(
+    *,
     model: LanguageModel,
     prompt: str | None = None,
-    messages: list[dict] | list[Message] | None = None,
     system: str | None = None,
-    tools: dict[str, Tool] | None = None,
-    stop_when: StopCondition | None = None,
-    on_step_start: Callable[[StepStartEvent], None] | None = None,
-    on_step_finish: Callable[[StepFinishEvent], None] | None = None,
-    provider_options: dict | None = None
+    messages: list[Message] | list[dict[str, Any]] | None = None,
+    tools: ToolSet | None = None,
+    stop_when: StopCondition | list[StopCondition] | None = None,
+    on_step_start: OnStepStart | None = None,
+    on_step_finish: OnStepFinish | None = None,
+    provider_options: ProviderOptions | None = None,
+    reasoning: ReasoningConfig | None = None,
+    signal: AbortSignal | None = None,
+    **kwargs: Any,
 ) -> GenerateTextResult
 ```
 
 ## Parameters
 
 <ParamField path="model" type="LanguageModel" required>
-  The AI model to use. Create with `openai()`, `anthropic()`, or `google()`.
+  Language model instance. Create one with a provider factory such as `openai("gpt-4o")`, `anthropic(...)`, or `google(...)`.
 </ParamField>
 
-<ParamField path="prompt" type="str">
-  Simple user prompt. Use this for single-turn conversations.
+<ParamField path="prompt" type="str | None">
+  Convenience user prompt. If `messages` is not provided, `prompt` is converted to a user message.
 </ParamField>
 
-<ParamField path="messages" type="list[dict] | list[Message]">
-  Full conversation history as dicts or Message objects. Use instead of `prompt` for multi-turn conversations.
+<ParamField path="system" type="str | None">
+  Optional system prompt. Only used when `messages` is not provided.
 </ParamField>
 
-<ParamField path="system" type="str">
-  System prompt to set the AI's behavior and context.
+<ParamField path="messages" type="list[Message] | list[dict[str, Any]] | None">
+  Explicit message list. When provided, `prompt` and `system` are ignored.
 </ParamField>
 
-<ParamField path="tools" type="dict[str, Tool]">
-  Dictionary of tools the AI can call. Keys are tool names.
+<ParamField path="tools" type="ToolSet | None">
+  Mapping of tool name to `Tool`. Tool definitions are usually created with `@tool`.
 </ParamField>
 
-<ParamField path="stop_when" type="StopCondition">
-  Condition to stop the tool execution loop. Use `step_count_is(n)` to stop after n steps, or `has_tool_call("name")` to stop when a specific tool is called.
+<ParamField path="stop_when" type="StopCondition | list[StopCondition] | None">
+  Stop condition or list of stop conditions for the tool loop. Defaults to `step_count_is(1)`.
 </ParamField>
 
-<ParamField path="on_step_start" type="Callable[[StepStartEvent], None]">
-  Callback invoked when each step begins.
+<ParamField path="on_step_start" type="OnStepStart | None">
+  Called before each provider request. May return `StepControl` to inject messages or stop at a step boundary.
 </ParamField>
 
-<ParamField path="on_step_finish" type="Callable[[StepFinishEvent], None]">
-  Callback invoked when each step completes.
+<ParamField path="on_step_finish" type="OnStepFinish | None">
+  Called after each step completes, including tool calls and tool results.
 </ParamField>
 
-<ParamField path="provider_options" type="dict">
-  Provider-specific options (temperature, max_tokens, etc.).
+<ParamField path="provider_options" type="ProviderOptions | None">
+  Provider-specific options keyed by provider name.
+</ParamField>
+
+<ParamField path="reasoning" type="ReasoningConfig | None">
+  Provider-agnostic reasoning controls such as `effort` or `budget`.
+</ParamField>
+
+<ParamField path="signal" type="AbortSignal | None">
+  Abort signal used to cancel the generation loop.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Additional provider-specific keyword arguments passed to the provider call.
 </ParamField>
 
 ## Returns
 
-<ResponseField name="GenerateTextResult" type="object">
-  <Expandable title="properties">
-    <ResponseField name="text" type="str">
-      The generated text response.
-    </ResponseField>
-    <ResponseField name="usage" type="Usage">
-      Token usage statistics.
-    </ResponseField>
-    <ResponseField name="tool_calls" type="list[ToolCall]">
-      All tool calls made during execution.
-    </ResponseField>
-    <ResponseField name="tool_results" type="list[ToolResult]">
-      Results from tool executions.
-    </ResponseField>
-    <ResponseField name="steps" type="list[StepResult]">
-      Results from each execution step.
-    </ResponseField>
-  </Expandable>
+<ResponseField name="GenerateTextResult" type="GenerateTextResult">
+  Completed text generation result.
+</ResponseField>
+
+Fields:
+
+<ResponseField name="text" type="str">
+  Accumulated generated text.
+</ResponseField>
+
+<ResponseField name="steps" type="list[StepResult]">
+  Step-by-step model/tool loop history.
+</ResponseField>
+
+<ResponseField name="finish_reason" type="str | None">
+  Provider finish reason for the final response.
+</ResponseField>
+
+<ResponseField name="usage" type="Usage | None">
+  Total usage accumulated across all steps.
+</ResponseField>
+
+<ResponseField name="response" type="dict[str, Any]">
+  Raw provider response metadata used by the provider implementation.
+</ResponseField>
+
+<ResponseField name="provider_metadata" type="dict[str, Any]">
+  Additional provider metadata.
+</ResponseField>
+
+Computed properties:
+
+<ResponseField name="tool_calls" type="list[ToolCall]">
+  Flattened tool calls from all steps.
+</ResponseField>
+
+<ResponseField name="tool_results" type="list[ToolResult]">
+  Flattened tool results from all steps.
+</ResponseField>
+
+## Raises
+
+<ResponseField name="ValueError" type="Exception">
+  Raised when neither `prompt` nor `messages` is provided.
+</ResponseField>
+
+<ResponseField name="AbortError" type="Exception">
+  Raised when `signal` is aborted.
+</ResponseField>
+
+<ResponseField name="RuntimeError" type="Exception">
+  Raised if the generation loop exits without a final result.
 </ResponseField>
 
 ## Examples
 
-### Basic Usage
+### Basic call
 
 ```python
-from ai_query import generate_text
-from ai_query.providers import openai
-
 result = await generate_text(
     model=openai("gpt-4o"),
-    prompt="What is Python?"
+    prompt="What is Python?",
 )
+
 print(result.text)
 ```
 
-### With System Prompt
+### Explicit messages
 
 ```python
-result = await generate_text(
-    model=openai("gpt-4o"),
-    system="You are a helpful coding assistant.",
-    prompt="How do I read a file in Python?"
-)
-```
+from ai_query.types import Message
 
-### With Tools
-
-```python
-from ai_query import generate_text
-from ai_query.providers import google, tool, Field
-
-@tool(description="Get current time")
-def get_time() -> str:
-    from datetime import datetime
-    return datetime.now().isoformat()
 
 result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="What time is it?",
-    tools={"get_time": get_time}
-)
-```
-
-### With Messages
-
-```python
-from ai_query import generate_text
-from ai_query.providers import anthropic
-
-result = await generate_text(
-    model=anthropic("claude-sonnet-4-20250514"),
+    model=model,
     messages=[
-        {"role": "user", "content": "My name is Alice."},
-        {"role": "assistant", "content": "Hello Alice!"},
-        {"role": "user", "content": "What's my name?"},
-    ]
+        Message(role="user", content="My name is Ada."),
+        Message(role="assistant", content="Nice to meet you, Ada."),
+        Message(role="user", content="What is my name?"),
+    ],
 )
 ```
 
-### With Stop Condition
+### Tool loop
 
 ```python
-from ai_query import generate_text
-from ai_query.providers import google, has_tool_call, step_count_is
-
-# Stop when a specific tool is called
 result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Complete this task",
-    tools=tools,
-    stop_when=has_tool_call("finish")
-)
-
-# Or stop after N steps
-result = await generate_text(
-    model=google("gemini-2.0-flash"),
-    prompt="Research this topic",
-    tools=tools,
-    stop_when=step_count_is(5)
+    model=model,
+    prompt="Search the docs and summarize installation.",
+    tools={"search_docs": search_docs},
+    stop_when=step_count_is(5),
 )
 ```
+
+### Step control
+
+```python
+from ai_query import StepControl
+from ai_query.types import Message
+
+
+async def on_step_start(event):
+    if event.step_number == 2:
+        return StepControl(
+            inject_messages=[Message(role="user", content="Keep the final answer short.")]
+        )
+    return None
+
+
+result = await generate_text(
+    model=model,
+    prompt="Research this topic.",
+    tools=tools,
+    on_step_start=on_step_start,
+)
+```
+
+## See Also
+
+- [stream_text](/reference/stream-text)
+- [Results](/reference/types/results)
+- [Stop Conditions](/reference/types/stop-conditions)
+- [Tool Loops](/core/agents)

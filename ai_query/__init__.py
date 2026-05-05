@@ -9,6 +9,7 @@ from ai_query.types import (
     EmbedManyResult,
     tool,
     Field,
+    StepControl,
     StepStartEvent,
     StepFinishEvent,
     ReasoningEvent,
@@ -30,6 +31,7 @@ from ai_query.core import (
 )
 
 from ai_query.agents.agent import Agent, Event, action
+from ai_query.agents.turn import AgentTurn, TurnEvent, TurnOptions, TurnResult
 from ai_query.agents.registry import AgentRegistry
 from ai_query.agents.remote import connect
 from ai_query.agents.server import AgentServer, AgentServerConfig
@@ -46,6 +48,10 @@ __all__ = [
     "Agent",
     "Event",
     "action",
+    "AgentTurn",
+    "TurnEvent",
+    "TurnOptions",
+    "TurnResult",
     "AgentRegistry",
     "AgentServer",
     "AgentServerConfig",
@@ -65,6 +71,7 @@ __all__ = [
     "ReasoningConfig",
     "ReasoningEffort",
     "ReasoningEvent",
+    "StepControl",
     # Stop conditions
     "StopCondition",
     "step_count_is",

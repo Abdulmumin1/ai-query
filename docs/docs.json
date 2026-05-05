@@ -20,31 +20,32 @@
             "group": "Start Here",
             "pages": [
               "index",
-              "tutorials/quickstart"
+              "tutorials/quickstart",
+              "core/overview",
+              "core/navigating-ai-query"
             ]
           },
           {
-            "group": "Core Flow",
+            "group": "Foundations",
             "pages": [
-              "explanation/generate-text",
-              "explanation/thinking",
-              "explanation/streaming",
-              "explanation/tools",
-              "explanation/agents",
-              "explanation/embeddings",
-              "explanation/mcp",
-              "explanation/abort"
+              "core/generate-text",
+              "core/streaming",
+              "core/conversations",
+              "core/tools",
+              "core/agents",
+              "core/thinking",
+              "core/embeddings",
+              "core/providers"
             ]
           },
           {
-            "group": "Stateful Agents",
+            "group": "Agents",
             "pages": [
-              "explanation/stateful-agents",
-              "explanation/conversations",
-              "explanation/events",
-              "explanation/agent-server",
-              "explanation/transports",
-              "explanation/agent-rpc"
+              "core/stateful-agents",
+              "core/live-turns",
+              "core/events",
+              "core/agent-server",
+              "core/agent-rpc"
             ]
           },
           {
@@ -57,9 +58,12 @@
             ]
           },
           {
-            "group": "Deep Dives",
+            "group": "Advanced",
             "pages": [
-              "explanation/unified-transport-layer"
+              "core/mcp",
+              "core/abort",
+              "core/transports",
+              "core/unified-transport-layer"
             ]
           }
         ]
@@ -70,7 +74,8 @@
           {
             "group": "Overview",
             "pages": [
-              "explanation/providers"
+              "core/providers",
+              "core/navigating-ai-query"
             ]
           },
           {
@@ -117,6 +122,7 @@
             "group": "Agent Classes",
             "pages": [
               "reference/agent",
+              "reference/agent-turn",
               "reference/agent-backends",
               "reference/agent-server",
               "reference/agent-registry"

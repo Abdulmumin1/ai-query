@@ -481,6 +481,32 @@ class Agent(Generic[StateT]):
         await self._persist_messages()
         return full_response
 
+    def turn(
+        self,
+        message: Content,
+        *,
+        options: Any = None,
+    ) -> Any:
+        """Create a live turn for advanced eventful execution."""
+        from ai_query.agents.turn import AgentTurn
+
+        if self.model is None:
+            raise ValueError(
+                "No model provided for Agent. Please pass a model to the Agent constructor "
+                "or set agent.model before calling turn()."
+            )
+        return AgentTurn(self, message, options=options)
+
+    async def run(
+        self,
+        message: Content,
+        *,
+        options: Any = None,
+    ) -> Any:
+        """Run a turn and return its structured result."""
+        turn = self.turn(message, options=options)
+        return await turn.result()
+
     async def stream(
         self,
         message: Content,

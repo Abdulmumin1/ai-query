@@ -525,6 +525,12 @@ class StepStartEvent:
 
 
 @dataclass
+class StepControl:
+    inject_messages: list["Message"] = field(default_factory=list)
+    stop: bool = False
+
+
+@dataclass
 class StepFinishEvent:
     step_number: int
     step: StepResult
@@ -533,7 +539,7 @@ class StepFinishEvent:
     steps: list[StepResult]
 
 
-OnStepStart = Callable[[StepStartEvent], Union[None, Awaitable[None]]]
+OnStepStart = Callable[[StepStartEvent], Union[StepControl, None, Awaitable[Union[StepControl, None]]]]
 OnStepFinish = Callable[[StepFinishEvent], Union[None, Awaitable[None]]]
 
 
