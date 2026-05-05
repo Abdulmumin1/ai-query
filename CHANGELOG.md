@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.36
+
+- patch: Preserve image attachments in the OpenAI Responses message conversion path so multimodal chat requests reach the model correctly.
+
 ## 1.7.35
 
 - patch: Add live agent turns, improve chat request passthrough, and restructure the documentation around a clearer learning path.

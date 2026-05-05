@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Preserve image attachments in the OpenAI Responses message conversion path so multimodal chat requests reach the model correctly."
-}
