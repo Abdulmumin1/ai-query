@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.35
+
+- patch: Add live agent turns, improve chat request passthrough, and restructure the documentation around a clearer learning path.
+
 ## 1.7.34
 
 - patch: Ignore malformed provider response fragments while parsing generated and streamed output.
