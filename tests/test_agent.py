@@ -18,10 +18,12 @@ from ai_query.types import (
     ToolCall,
     ToolCallPart,
     ToolResultPart,
+    AbortError,
     Usage,
     step_count_is,
     tool,
 )
+from ai_query.providers.base import BaseProvider
 from ai_query.model import LanguageModel
 from tests.conftest import MockProvider
 
@@ -564,6 +566,98 @@ class TestAgentTurn:
     async def _send_after_tick(self, turn):
         await asyncio.sleep(0)
         await turn.send("Actually focus on migrations")
+
+    @pytest.mark.asyncio
+    async def test_turn_failure_persists_user_and_completed_steps(self):
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            return value
+
+        class FailingProvider(BaseProvider):
+            name = "failing"
+
+            def __init__(self):
+                super().__init__(api_key="test")
+                self.stream_call_count = 0
+
+            async def generate(self, **kwargs):
+                raise NotImplementedError
+
+            async def stream(self, **kwargs):
+                self.stream_call_count += 1
+                if self.stream_call_count == 1:
+                    yield StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"value": "first"},
+                            )
+                        ],
+                    )
+                    return
+                raise RuntimeError("provider failed")
+
+        storage = MemoryStorage()
+        model = LanguageModel(provider=FailingProvider(), model_id="test-model")
+        agent = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(5),
+        )
+        await agent.start()
+
+        turn = agent.turn("Start")
+        with pytest.raises(RuntimeError, match="provider failed"):
+            await turn.result()
+
+        stored = await storage.get("test:messages")
+        assert stored is not None
+        assert [message["role"] for message in stored] == ["user", "assistant", "tool"]
+        assert stored[0]["content"] == "Start"
+        assert stored[1]["content"][0]["type"] == "tool_call"
+        assert stored[2]["content"][0]["type"] == "tool_result"
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_abort_keeps_persisted_history(self):
+        class SlowProvider(BaseProvider):
+            name = "slow"
+
+            def __init__(self):
+                super().__init__(api_key="test")
+
+            async def generate(self, **kwargs):
+                raise NotImplementedError
+
+            async def stream(self, **kwargs):
+                await asyncio.sleep(0.05)
+                yield StreamChunk(text="late")
+                yield StreamChunk(is_final=True, finish_reason="stop")
+
+        storage = MemoryStorage()
+        model = LanguageModel(provider=SlowProvider(), model_id="test-model")
+        agent = Agent("test", storage=storage, model=model)
+        await agent.start()
+
+        turn = agent.turn("Start")
+        task = asyncio.create_task(turn.result())
+        await asyncio.sleep(0)
+        turn.abort("user cancelled")
+
+        with pytest.raises(AbortError, match="user cancelled"):
+            await task
+
+        stored = await storage.get("test:messages")
+        assert stored is not None
+        assert [message["role"] for message in stored] == ["user"]
+        assert stored[0]["content"] == "Start"
+        assert [message.role for message in agent.messages] == ["user"]
+        await agent.stop()
 
 
 class TestAgentStream:
