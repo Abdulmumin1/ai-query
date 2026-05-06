@@ -9,6 +9,7 @@ from ai_query import generate_text, tool, Field, step_count_is
 from ai_query.types import (
     GenerateTextResult,
     Message,
+    StepControl,
     Usage,
     ToolCall,
     StepStartEvent,
@@ -85,6 +86,39 @@ class TestGenerateTextBasic:
 
         assert result.text == "The capital is Paris."
         assert len(provider.last_messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_with_system_and_messages_prepends_system(self):
+        """generate_text should prepend system when messages lack a leading system message."""
+        provider = MockProvider(responses=[make_response(text="ok")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        await generate_text(
+            model=model,
+            system="repo rules",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        assert [msg.role for msg in provider.last_messages] == ["system", "user"]
+        assert provider.last_messages[0].content == "repo rules"
+
+    @pytest.mark.asyncio
+    async def test_with_system_and_existing_system_message_does_not_duplicate(self):
+        """generate_text should not duplicate a leading system message."""
+        provider = MockProvider(responses=[make_response(text="ok")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        await generate_text(
+            model=model,
+            system="repo rules",
+            messages=[
+                Message(role="system", content="existing rules"),
+                Message(role="user", content="hi"),
+            ],
+        )
+
+        assert [msg.role for msg in provider.last_messages] == ["system", "user"]
+        assert provider.last_messages[0].content == "existing rules"
 
     @pytest.mark.asyncio
     async def test_with_message_objects(self):
@@ -603,6 +637,41 @@ class TestGenerateTextCallbacks:
         # Provider should receive modified messages
         assert len(provider.last_messages) == 2
         assert provider.last_messages[1].content == "Extra instruction"
+
+    @pytest.mark.asyncio
+    async def test_step_control_accepts_dict_messages(self):
+        """StepControl injected dict messages should be normalized to Message."""
+        @tool(description="Echo")
+        def echo(msg: str) -> str:
+            return msg
+
+        provider = MockProvider(responses=[
+            make_response(
+                text="Calling echo",
+                finish_reason="tool_use",
+                tool_calls=[make_tool_call("echo", {"msg": "hi"}, id="call_1")],
+            ),
+            make_response(text="Done", finish_reason="stop"),
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        def on_start(event: StepStartEvent):
+            if event.step_number == 2:
+                return StepControl(
+                    inject_messages=[{"role": "user", "content": "Extra instruction"}]
+                )
+            return None
+
+        await generate_text(
+            model=model,
+            prompt="Test",
+            tools={"echo": echo},
+            on_step_start=on_start,
+            stop_when=step_count_is(10),
+        )
+
+        assert provider.last_messages[-1].role == "user"
+        assert provider.last_messages[-1].content == "Extra instruction"
 
 
 # =============================================================================

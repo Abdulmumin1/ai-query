@@ -6,10 +6,17 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
 
+from ai_query.agents.hooks import AgentHooks
 from ai_query.types import (
     AbortController,
     AbortError,
     AbortSignal,
+    AfterToolCallEvent,
+    OnAfterToolCall,
+    OnBeforeToolCall,
+    OnStepFinish,
+    OnStepStart,
+    BeforeToolCallEvent,
     Message,
     ReasoningConfig,
     ReasoningEvent,
@@ -34,6 +41,7 @@ class TurnOptions:
     reasoning: ReasoningConfig | None = None
     provider_options: "ProviderOptions | None" = None
     signal: AbortSignal | None = None
+    hooks: AgentHooks | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -188,6 +196,18 @@ class AgentTurn:
         external_signal = self.options.signal
         signal = self._controller.signal
 
+        (
+            before_step_hook,
+            after_step_hook,
+            before_tool_call_hook,
+            after_tool_call_hook,
+            reasoning_handler,
+        ) = self.agent._build_runtime_callbacks(
+            turn=self,
+            hooks=self.options.hooks,
+            signal=signal,
+        )
+
         await self._put_event(TurnStarted(
             type="turn.started",
             turn_id=self.id,
@@ -204,11 +224,16 @@ class AgentTurn:
             injected: list[Message] = []
             while not self._steering.empty():
                 injected.append(await self._steering.get())
+            hook_control = await before_step_hook(event)
             if injected:
                 self.agent.messages.extend(injected)
                 await self.agent._persist_messages()
-                return StepControl(inject_messages=injected)
-            return None
+            if not hook_control and not injected:
+                return None
+            return StepControl(
+                inject_messages=(hook_control.inject_messages if hook_control else []) + injected,
+                stop=bool(hook_control.stop) if hook_control else False,
+            )
 
         async def on_step_finish(event: StepFinishEvent) -> None:
             self.agent._append_step_message(event.step)
@@ -219,9 +244,16 @@ class AgentTurn:
                 step=event.step,
                 usage=event.usage,
             ))
+            await after_step_hook(event)
+
+        async def before_tool_call(event: BeforeToolCallEvent):
+            return await before_tool_call_hook(event)
+
+        async def after_tool_call(event: AfterToolCallEvent):
+            return await after_tool_call_hook(event)
 
         async def on_reasoning_event(event: ReasoningEvent) -> None:
-            await self.agent._handle_reasoning_event(event)
+            await reasoning_handler(event)
             await self._put_event(ReasoningDelta(type="reasoning.delta", event=event))
 
         try:
@@ -241,6 +273,8 @@ class AgentTurn:
                 on_reasoning_event=on_reasoning_event,
                 on_step_start=on_step_start,
                 on_step_finish=on_step_finish,
+                before_tool_call=before_tool_call,
+                after_tool_call=after_tool_call,
             )
 
             async for chunk in result.text_stream:

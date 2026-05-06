@@ -544,6 +544,52 @@ OnStepFinish = Callable[[StepFinishEvent], Union[None, Awaitable[None]]]
 
 
 @dataclass
+class BeforeToolCallEvent:
+    step_number: int
+    tool_call: ToolCall
+    messages: list["Message"]
+
+
+@dataclass
+class BeforeToolCallResult:
+    block: bool = False
+    reason: str | None = None
+
+
+@dataclass
+class AfterToolCallEvent:
+    step_number: int
+    tool_call: ToolCall
+    tool_result: ToolResult
+    messages: list["Message"]
+
+
+@dataclass
+class AfterToolCallResult:
+    result: Any | None = None
+    is_error: bool | None = None
+    terminate: bool | None = None
+
+
+OnBeforeToolCall = Callable[
+    [BeforeToolCallEvent],
+    Union[
+        BeforeToolCallResult,
+        None,
+        Awaitable[Union[BeforeToolCallResult, None]],
+    ],
+]
+OnAfterToolCall = Callable[
+    [AfterToolCallEvent],
+    Union[
+        AfterToolCallResult,
+        None,
+        Awaitable[Union[AfterToolCallResult, None]],
+    ],
+]
+
+
+@dataclass
 class TextPart:
     type: Literal["text"] = "text"
     text: str = ""

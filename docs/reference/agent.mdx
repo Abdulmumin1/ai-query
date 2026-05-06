@@ -30,6 +30,7 @@ class Agent(Generic[StateT]):
         provider_options: ProviderOptions | None = None,
         reasoning: ReasoningConfig | None = None,
         on_reasoning_event: OnReasoningEvent | None = None,
+        hooks: AgentHooks | None = None,
         transport: AgentTransport | None = None,
         event_bus: EventBus | None = None,
     ) -> None
@@ -75,6 +76,10 @@ class Agent(Generic[StateT]):
 
 <ParamField path="on_reasoning_event" type="OnReasoningEvent | None">
   Callback for provider reasoning events. Agent also emits these as `reasoning` events.
+</ParamField>
+
+<ParamField path="hooks" type="AgentHooks | None">
+  Default runtime hooks for step control, tool policy, tool result overrides, and reasoning observation.
 </ParamField>
 
 <ParamField path="transport" type="AgentTransport | None">
@@ -383,6 +388,7 @@ async for event in turn.events():
 
 ## See Also
 
+- [Hooks](/core/hooks)
 - [AgentTurn](/reference/agent-turn)
 - [Agent Server](/reference/agent-server)
 - [Stateful Agents](/core/stateful-agents)

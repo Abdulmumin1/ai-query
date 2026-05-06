@@ -1,5 +1,7 @@
 """HTTP transport using aiohttp for standard Python environments."""
 
+import atexit
+import asyncio
 from typing import Any, AsyncIterator
 
 import aiohttp
@@ -16,6 +18,7 @@ class AioHTTPTransport(HTTPTransport):
 
     def __init__(self) -> None:
         self._session: aiohttp.ClientSession | None = None
+        atexit.register(self._close_at_exit)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session."""
@@ -71,3 +74,18 @@ class AioHTTPTransport(HTTPTransport):
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
+
+    def _close_at_exit(self) -> None:
+        """Best-effort cleanup for process exit.
+
+        This should not affect normal long-lived agent usage because it only runs
+        during interpreter shutdown.
+        """
+        if self._session is None or self._session.closed:
+            return
+        try:
+            asyncio.run(self.close())
+        except RuntimeError:
+            # Best-effort shutdown path; ignore if the interpreter/event loop
+            # state no longer allows awaiting cleanup.
+            pass

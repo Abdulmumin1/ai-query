@@ -43,6 +43,7 @@
             "pages": [
               "core/stateful-agents",
               "core/live-turns",
+              "core/hooks",
               "core/events",
               "core/agent-server",
               "core/agent-rpc"
