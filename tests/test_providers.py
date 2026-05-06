@@ -250,6 +250,85 @@ class TestOpenAIProvider:
             }
         ]
 
+
+class TestGoogleProvider:
+    """Tests for Google provider."""
+
+    @pytest.mark.asyncio
+    async def test_google_convert_messages_with_data_url_image_part(self):
+        """Google provider should strip data URL prefix for ImagePart input."""
+        from ai_query.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key="test")
+        messages = [
+            Message(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Describe this image."},
+                    ImagePart(
+                        image="data:image/png;base64,base64data",
+                        media_type="image/png",
+                    ),
+                ],
+            )
+        ]
+
+        system, converted = await provider._convert_messages(messages)
+
+        assert system is None
+        assert converted == [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "Describe this image."},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": "base64data",
+                        }
+                    },
+                ],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_google_convert_messages_with_data_url_dict_image(self):
+        """Google provider should strip data URL prefix for dict-style image input."""
+        from ai_query.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key="test")
+        messages = [
+            Message(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Describe this image."},
+                    {
+                        "type": "image",
+                        "image": "data:image/png;base64,base64data",
+                        "media_type": "image/png",
+                    },
+                ],
+            )
+        ]
+
+        system, converted = await provider._convert_messages(messages)
+
+        assert system is None
+        assert converted == [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "Describe this image."},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": "base64data",
+                        }
+                    },
+                ],
+            }
+        ]
+
     @pytest.mark.asyncio
     async def test_openai_convert_messages_for_responses_with_dict_image(self):
         """OpenAI Responses conversion should preserve dict-style image input."""
