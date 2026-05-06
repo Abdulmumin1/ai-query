@@ -88,6 +88,29 @@ class TestSSEReplay:
             assert resp.headers["Content-Type"] == "text/event-stream"
             # We don't read the whole stream as it's infinite, just verify connection
 
+    @pytest.mark.asyncio
+    async def test_sse_replay_with_router_includes_event_ids(self, aiohttp_client, event_agent_class):
+        """SSE replay should include id lines so last_event_id recovery remains lossless."""
+        server = AgentServer(event_agent_class)
+
+        agent = server.get_or_create("test-replay-ids")
+        await agent.start()
+
+        await agent.emit("step_start", {"step": 1})
+        await agent.emit("ai_chunk", {"content": "hello"})
+
+        config = AgentServerConfig()
+        server._config = config
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        async with client.get("/agent/test-replay-ids/events?last_event_id=0") as resp:
+            assert resp.status == 200
+            first_chunk = await resp.content.readuntil(b"\n\n")
+            text = first_chunk.decode("utf-8")
+            assert "id: 1\n" in text
+            assert "event: step_start\n" in text
+
 
 class TestSSEEventFormatting:
     """Tests for SSE event formatting via emit handler."""
