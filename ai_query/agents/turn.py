@@ -197,6 +197,7 @@ class AgentTurn:
         ))
 
         self.agent.messages.append(self.message)
+        await self.agent._persist_messages()
 
         async def on_step_start(event: StepStartEvent) -> StepControl | None:
             await self._put_event(StepStarted(type="step.started", step_number=event.step_number))
@@ -204,10 +205,14 @@ class AgentTurn:
             while not self._steering.empty():
                 injected.append(await self._steering.get())
             if injected:
+                self.agent.messages.extend(injected)
+                await self.agent._persist_messages()
                 return StepControl(inject_messages=injected)
             return None
 
         async def on_step_finish(event: StepFinishEvent) -> None:
+            self.agent._append_step_message(event.step)
+            await self.agent._persist_messages()
             await self._put_event(StepFinished(
                 type="step.finished",
                 step_number=event.step_number,
@@ -243,8 +248,6 @@ class AgentTurn:
                 await self._put_event(TextDelta(type="text.delta", text=chunk))
 
             steps = await self.agent._get_result_steps(result) or []
-            self.agent._append_step_messages(steps, full_response)
-            await self.agent._persist_messages()
 
             output_message = self.agent.messages[-1] if self.agent.messages else Message(role="assistant", content=full_response)
             turn_result = TurnResult(
@@ -262,8 +265,6 @@ class AgentTurn:
             await self._put_event(TurnFinished(type="turn.finished", result=turn_result))
             return turn_result
         except AbortError:
-            if self.agent.messages and self.agent.messages[-1] is self.message:
-                self.agent.messages.pop()
             await self._put_event(TurnFailed(type="turn.failed", error=signal.reason or "Operation aborted"))
             raise
         except Exception as exc:

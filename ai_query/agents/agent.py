@@ -356,6 +356,32 @@ class Agent(Generic[StateT]):
             f"{self._id}:messages", [message.to_dict() for message in self._messages]
         )
 
+    def _append_step_message(self, step: StepResult) -> None:
+        if step.tool_calls:
+            assistant_content: list[Any] = []
+            if step.text:
+                assistant_content.append(TextPart(text=step.text))
+            for tool_call in step.tool_calls:
+                assistant_content.append(ToolCallPart(tool_call=tool_call))
+
+            self._messages.append(
+                Message(
+                    role="assistant",
+                    content=assistant_content if assistant_content else "",
+                )
+            )
+
+            tool_result_parts = [
+                ToolResultPart(tool_result=tool_result)
+                for tool_result in step.tool_results
+            ]
+            if tool_result_parts:
+                self._messages.append(Message(role="tool", content=tool_result_parts))
+            return
+
+        if step.text:
+            self._messages.append(Message(role="assistant", content=step.text))
+
     def _append_step_messages(
         self, steps: list[StepResult] | None, fallback_response: str
     ) -> None:
@@ -364,32 +390,7 @@ class Agent(Generic[StateT]):
             return
 
         for step in steps:
-            if step.tool_calls:
-                assistant_content: list[Any] = []
-                if step.text:
-                    assistant_content.append(TextPart(text=step.text))
-                for tool_call in step.tool_calls:
-                    assistant_content.append(ToolCallPart(tool_call=tool_call))
-
-                self._messages.append(
-                    Message(
-                        role="assistant",
-                        content=assistant_content if assistant_content else "",
-                    )
-                )
-
-                tool_result_parts = [
-                    ToolResultPart(tool_result=tool_result)
-                    for tool_result in step.tool_results
-                ]
-                if tool_result_parts:
-                    self._messages.append(
-                        Message(role="tool", content=tool_result_parts)
-                    )
-                continue
-
-            if step.text:
-                self._messages.append(Message(role="assistant", content=step.text))
+            self._append_step_message(step)
 
     async def _get_result_steps(self, result: Any) -> list[StepResult] | None:
         steps_property = getattr(type(result), "steps", None)
