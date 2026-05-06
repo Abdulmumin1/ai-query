@@ -216,6 +216,15 @@ class GoogleProvider(BaseProvider):
                                     image_data,
                                     media_type,
                                 ) = await self._fetch_resource_as_base64(image_data)
+                            elif isinstance(image_data, str) and image_data.startswith(
+                                "data:"
+                            ):
+                                header, _, payload = image_data.partition(",")
+                                if ";base64" in header:
+                                    header_media_type = header[5:].split(";", 1)[0]
+                                    if header_media_type:
+                                        media_type = header_media_type
+                                    image_data = payload
                             elif isinstance(image_data, bytes):
                                 image_data = base64.b64encode(image_data).decode()
 
@@ -298,6 +307,15 @@ class GoogleProvider(BaseProvider):
                                 image_data,
                                 media_type,
                             ) = await self._fetch_resource_as_base64(image_data)
+                        elif isinstance(image_data, str) and image_data.startswith(
+                            "data:"
+                        ):
+                            header, _, payload = image_data.partition(",")
+                            if ";base64" in header:
+                                header_media_type = header[5:].split(";", 1)[0]
+                                if header_media_type:
+                                    media_type = header_media_type
+                                image_data = payload
                         elif isinstance(image_data, bytes):
                             image_data = base64.b64encode(image_data).decode()
 
