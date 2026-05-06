@@ -190,6 +190,7 @@ class TurnOptions:
     reasoning: ReasoningConfig | None = None
     provider_options: ProviderOptions | None = None
     signal: AbortSignal | None = None
+    hooks: AgentHooks | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
@@ -213,6 +214,10 @@ Fields:
 
 <ParamField path="signal" type="AbortSignal | None">
   External abort signal that also aborts the turn.
+</ParamField>
+
+<ParamField path="hooks" type="AgentHooks | None">
+  Per-turn hook overrides. These merge over agent-level default hooks.
 </ParamField>
 
 <ParamField path="metadata" type="dict[str, Any]">
@@ -336,6 +341,7 @@ result = await turn.result()
 
 ## See Also
 
+- [Hooks](/core/hooks)
 - [Agent](/reference/agent)
 - [Live Turns](/core/live-turns)
 - [Results](/reference/types/results)

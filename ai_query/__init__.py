@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from ai_query.types import (
+    AfterToolCallEvent,
+    AfterToolCallResult,
+    BeforeToolCallEvent,
+    BeforeToolCallResult,
     GenerateTextResult,
     TextStreamResult,
     EmbedResult,
@@ -14,6 +18,8 @@ from ai_query.types import (
     StepFinishEvent,
     ReasoningEvent,
     OnReasoningEvent,
+    OnBeforeToolCall,
+    OnAfterToolCall,
     OnStepStart,
     OnStepFinish,
     StopCondition,
@@ -31,6 +37,13 @@ from ai_query.core import (
 )
 
 from ai_query.agents.agent import Agent, Event, action
+from ai_query.agents.hooks import (
+    AgentHooks,
+    AfterStepContext,
+    AfterToolCallContext,
+    BeforeStepContext,
+    BeforeToolCallContext,
+)
 from ai_query.agents.turn import AgentTurn, TurnEvent, TurnOptions, TurnResult
 from ai_query.agents.registry import AgentRegistry
 from ai_query.agents.remote import connect
@@ -48,6 +61,11 @@ __all__ = [
     "Agent",
     "Event",
     "action",
+    "AgentHooks",
+    "BeforeStepContext",
+    "AfterStepContext",
+    "BeforeToolCallContext",
+    "AfterToolCallContext",
     "AgentTurn",
     "TurnEvent",
     "TurnOptions",
@@ -72,6 +90,10 @@ __all__ = [
     "ReasoningEffort",
     "ReasoningEvent",
     "StepControl",
+    "BeforeToolCallEvent",
+    "BeforeToolCallResult",
+    "AfterToolCallEvent",
+    "AfterToolCallResult",
     # Stop conditions
     "StopCondition",
     "step_count_is",
@@ -81,5 +103,7 @@ __all__ = [
     "StepFinishEvent",
     "OnStepStart",
     "OnStepFinish",
+    "OnBeforeToolCall",
+    "OnAfterToolCall",
     "OnReasoningEvent",
 ]

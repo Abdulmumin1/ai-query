@@ -22,10 +22,14 @@ from ai_query.types import (
     StepResult,
     StopCondition,
     step_count_is,
+    BeforeToolCallEvent,
+    AfterToolCallEvent,
     StepStartEvent,
     StepFinishEvent,
     OnStepStart,
     OnStepFinish,
+    OnBeforeToolCall,
+    OnAfterToolCall,
     OnReasoningEvent,
     EmbedResult,
     EmbedManyResult,
@@ -51,6 +55,23 @@ def _apply_reasoning(
     )
 
 
+def _normalize_injected_messages(
+    messages: list[Message] | list[dict[str, Any]],
+) -> list[Message]:
+    normalized: list[Message] = []
+    for msg in messages:
+        if isinstance(msg, Message):
+            normalized.append(msg)
+        elif isinstance(msg, dict):
+            normalized.append(Message.from_dict(msg))
+        else:
+            raise TypeError(
+                "StepControl.inject_messages items must be Message or dict, "
+                f"got {type(msg).__name__}"
+            )
+    return normalized
+
+
 async def generate_text(
     *,
     model: LanguageModel,
@@ -61,6 +82,8 @@ async def generate_text(
     stop_when: StopCondition | list[StopCondition] | None = None,
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
+    before_tool_call: OnBeforeToolCall | None = None,
+    after_tool_call: OnAfterToolCall | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
@@ -122,7 +145,9 @@ async def generate_text(
                 callback_result = await callback_result
             if callback_result:
                 if callback_result.inject_messages:
-                    current_messages.extend(callback_result.inject_messages)
+                    current_messages.extend(
+                        _normalize_injected_messages(callback_result.inject_messages)
+                    )
                 if callback_result.stop:
                     if steps:
                         final_result = GenerateTextResult(
@@ -179,31 +204,69 @@ async def generate_text(
             break
 
         tool_results: list[ToolResult] = []
+        should_terminate_after_step = False
         for tc in tool_calls:
+            before_result = None
+            if before_tool_call:
+                before_event = BeforeToolCallEvent(
+                    step_number=step_number,
+                    tool_call=tc,
+                    messages=current_messages,
+                )
+                before_result = before_tool_call(before_event)
+                if inspect.isawaitable(before_result):
+                    before_result = await before_result
+
             tool_def = tools.get(tc.name) if tools else None
-            if tool_def is None:
-                tool_results.append(ToolResult(
+            if before_result and before_result.block:
+                tool_result = ToolResult(
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=f"Error: {before_result.reason or 'Tool execution was blocked'}",
+                    is_error=True,
+                )
+            elif tool_def is None:
+                tool_result = ToolResult(
                     tool_call_id=tc.id,
                     tool_name=tc.name,
                     result=f"Error: Unknown tool '{tc.name}'",
                     is_error=True,
-                ))
-                continue
+                )
+            else:
+                try:
+                    output = await tool_def.run(**tc.arguments)
+                    tool_result = ToolResult(
+                        tool_call_id=tc.id,
+                        tool_name=tc.name,
+                        result=output,
+                    )
+                except Exception as e:
+                    tool_result = ToolResult(
+                        tool_call_id=tc.id,
+                        tool_name=tc.name,
+                        result=f"Error: {e}",
+                        is_error=True,
+                    )
 
-            try:
-                output = await tool_def.run(**tc.arguments)
-                tool_results.append(ToolResult(
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    result=output,
-                ))
-            except Exception as e:
-                tool_results.append(ToolResult(
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    result=f"Error: {e}",
-                    is_error=True,
-                ))
+            if after_tool_call:
+                after_event = AfterToolCallEvent(
+                    step_number=step_number,
+                    tool_call=tc,
+                    tool_result=tool_result,
+                    messages=current_messages,
+                )
+                after_result = after_tool_call(after_event)
+                if inspect.isawaitable(after_result):
+                    after_result = await after_result
+                if after_result:
+                    if after_result.result is not None:
+                        tool_result.result = after_result.result
+                    if after_result.is_error is not None:
+                        tool_result.is_error = after_result.is_error
+                    if after_result.terminate:
+                        should_terminate_after_step = True
+
+            tool_results.append(tool_result)
 
         step.tool_results = tool_results
         steps.append(step)
@@ -220,7 +283,7 @@ async def generate_text(
             if inspect.isawaitable(callback_result):
                 await callback_result
 
-        should_stop = False
+        should_stop = should_terminate_after_step
         for condition in stop_conditions:
             cond_result = condition(steps)
             if inspect.isawaitable(cond_result):
@@ -268,6 +331,8 @@ def stream_text(
     stop_when: StopCondition | list[StopCondition] | None = None,
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
+    before_tool_call: OnBeforeToolCall | None = None,
+    after_tool_call: OnAfterToolCall | None = None,
     on_reasoning_event: OnReasoningEvent | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
@@ -332,7 +397,9 @@ def stream_text(
                     callback_result = await callback_result
                 if callback_result:
                     if callback_result.inject_messages:
-                        current_messages.extend(callback_result.inject_messages)
+                        current_messages.extend(
+                            _normalize_injected_messages(callback_result.inject_messages)
+                        )
                     if callback_result.stop:
                         yield StreamChunk(
                             is_final=True,
@@ -407,31 +474,69 @@ def stream_text(
                 break
 
             tool_results: list[ToolResult] = []
+            should_terminate_after_step = False
             for tc in step_tool_calls:
+                before_result = None
+                if before_tool_call:
+                    before_event = BeforeToolCallEvent(
+                        step_number=step_number,
+                        tool_call=tc,
+                        messages=current_messages,
+                    )
+                    before_result = before_tool_call(before_event)
+                    if inspect.isawaitable(before_result):
+                        before_result = await before_result
+
                 tool_def = tools.get(tc.name) if tools else None
-                if tool_def is None:
-                    tool_results.append(ToolResult(
+                if before_result and before_result.block:
+                    tool_result = ToolResult(
+                        tool_call_id=tc.id,
+                        tool_name=tc.name,
+                        result=f"Error: {before_result.reason or 'Tool execution was blocked'}",
+                        is_error=True,
+                    )
+                elif tool_def is None:
+                    tool_result = ToolResult(
                         tool_call_id=tc.id,
                         tool_name=tc.name,
                         result=f"Error: Unknown tool '{tc.name}'",
                         is_error=True,
-                    ))
-                    continue
+                    )
+                else:
+                    try:
+                        output = await tool_def.run(**tc.arguments)
+                        tool_result = ToolResult(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            result=output,
+                        )
+                    except Exception as e:
+                        tool_result = ToolResult(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            result=f"Error: {str(e)}",
+                            is_error=True,
+                        )
 
-                try:
-                    output = await tool_def.run(**tc.arguments)
-                    tool_results.append(ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        result=output,
-                    ))
-                except Exception as e:
-                    tool_results.append(ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        result=f"Error: {str(e)}",
-                        is_error=True,
-                    ))
+                if after_tool_call:
+                    after_event = AfterToolCallEvent(
+                        step_number=step_number,
+                        tool_call=tc,
+                        tool_result=tool_result,
+                        messages=current_messages,
+                    )
+                    after_result = after_tool_call(after_event)
+                    if inspect.isawaitable(after_result):
+                        after_result = await after_result
+                    if after_result:
+                        if after_result.result is not None:
+                            tool_result.result = after_result.result
+                        if after_result.is_error is not None:
+                            tool_result.is_error = after_result.is_error
+                        if after_result.terminate:
+                            should_terminate_after_step = True
+
+                tool_results.append(tool_result)
 
             step.tool_results = tool_results
             steps.append(step)
@@ -448,7 +553,7 @@ def stream_text(
                 if inspect.isawaitable(callback_result):
                     await callback_result
 
-            should_stop = False
+            should_stop = should_terminate_after_step
             for condition in stop_conditions:
                 cond_result = condition(steps)
                 if inspect.isawaitable(cond_result):

@@ -21,14 +21,32 @@ from typing import (
     Type,
 )
 
+from ai_query.agents.hooks import (
+    AgentHooks,
+    AfterStepContext,
+    AfterToolCallContext,
+    BeforeStepContext,
+    BeforeToolCallContext,
+    merge_hooks,
+)
 from ai_query.agents.storage import MemoryStorage, Storage
 from ai_query.agents.websocket import Connection, ConnectionContext
 from ai_query.model import LanguageModel
 from ai_query.types import (
+    AbortController,
     AbortError,
     AbortSignal,
+    AfterToolCallEvent,
     Message,
+    BeforeToolCallEvent,
+    OnAfterToolCall,
+    OnBeforeToolCall,
+    OnStepFinish,
+    OnStepStart,
+    ReasoningEvent,
     StepResult,
+    StepFinishEvent,
+    StepStartEvent,
     TextPart,
     ToolCallPart,
     ToolResultPart,
@@ -37,11 +55,11 @@ from ai_query.types import (
 if TYPE_CHECKING:
     from ai_query.agents.events import EventBus
     from ai_query.agents.transport import AgentTransport
+    from ai_query.agents.turn import AgentTurn, TurnOptions
     from ai_query.types import (
         OnReasoningEvent,
         ProviderOptions,
         ReasoningConfig,
-        ReasoningEvent,
         StopCondition,
         ToolSet,
     )
@@ -187,6 +205,7 @@ class Agent(Generic[StateT]):
         provider_options: Union[ProviderOptions, None] = None,
         reasoning: Union[ReasoningConfig, None] = None,
         on_reasoning_event: Union[OnReasoningEvent, None] = None,
+        hooks: AgentHooks | None = None,
         transport: Union[AgentTransport, None] = None,
         event_bus: Union[EventBus, None] = None,
     ) -> None:
@@ -209,6 +228,7 @@ class Agent(Generic[StateT]):
         self.provider_options = provider_options
         self.reasoning = reasoning
         self.on_reasoning_event = on_reasoning_event
+        self.hooks = hooks or AgentHooks()
 
         # Agent state
         self._state: Union[StateT, None] = None
@@ -415,6 +435,97 @@ class Agent(Generic[StateT]):
             },
         )
 
+    def _resolve_hooks(self, override: AgentHooks | None = None) -> AgentHooks:
+        return merge_hooks(self.hooks, override)
+
+    def _build_runtime_callbacks(
+        self,
+        *,
+        turn: "AgentTurn | None" = None,
+        hooks: AgentHooks | None = None,
+        signal: AbortSignal | None = None,
+    ) -> tuple[
+        OnStepStart,
+        OnStepFinish,
+        OnBeforeToolCall,
+        OnAfterToolCall,
+        Callable[[ReasoningEvent], Awaitable[None]],
+    ]:
+        active_hooks = self._resolve_hooks(hooks)
+        runtime_signal = signal or AbortController().signal
+
+        async def before_step(event: StepStartEvent):
+            if not active_hooks.before_step:
+                return None
+            callback_result = active_hooks.before_step(
+                BeforeStepContext(
+                    agent=self,
+                    turn=turn,
+                    step_number=event.step_number,
+                    event=event,
+                    signal=runtime_signal,
+                )
+            )
+            if inspect.isawaitable(callback_result):
+                callback_result = await callback_result
+            return callback_result
+
+        async def after_step(event: StepFinishEvent) -> None:
+            if not active_hooks.after_step:
+                return None
+            callback_result = active_hooks.after_step(
+                AfterStepContext(
+                    agent=self,
+                    turn=turn,
+                    step_number=event.step_number,
+                    event=event,
+                    signal=runtime_signal,
+                )
+            )
+            if inspect.isawaitable(callback_result):
+                await callback_result
+
+        async def before_tool_call(event: BeforeToolCallEvent):
+            if not active_hooks.before_tool_call:
+                return None
+            callback_result = active_hooks.before_tool_call(
+                BeforeToolCallContext(
+                    agent=self,
+                    turn=turn,
+                    step_number=event.step_number,
+                    event=event,
+                    signal=runtime_signal,
+                )
+            )
+            if inspect.isawaitable(callback_result):
+                callback_result = await callback_result
+            return callback_result
+
+        async def after_tool_call(event: AfterToolCallEvent):
+            if not active_hooks.after_tool_call:
+                return None
+            callback_result = active_hooks.after_tool_call(
+                AfterToolCallContext(
+                    agent=self,
+                    turn=turn,
+                    step_number=event.step_number,
+                    event=event,
+                    signal=runtime_signal,
+                )
+            )
+            if inspect.isawaitable(callback_result):
+                callback_result = await callback_result
+            return callback_result
+
+        async def reasoning_handler(event: ReasoningEvent) -> None:
+            if active_hooks.on_reasoning_event:
+                callback_result = active_hooks.on_reasoning_event(event)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
+            await self._handle_reasoning_event(event)
+
+        return before_step, after_step, before_tool_call, after_tool_call, reasoning_handler
+
     # ─── Chat & Streaming ──────────────────────────────────────────────────
 
     async def chat(
@@ -436,32 +547,27 @@ class Agent(Generic[StateT]):
         msg_content = message if isinstance(message, str) else message
         self._messages.append(Message(role="user", content=msg_content))
 
-        if signal:
-            gen_task = asyncio.create_task(self._do_chat())
-            abort_task = asyncio.create_task(signal.wait())
-
-            done, pending = await asyncio.wait(
-                [gen_task, abort_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            for task in pending:
-                task.cancel()
-
-            if abort_task in done:
+        try:
+            return await self._do_chat(signal=signal)
+        except AbortError:
+            if self._messages and self._messages[-1].role == "user":
                 self._messages.pop()
-                raise AbortError(signal.reason)
+            raise
 
-            return gen_task.result()
-        else:
-            return await self._do_chat()
-
-    async def _do_chat(self) -> str:
+    async def _do_chat(self, *, signal: AbortSignal | None = None) -> str:
         from ai_query import stream_text
 
         # Ensure model is set (should have been checked by caller)
         if self.model is None:
             raise ValueError("Agent model is not configured")
+
+        (
+            before_step,
+            after_step,
+            before_tool_call,
+            after_tool_call,
+            reasoning_handler,
+        ) = self._build_runtime_callbacks(signal=signal)
 
         result = stream_text(
             model=self.model,
@@ -469,9 +575,14 @@ class Agent(Generic[StateT]):
             messages=self._messages,
             tools=self.tools if self.tools else None,
             stop_when=self.stop_when,
+            on_step_start=before_step,
+            on_step_finish=after_step,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
             provider_options=self.provider_options,
             reasoning=self.reasoning,
-            on_reasoning_event=self._handle_reasoning_event,
+            signal=signal,
+            on_reasoning_event=reasoning_handler,
         )
 
         full_response = ""
@@ -527,6 +638,14 @@ class Agent(Generic[StateT]):
         # Ensure model is set for type checker
         assert self.model is not None
 
+        (
+            before_step,
+            after_step,
+            before_tool_call,
+            after_tool_call,
+            reasoning_handler,
+        ) = self._build_runtime_callbacks(signal=signal)
+
         msg_content = message if isinstance(message, str) else message
         self._messages.append(Message(role="user", content=msg_content))
 
@@ -538,9 +657,14 @@ class Agent(Generic[StateT]):
             messages=self._messages,
             tools=self.tools if self.tools else None,
             stop_when=self.stop_when,
+            on_step_start=before_step,
+            on_step_finish=after_step,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
             provider_options=self.provider_options,
             reasoning=self.reasoning,
-            on_reasoning_event=self._handle_reasoning_event,
+            signal=signal,
+            on_reasoning_event=reasoning_handler,
         )
 
         full_response = ""

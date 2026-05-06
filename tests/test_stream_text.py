@@ -9,6 +9,7 @@ from ai_query import stream_text, tool, Field, step_count_is
 from ai_query.types import (
     Message,
     ReasoningEvent,
+    StepControl,
     Usage,
     StreamChunk,
     ToolCall,
@@ -630,6 +631,50 @@ class TestStreamTextCallbacks:
             pass
 
         assert step_numbers == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_stream_step_control_accepts_dict_messages(self):
+        """Streaming step control should normalize injected dict messages."""
+        @tool(description="Echo")
+        def echo(msg: str) -> str:
+            return msg
+
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(text="Calling"),
+                StreamChunk(
+                    is_final=True,
+                    finish_reason="tool_use",
+                    tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hi"})],
+                ),
+            ],
+            [
+                StreamChunk(text="Done"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ],
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        def on_start(event: StepStartEvent):
+            if event.step_number == 2:
+                return StepControl(
+                    inject_messages=[{"role": "user", "content": "Extra instruction"}]
+                )
+            return None
+
+        result = stream_text(
+            model=model,
+            prompt="Test",
+            tools={"echo": echo},
+            on_step_start=on_start,
+            stop_when=step_count_is(10),
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        assert provider.last_messages[-1].role == "user"
+        assert provider.last_messages[-1].content == "Extra instruction"
 
 
 # =============================================================================

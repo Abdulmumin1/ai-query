@@ -1,0 +1,209 @@
+---
+title: "Hooks"
+description: "Control step and tool execution without rewriting the runtime"
+---
+
+Hooks are the runtime control layer in `ai-query`.
+
+Use hooks when you need to influence execution at stable boundaries. Use turn events when you only need to observe what is happening.
+
+## Hooks vs Events vs Lifecycle Overrides
+
+| Need | Use |
+| --- | --- |
+| control step execution | hooks |
+| observe a live run | `AgentTurn.events()` |
+| customize startup, connection, or message lifecycle | agent subclass overrides |
+
+Hooks are intentionally narrow and typed. They are not a full plugin system.
+
+## Available Hooks
+
+`AgentHooks` currently supports:
+
+1. `before_step`
+2. `after_step`
+3. `before_tool_call`
+4. `after_tool_call`
+5. `on_reasoning_event`
+
+## Configuring Hooks
+
+Set hooks on the agent as defaults:
+
+```python
+from ai_query.agents import Agent, AgentHooks
+
+
+agent = Agent(
+    "assistant",
+    model=model,
+    hooks=AgentHooks(
+        before_tool_call=before_tool_call,
+        after_step=after_step,
+    ),
+)
+```
+
+Override them for one turn:
+
+```python
+from ai_query.agents import TurnOptions
+
+
+result = await agent.run(
+    "Investigate the bug",
+    options=TurnOptions(
+        hooks=AgentHooks(after_step=custom_after_step),
+    ),
+)
+```
+
+Per-turn hooks merge over agent defaults.
+
+## before_step
+
+Runs before each provider request in a tool loop.
+
+Return `StepControl` to inject messages or stop before the next step begins.
+
+```python
+from ai_query import StepControl
+from ai_query.types import Message
+
+
+async def before_step(ctx):
+    if ctx.step_number == 2:
+        return StepControl(
+            inject_messages=[
+                Message(role="user", content="Keep the answer short.")
+            ]
+        )
+    return None
+```
+
+## after_step
+
+Runs after a step completes.
+
+Use it for logging, status updates, and post-step policy.
+
+```python
+async def after_step(ctx):
+    await ctx.agent.emit(
+        "status",
+        {
+            "phase": "step_finish",
+            "step": ctx.step_number,
+            "tool_calls": len(ctx.event.step.tool_calls),
+        },
+    )
+```
+
+## before_tool_call
+
+Runs before a tool executes.
+
+Return `BeforeToolCallResult(block=True, reason=...)` to block execution.
+
+```python
+from ai_query.agents import BeforeToolCallResult
+
+
+async def before_tool_call(ctx):
+    if ctx.event.tool_call.name != "bash":
+        return None
+
+    command = ctx.event.tool_call.arguments.get("command", "")
+    if "rm -rf" in command:
+        return BeforeToolCallResult(block=True, reason="Refusing destructive command.")
+    return None
+```
+
+## after_tool_call
+
+Runs after a tool finishes.
+
+Return `AfterToolCallResult` to override the tool result or terminate the current step batch.
+
+```python
+from ai_query.agents import AfterToolCallResult
+
+
+async def after_tool_call(ctx):
+    if ctx.event.tool_call.name == "search_docs":
+        return AfterToolCallResult(result="sanitized result")
+    return None
+```
+
+Merge semantics are explicit:
+
+- omitted fields preserve the original tool result
+- returned fields replace the original value for that field
+
+## on_reasoning_event
+
+Runs when provider reasoning/thinking output arrives.
+
+```python
+async def on_reasoning_event(event):
+    if event.text:
+        print("thinking:", event.text)
+```
+
+This hook runs in addition to the agent's legacy `on_reasoning_event` callback if you configured both.
+
+## Chump-Style Example
+
+```python
+class ChumpAgent(Agent[dict[str, Any]]):
+    def __init__(self, id: str):
+        super().__init__(
+            id,
+            model=model,
+            system=SYSTEM_PROMPT,
+            storage=SQLiteStorage("chump.sqlite3"),
+            hooks=AgentHooks(
+                before_step=self._before_step,
+                after_step=self._after_step,
+                before_tool_call=self._before_tool_call,
+                after_tool_call=self._after_tool_call,
+                on_reasoning_event=self._on_reasoning_event,
+            ),
+        )
+
+    async def _before_step(self, ctx):
+        await self.emit("status", {"phase": "step_start", "step": ctx.step_number})
+        return None
+
+    async def _after_step(self, ctx):
+        await self.emit("status", {"phase": "step_finish", "step": ctx.step_number})
+
+    async def _before_tool_call(self, ctx):
+        if ctx.event.tool_call.name == "bash":
+            command = ctx.event.tool_call.arguments.get("command", "")
+            if "rm -rf" in command:
+                return BeforeToolCallResult(block=True, reason="Refusing destructive command.")
+        return None
+
+    async def _after_tool_call(self, ctx):
+        return None
+
+    async def _on_reasoning_event(self, event):
+        await self.emit("reasoning", {"kind": event.kind, "text": event.text})
+```
+
+## Best Practices
+
+- keep hooks small
+- use hooks for control and policy, not presentation
+- use events for UI output
+- prefer agent-level defaults and only override per turn when necessary
+- avoid expensive work inside `before_step` and `before_tool_call`
+
+## Related
+
+- [Live Turns](/core/live-turns)
+- [Stateful Agents](/core/stateful-agents)
+- [Agent](/reference/agent)
+- [AgentTurn](/reference/agent-turn)

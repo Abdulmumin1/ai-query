@@ -6,8 +6,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from ai_query.agents import (
     Agent,
+    AgentHooks,
+    AfterToolCallResult,
+    BeforeToolCallResult,
     MemoryStorage,
     SQLiteStorage,
+    TurnOptions,
     Connection,
     ConnectionContext,
 )
@@ -657,6 +661,146 @@ class TestAgentTurn:
         assert [message["role"] for message in stored] == ["user"]
         assert stored[0]["content"] == "Start"
         assert [message.role for message in agent.messages] == ["user"]
+        await agent.stop()
+
+
+class TestAgentHooks:
+    """Tests for typed agent hooks."""
+
+    @pytest.mark.asyncio
+    async def test_agent_before_tool_call_can_block_execution(self):
+        executed = []
+
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            executed.append(value)
+            return value
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"value": "hello"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="done"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        storage = MemoryStorage()
+        agent = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(5),
+            hooks=AgentHooks(
+                before_tool_call=lambda ctx: BeforeToolCallResult(
+                    block=True,
+                    reason="blocked",
+                )
+            ),
+        )
+        await agent.start()
+
+        response = await agent.chat("Start")
+        stored = await storage.get("test:messages")
+
+        assert response == "done"
+        assert executed == []
+        assert stored is not None
+        assert stored[2]["content"][0]["tool_result"]["is_error"] is True
+        assert stored[2]["content"][0]["tool_result"]["result"] == "Error: blocked"
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_agent_after_tool_call_can_override_result(self):
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            return value
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"value": "hello"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="done"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        storage = MemoryStorage()
+        agent = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(5),
+            hooks=AgentHooks(
+                after_tool_call=lambda ctx: AfterToolCallResult(result="patched")
+            ),
+        )
+        await agent.start()
+
+        await agent.chat("Start")
+        stored = await storage.get("test:messages")
+
+        assert stored is not None
+        assert stored[2]["content"][0]["tool_result"]["result"] == "patched"
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_options_hooks_merge_with_agent_hooks(self):
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(text="ok"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ]
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        calls: list[str] = []
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=model,
+            hooks=AgentHooks(before_step=lambda ctx: calls.append("before")),
+        )
+        await agent.start()
+
+        result = await agent.run(
+            "Hello",
+            options=TurnOptions(
+                hooks=AgentHooks(after_step=lambda ctx: calls.append("after"))
+            ),
+        )
+
+        assert result.text == "ok"
+        assert calls == ["before", "after"]
         await agent.stop()
 
 
