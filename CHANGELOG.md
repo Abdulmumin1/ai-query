@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.40
+
+- patch: Preserve SSE event ids during replay so last_event_id recovery remains lossless.
+
 ## 1.7.39
 
 - patch: Normalize injected hook messages and add safe transport cleanup while introducing typed agent runtime hooks.
