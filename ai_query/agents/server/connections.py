@@ -56,11 +56,21 @@ class AioHttpSSEConnection(Connection):
         # Simpler: just send as data
         await self._response.write(f"data: {message}\n\n".encode("utf-8"))
 
-    async def send_event(self, event: str, data: dict[str, Any]) -> None:
+    async def send_event(
+        self,
+        event: str,
+        data: dict[str, Any],
+        event_id: int | None = None,
+    ) -> None:
         """Send structured event as SSE."""
         # Escape newlines for SSE data
         json_data = json.dumps(data)
-        await self._response.write(f"event: {event}\ndata: {json_data}\n\n".encode("utf-8"))
+        sse_parts = []
+        if event_id is not None:
+            sse_parts.append(f"id: {event_id}")
+        sse_parts.append(f"event: {event}")
+        sse_parts.append(f"data: {json_data}")
+        await self._response.write(("\n".join(sse_parts) + "\n\n").encode("utf-8"))
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
         # SSE connections are closed by client disconnecting or server finishing

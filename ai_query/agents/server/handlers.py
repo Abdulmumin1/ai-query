@@ -224,7 +224,7 @@ class ServerHandlers:
                 lid = int(last_id)
                 conn = AioHttpSSEConnection(response, request)
                 async for event in agent.replay_events(lid):
-                    await conn.send_event(event.type, event.data)
+                    await conn.send_event(event.type, event.data, event.id)
             except ValueError:
                 pass
 

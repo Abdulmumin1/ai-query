@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Preserve SSE event ids during replay so last_event_id recovery remains lossless."
+}
