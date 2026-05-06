@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.39
+
+- patch: Normalize injected hook messages and add safe transport cleanup while introducing typed agent runtime hooks.
+
 ## 1.7.38
 
 - patch: Persist live turn history incrementally and keep aborted turns in message history instead of rolling them back.
