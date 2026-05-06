@@ -36,7 +36,9 @@ from ai_query.types import (
     AbortController,
     AbortError,
     AbortSignal,
+    AfterToolCallResult,
     AfterToolCallEvent,
+    BeforeToolCallResult,
     Message,
     BeforeToolCallEvent,
     OnAfterToolCall,
@@ -45,6 +47,7 @@ from ai_query.types import (
     OnStepStart,
     ReasoningEvent,
     StepResult,
+    StepControl,
     StepFinishEvent,
     StepStartEvent,
     TextPart,
@@ -227,8 +230,8 @@ class Agent(Generic[StateT]):
         self.stop_when = stop_when
         self.provider_options = provider_options
         self.reasoning = reasoning
-        self.on_reasoning_event = on_reasoning_event
-        self.hooks = hooks or AgentHooks()
+        self._on_reasoning_event_callback = on_reasoning_event
+        self.hooks = hooks
 
         # Agent state
         self._state: Union[StateT, None] = None
@@ -420,8 +423,8 @@ class Agent(Generic[StateT]):
         return await result.steps
 
     async def _handle_reasoning_event(self, event: "ReasoningEvent") -> None:
-        if self.on_reasoning_event:
-            callback_result = self.on_reasoning_event(event)
+        if self._on_reasoning_event_callback:
+            callback_result = self._on_reasoning_event_callback(event)
             if inspect.isawaitable(callback_result):
                 await callback_result
 
@@ -437,6 +440,73 @@ class Agent(Generic[StateT]):
 
     def _resolve_hooks(self, override: AgentHooks | None = None) -> AgentHooks:
         return merge_hooks(self.hooks, override)
+
+    @staticmethod
+    def _merge_step_control(*results: StepControl | None) -> StepControl | None:
+        merged = StepControl()
+        seen = False
+        for result in results:
+            if result is None:
+                continue
+            seen = True
+            merged.inject_messages.extend(result.inject_messages)
+            merged.stop = merged.stop or result.stop
+        return merged if seen else None
+
+    @staticmethod
+    def _merge_before_tool_call_results(
+        *results: BeforeToolCallResult | None,
+    ) -> BeforeToolCallResult | None:
+        blocked = False
+        reason: str | None = None
+        seen = False
+        for result in results:
+            if result is None:
+                continue
+            seen = True
+            blocked = blocked or result.block
+            if result.reason is not None:
+                reason = result.reason
+        if not seen:
+            return None
+        return BeforeToolCallResult(block=blocked, reason=reason)
+
+    @staticmethod
+    def _merge_after_tool_call_results(
+        *results: AfterToolCallResult | None,
+    ) -> AfterToolCallResult | None:
+        merged = AfterToolCallResult()
+        seen = False
+        for result in results:
+            if result is None:
+                continue
+            seen = True
+            if result.result is not None:
+                merged.result = result.result
+            if result.is_error is not None:
+                merged.is_error = result.is_error
+            if result.terminate is not None:
+                merged.terminate = result.terminate
+        return merged if seen else None
+
+    async def before_step(self, ctx: BeforeStepContext) -> StepControl | None:
+        return None
+
+    async def after_step(self, ctx: AfterStepContext) -> None:
+        return None
+
+    async def before_tool_call(
+        self, ctx: BeforeToolCallContext
+    ) -> BeforeToolCallResult | None:
+        return None
+
+    async def after_tool_call(
+        self, ctx: AfterToolCallContext
+    ) -> AfterToolCallResult | None:
+        return None
+
+    async def on_reasoning_event(self, event: ReasoningEvent) -> None:
+        return None
 
     def _build_runtime_callbacks(
         self,
@@ -455,69 +525,79 @@ class Agent(Generic[StateT]):
         runtime_signal = signal or AbortController().signal
 
         async def before_step(event: StepStartEvent):
-            if not active_hooks.before_step:
-                return None
-            callback_result = active_hooks.before_step(
-                BeforeStepContext(
-                    agent=self,
-                    turn=turn,
-                    step_number=event.step_number,
-                    event=event,
-                    signal=runtime_signal,
-                )
+            ctx = BeforeStepContext(
+                agent=self,
+                turn=turn,
+                step_number=event.step_number,
+                event=event,
+                signal=runtime_signal,
             )
-            if inspect.isawaitable(callback_result):
-                callback_result = await callback_result
-            return callback_result
+            method_result = self.before_step(ctx)
+            if inspect.isawaitable(method_result):
+                method_result = await method_result
+            hook_result = None
+            if active_hooks.before_step:
+                hook_result = active_hooks.before_step(ctx)
+                if inspect.isawaitable(hook_result):
+                    hook_result = await hook_result
+            return self._merge_step_control(method_result, hook_result)
 
         async def after_step(event: StepFinishEvent) -> None:
-            if not active_hooks.after_step:
-                return None
-            callback_result = active_hooks.after_step(
-                AfterStepContext(
-                    agent=self,
-                    turn=turn,
-                    step_number=event.step_number,
-                    event=event,
-                    signal=runtime_signal,
-                )
+            ctx = AfterStepContext(
+                agent=self,
+                turn=turn,
+                step_number=event.step_number,
+                event=event,
+                signal=runtime_signal,
             )
-            if inspect.isawaitable(callback_result):
-                await callback_result
+            method_result = self.after_step(ctx)
+            if inspect.isawaitable(method_result):
+                await method_result
+            if active_hooks.after_step:
+                callback_result = active_hooks.after_step(ctx)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
 
         async def before_tool_call(event: BeforeToolCallEvent):
-            if not active_hooks.before_tool_call:
-                return None
-            callback_result = active_hooks.before_tool_call(
-                BeforeToolCallContext(
-                    agent=self,
-                    turn=turn,
-                    step_number=event.step_number,
-                    event=event,
-                    signal=runtime_signal,
-                )
+            ctx = BeforeToolCallContext(
+                agent=self,
+                turn=turn,
+                step_number=event.step_number,
+                event=event,
+                signal=runtime_signal,
             )
-            if inspect.isawaitable(callback_result):
-                callback_result = await callback_result
-            return callback_result
+            method_result = self.before_tool_call(ctx)
+            if inspect.isawaitable(method_result):
+                method_result = await method_result
+            hook_result = None
+            if active_hooks.before_tool_call:
+                hook_result = active_hooks.before_tool_call(ctx)
+                if inspect.isawaitable(hook_result):
+                    hook_result = await hook_result
+            return self._merge_before_tool_call_results(method_result, hook_result)
 
         async def after_tool_call(event: AfterToolCallEvent):
-            if not active_hooks.after_tool_call:
-                return None
-            callback_result = active_hooks.after_tool_call(
-                AfterToolCallContext(
-                    agent=self,
-                    turn=turn,
-                    step_number=event.step_number,
-                    event=event,
-                    signal=runtime_signal,
-                )
+            ctx = AfterToolCallContext(
+                agent=self,
+                turn=turn,
+                step_number=event.step_number,
+                event=event,
+                signal=runtime_signal,
             )
-            if inspect.isawaitable(callback_result):
-                callback_result = await callback_result
-            return callback_result
+            method_result = self.after_tool_call(ctx)
+            if inspect.isawaitable(method_result):
+                method_result = await method_result
+            hook_result = None
+            if active_hooks.after_tool_call:
+                hook_result = active_hooks.after_tool_call(ctx)
+                if inspect.isawaitable(hook_result):
+                    hook_result = await hook_result
+            return self._merge_after_tool_call_results(method_result, hook_result)
 
         async def reasoning_handler(event: ReasoningEvent) -> None:
+            method_result = self.on_reasoning_event(event)
+            if inspect.isawaitable(method_result):
+                await method_result
             if active_hooks.on_reasoning_event:
                 callback_result = active_hooks.on_reasoning_event(event)
                 if inspect.isawaitable(callback_result):

@@ -668,6 +668,60 @@ class TestAgentHooks:
     """Tests for typed agent hooks."""
 
     @pytest.mark.asyncio
+    async def test_subclass_before_tool_call_hook_runs_without_agenthooks(self):
+        executed = []
+
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            executed.append(value)
+            return value
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"value": "hello"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="done"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        storage = MemoryStorage()
+
+        class BlockingAgent(Agent):
+            async def before_tool_call(self, ctx):
+                return BeforeToolCallResult(block=True, reason="blocked by method")
+
+        agent = BlockingAgent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(5),
+        )
+        await agent.start()
+
+        await agent.chat("Start")
+        stored = await storage.get("test:messages")
+
+        assert executed == []
+        assert stored is not None
+        assert stored[2]["content"][0]["tool_result"]["result"] == "Error: blocked by method"
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_agent_before_tool_call_can_block_execution(self):
         executed = []
 

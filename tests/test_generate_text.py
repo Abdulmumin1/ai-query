@@ -88,6 +88,39 @@ class TestGenerateTextBasic:
         assert len(provider.last_messages) == 1
 
     @pytest.mark.asyncio
+    async def test_with_system_and_messages_prepends_system(self):
+        """generate_text should prepend system when messages lack a leading system message."""
+        provider = MockProvider(responses=[make_response(text="ok")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        await generate_text(
+            model=model,
+            system="repo rules",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        assert [msg.role for msg in provider.last_messages] == ["system", "user"]
+        assert provider.last_messages[0].content == "repo rules"
+
+    @pytest.mark.asyncio
+    async def test_with_system_and_existing_system_message_does_not_duplicate(self):
+        """generate_text should not duplicate a leading system message."""
+        provider = MockProvider(responses=[make_response(text="ok")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        await generate_text(
+            model=model,
+            system="repo rules",
+            messages=[
+                Message(role="system", content="existing rules"),
+                Message(role="user", content="hi"),
+            ],
+        )
+
+        assert [msg.role for msg in provider.last_messages] == ["system", "user"]
+        assert provider.last_messages[0].content == "existing rules"
+
+    @pytest.mark.asyncio
     async def test_with_message_objects(self):
         """generate_text should handle Message objects."""
         provider = MockProvider(responses=[

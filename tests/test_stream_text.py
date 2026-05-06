@@ -82,6 +82,55 @@ class TestStreamTextBasic:
         assert usage.total_tokens == 11
 
     @pytest.mark.asyncio
+    async def test_stream_with_system_and_messages_prepends_system(self):
+        """stream_text should prepend system when messages lack a leading system message."""
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(text="ok"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ]
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            system="repo rules",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        assert [msg.role for msg in provider.last_messages] == ["system", "user"]
+        assert provider.last_messages[0].content == "repo rules"
+
+    @pytest.mark.asyncio
+    async def test_stream_with_system_and_existing_system_message_does_not_duplicate(self):
+        """stream_text should not duplicate a leading system message."""
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(text="ok"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ]
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            system="repo rules",
+            messages=[
+                Message(role="system", content="existing rules"),
+                Message(role="user", content="hi"),
+            ],
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        assert [msg.role for msg in provider.last_messages] == ["system", "user"]
+        assert provider.last_messages[0].content == "existing rules"
+
+    @pytest.mark.asyncio
     async def test_stream_full_text(self):
         """stream_text should provide full text after completion."""
         provider = MockProvider(stream_chunks=[

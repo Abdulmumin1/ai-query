@@ -29,7 +29,23 @@ Hooks are intentionally narrow and typed. They are not a full plugin system.
 
 ## Configuring Hooks
 
-Set hooks on the agent as defaults:
+The best DX for subclass-based agents is to override hook methods on the class:
+
+```python
+class CodingAgent(Agent[dict[str, Any]]):
+    async def before_step(self, ctx):
+        await self.emit("status", {"phase": "step_start", "step": ctx.step_number})
+        return None
+
+    async def before_tool_call(self, ctx):
+        if ctx.event.tool_call.name == "bash":
+            command = ctx.event.tool_call.arguments.get("command", "")
+            if "rm -rf" in command:
+                return BeforeToolCallResult(block=True, reason="Refusing destructive command.")
+        return None
+```
+
+For composition-style usage, you can also set hooks on the agent instance:
 
 ```python
 from ai_query.agents import Agent, AgentHooks
@@ -163,33 +179,26 @@ class ChumpAgent(Agent[dict[str, Any]]):
             model=model,
             system=SYSTEM_PROMPT,
             storage=SQLiteStorage("chump.sqlite3"),
-            hooks=AgentHooks(
-                before_step=self._before_step,
-                after_step=self._after_step,
-                before_tool_call=self._before_tool_call,
-                after_tool_call=self._after_tool_call,
-                on_reasoning_event=self._on_reasoning_event,
-            ),
         )
 
-    async def _before_step(self, ctx):
+    async def before_step(self, ctx):
         await self.emit("status", {"phase": "step_start", "step": ctx.step_number})
         return None
 
-    async def _after_step(self, ctx):
+    async def after_step(self, ctx):
         await self.emit("status", {"phase": "step_finish", "step": ctx.step_number})
 
-    async def _before_tool_call(self, ctx):
+    async def before_tool_call(self, ctx):
         if ctx.event.tool_call.name == "bash":
             command = ctx.event.tool_call.arguments.get("command", "")
             if "rm -rf" in command:
                 return BeforeToolCallResult(block=True, reason="Refusing destructive command.")
         return None
 
-    async def _after_tool_call(self, ctx):
+    async def after_tool_call(self, ctx):
         return None
 
-    async def _on_reasoning_event(self, event):
+    async def on_reasoning_event(self, event):
         await self.emit("reasoning", {"kind": event.kind, "text": event.text})
 ```
 

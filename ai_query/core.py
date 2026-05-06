@@ -72,6 +72,32 @@ def _normalize_injected_messages(
     return normalized
 
 
+def _build_initial_messages(
+    *,
+    prompt: str | None = None,
+    system: str | None = None,
+    messages: list[Message] | list[dict[str, Any]] | None = None,
+) -> list[Message]:
+    final_messages: list[Message] = []
+
+    if messages is not None:
+        for msg in messages:
+            if isinstance(msg, Message):
+                final_messages.append(msg)
+            else:
+                final_messages.append(Message.from_dict(msg))
+
+        if system and (not final_messages or final_messages[0].role != "system"):
+            final_messages.insert(0, Message(role="system", content=system))
+        return final_messages
+
+    if system:
+        final_messages.append(Message(role="system", content=system))
+    if prompt:
+        final_messages.append(Message(role="user", content=prompt))
+    return final_messages
+
+
 async def generate_text(
     *,
     model: LanguageModel,
@@ -90,20 +116,11 @@ async def generate_text(
     **kwargs: Any,
 ) -> GenerateTextResult:
     """Generate text using an AI model."""
-    # Build messages list
-    final_messages: list[Message] = []
-
-    if messages is not None:
-        for msg in messages:
-            if isinstance(msg, Message):
-                final_messages.append(msg)
-            else:
-                final_messages.append(Message.from_dict(msg))
-    else:
-        if system:
-            final_messages.append(Message(role="system", content=system))
-        if prompt:
-            final_messages.append(Message(role="user", content=prompt))
+    final_messages = _build_initial_messages(
+        prompt=prompt,
+        system=system,
+        messages=messages,
+    )
 
     if not final_messages:
         raise ValueError("Either 'prompt' or 'messages' must be provided")
@@ -340,19 +357,11 @@ def stream_text(
     **kwargs: Any,
 ) -> TextStreamResult:
     """Stream text from an AI model."""
-    final_messages: list[Message] = []
-
-    if messages is not None:
-        for msg in messages:
-            if isinstance(msg, Message):
-                final_messages.append(msg)
-            else:
-                final_messages.append(Message.from_dict(msg))
-    else:
-        if system:
-            final_messages.append(Message(role="system", content=system))
-        if prompt:
-            final_messages.append(Message(role="user", content=prompt))
+    final_messages = _build_initial_messages(
+        prompt=prompt,
+        system=system,
+        messages=messages,
+    )
 
     if not final_messages:
         raise ValueError("Either 'prompt' or 'messages' must be provided")
