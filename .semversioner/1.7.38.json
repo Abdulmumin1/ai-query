@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Persist live turn history incrementally and keep aborted turns in message history instead of rolling them back.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-06T06:49:56+00:00",
+  "version": "1.7.38"
+}

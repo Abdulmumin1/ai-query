@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.38
+
+- patch: Persist live turn history incrementally and keep aborted turns in message history instead of rolling them back.
+
 ## 1.7.37
 
 - patch: Strip data URL prefixes from Google inline image inputs so Gemini providers receive raw base64 image data.
