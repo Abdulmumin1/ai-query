@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Strip data URL prefixes from Google inline image inputs so Gemini providers receive raw base64 image data.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-06T06:19:02+00:00",
+  "version": "1.7.37"
+}

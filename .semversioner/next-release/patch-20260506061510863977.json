@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Strip data URL prefixes from Google inline image inputs so Gemini providers receive raw base64 image data."
-}

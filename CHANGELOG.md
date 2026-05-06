@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.37
+
+- patch: Strip data URL prefixes from Google inline image inputs so Gemini providers receive raw base64 image data.
+
 ## 1.7.36
 
 - patch: Preserve image attachments in the OpenAI Responses message conversion path so multimodal chat requests reach the model correctly.
