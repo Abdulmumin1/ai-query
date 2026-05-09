@@ -290,18 +290,25 @@ class Agent(Generic[StateT]):
 
     # ─── Event Emission (The Core API) ─────────────────────────────────────
 
-    async def emit(self, event: str, data: Dict[str, Any]) -> int:
+    async def emit(
+        self,
+        event: str,
+        data: Dict[str, Any],
+        *,
+        replay: bool = True,
+    ) -> int:
         """Emit an event. Returns the event ID."""
         # Assign ID
         self._event_counter += 1
         event_id = self._event_counter
 
-        # Log event
-        event_record = {"id": event_id, "type": event, "data": data}
-        self._event_log.append(event_record)
+        if replay:
+            # Log replayable event only
+            event_record = {"id": event_id, "type": event, "data": data}
+            self._event_log.append(event_record)
 
-        # Persist if enabled
-        if self.enable_event_log:
+        # Persist if enabled and replayable
+        if replay and self.enable_event_log:
             await self._storage.set(f"{self._id}:event_log", self._event_log)
 
         # Deliver via handler (set by transport layer)

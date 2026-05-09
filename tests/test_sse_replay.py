@@ -111,6 +111,41 @@ class TestSSEReplay:
             assert "id: 1\n" in text
             assert "event: step_start\n" in text
 
+    @pytest.mark.asyncio
+    async def test_sse_replay_skips_non_replayable_events_but_keeps_id_gaps(self, aiohttp_client, event_agent_class):
+        """SSE replay should omit replay=False events while keeping global ids monotonic."""
+        server = AgentServer(event_agent_class)
+
+        agent = server.get_or_create("test-replay-gaps")
+        await agent.start()
+
+        live_events = []
+
+        async def handler(event: str, data: dict, event_id: int):
+            live_events.append((event, data, event_id))
+
+        agent._emit_handler = handler
+
+        id1 = await agent.emit("status", {"seq": 1})
+        id2 = await agent.emit("open_document", {"path": "README.md"}, replay=False)
+        id3 = await agent.emit("status", {"seq": 3})
+
+        assert [id1, id2, id3] == [1, 2, 3]
+        assert [event_id for _, _, event_id in live_events] == [1, 2, 3]
+
+        config = AgentServerConfig()
+        server._config = config
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        async with client.get("/agent/test-replay-gaps/events?last_event_id=1") as resp:
+            assert resp.status == 200
+            first_chunk = await resp.content.readuntil(b"\n\n")
+            text = first_chunk.decode("utf-8")
+            assert "id: 3\n" in text
+            assert "event: status\n" in text
+            assert "open_document" not in text
+
 
 class TestSSEEventFormatting:
     """Tests for SSE event formatting via emit handler."""

@@ -89,6 +89,31 @@ class TestEventLogBuiltin:
         await agent.stop()
 
     @pytest.mark.asyncio
+    async def test_emit_replay_false_skips_persistence_even_when_enabled(self):
+        """emit(replay=False) should deliver live but not persist to replay log."""
+        storage = MemoryStorage()
+
+        class DurableAgent(Agent):
+            enable_event_log = True
+
+        received = []
+        agent = DurableAgent("test", storage=storage)
+        agent._emit_handler = AsyncMock(
+            side_effect=lambda event, data, event_id: received.append((event, data, event_id))
+        )
+        await agent.start()
+
+        event_id = await agent.emit("open_document", {"path": "README.md"}, replay=False)
+
+        assert event_id == 1
+        assert received == [("open_document", {"path": "README.md"}, 1)]
+        assert agent._event_log == []
+        stored = await storage.get("test:event_log")
+        assert stored is None
+
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_event_log_loaded_on_start(self):
         """Event log should be loaded from storage on start."""
         storage = MemoryStorage()
@@ -155,6 +180,29 @@ class TestEventLogBuiltin:
 
         stored = await storage.get("test:event_log")
         assert stored is None
+
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_replay_events_can_have_id_gaps(self):
+        """replay_events should skip non-replayable ids but preserve monotonic ordering."""
+        class DurableAgent(Agent):
+            enable_event_log = True
+
+        agent = DurableAgent("test", storage=MemoryStorage())
+        await agent.start()
+
+        id1 = await agent.emit("status", {"n": 1})
+        id2 = await agent.emit("open_document", {"n": 2}, replay=False)
+        id3 = await agent.emit("status", {"n": 3})
+
+        replayed = []
+        async for event in agent.replay_events(after_id=id1):
+            replayed.append(event)
+
+        assert [id1, id2, id3] == [1, 2, 3]
+        assert [event.id for event in replayed] == [3]
+        assert [event.data for event in replayed] == [{"n": 3}]
 
         await agent.stop()
 

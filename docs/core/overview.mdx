@@ -89,6 +89,12 @@ There are two event concepts:
 - `agent.emit(...)` is for application events sent to clients and optionally replayed later.
 - `turn.events()` is a live execution stream for text, steps, reasoning, completion, and failure.
 
+Example of an ephemeral UI command that should not replay:
+
+```python
+await agent.emit("open_document", {"path": "README.md"}, replay=False)
+```
+
 ## Choosing Correctly
 
 Use the smallest primitive that gives you what you need.
