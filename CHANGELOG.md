@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.42
+
+- patch: fix: ephemeral agent events
+
 ## 1.7.41
 
 - patch: Add replay=False support for emitted agent events so ephemeral UI commands are delivered live without being replayed on reconnect.
