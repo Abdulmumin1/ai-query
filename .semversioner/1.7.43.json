@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "fix: deepseek reasoning and content serialization",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-10T20:12:34+00:00",
+  "version": "1.7.43"
+}

@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.43
+
+- patch: fix: deepseek reasoning and content serialization
+
 ## 1.7.42
 
 - patch: fix: ephemeral agent events
