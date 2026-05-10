@@ -362,13 +362,31 @@ class ServerHandlers:
         result = await agent.handle_request(body)
         return web.json_response(result)
 
+    async def _hydrate_or_404(self, agent_id: str) -> Any:
+        """Hydrate an agent from storage, or 404 if it has never existed.
+
+        Mirrors the lazy-hydrate pattern used by the streaming handlers, but
+        first probes storage for a persisted ``{agent_id}:state`` row so that
+        GET requests for truly-unknown ids return 404 instead of silently
+        creating an empty agent.
+        """
+        was_warm = agent_id in self.server._agents
+        agent = self.server.get_or_create(agent_id)
+        if agent._state is None:
+            if not was_warm:
+                stored = await agent._storage.get(f"{agent_id}:state")
+                if stored is None:
+                    # Roll back the placeholder created by get_or_create.
+                    self.server._agents.pop(agent_id, None)
+                    raise web.HTTPNotFound()
+            await agent.start()
+            await self.server.on_agent_create(agent)
+        return agent
+
     async def handle_get_state(self, request: web.Request) -> web.Response:
         await self._check_auth(request)
         agent_id = request.match_info["agent_id"]
-        if agent_id not in self.server._agents:
-            raise web.HTTPNotFound()
-        
-        agent = self.server._agents[agent_id].agent
+        agent = await self._hydrate_or_404(agent_id)
         try:
             return web.json_response(agent.state)
         except Exception:
@@ -377,10 +395,7 @@ class ServerHandlers:
     async def handle_get_messages(self, request: web.Request) -> web.Response:
         await self._check_auth(request)
         agent_id = request.match_info["agent_id"]
-        if agent_id not in self.server._agents:
-            raise web.HTTPNotFound()
-
-        agent = self.server._agents[agent_id].agent
+        agent = await self._hydrate_or_404(agent_id)
         msgs = [message.to_dict() for message in agent.messages]
         return web.json_response({"messages": msgs})
 

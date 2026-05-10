@@ -246,10 +246,30 @@ Clears message history and persists an empty message list.
 ## emit
 
 ```python
-async def emit(self, event: str, data: dict[str, Any]) -> int
+async def emit(
+    self,
+    event: str,
+    data: dict[str, Any],
+    *,
+    replay: bool = True,
+) -> int
 ```
 
 Emits an agent event.
+
+Parameters:
+
+<ParamField path="event" type="str" required>
+  Event type to deliver to connected clients.
+</ParamField>
+
+<ParamField path="data" type="dict[str, Any]" required>
+  Event payload.
+</ParamField>
+
+<ParamField path="replay" type="bool">
+  When `True`, the event is stored in the replay log and may be returned by `replay_events()`. When `False`, the event is delivered live to connected clients but omitted from replay persistence.
+</ParamField>
 
 Returns:
 
@@ -258,6 +278,12 @@ Returns:
 </ResponseField>
 
 If `enable_event_log = True`, events are persisted to storage.
+
+Notes:
+
+- Event IDs remain monotonic even for `replay=False` events.
+- Replay streams may therefore contain gaps in event IDs.
+- Use `replay=False` for ephemeral UI commands such as `open_document` that should not re-run on reconnect.
 
 ## replay_events
 
