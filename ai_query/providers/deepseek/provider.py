@@ -29,6 +29,10 @@ class DeepSeekProvider(OpenAIProvider):
 
         for message in messages:
             converted_message = await super()._convert_messages([message])
+            converted_message = [
+                self._sanitize_message_content(item)
+                for item in converted_message
+            ]
             if message.role == "assistant":
                 reasoning_text = self._extract_reasoning_text(message)
                 for item in converted_message:
@@ -37,6 +41,23 @@ class DeepSeekProvider(OpenAIProvider):
             converted.extend(converted_message)
 
         return converted
+
+    def _sanitize_message_content(self, message: dict[str, Any]) -> dict[str, Any]:
+        content = message.get("content")
+        if not isinstance(content, list):
+            return message
+
+        text_parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text_parts.append(str(part.get("text") or ""))
+
+        return {
+            **message,
+            "content": "".join(text_parts),
+        }
 
     def _extract_reasoning_text(self, message: Message) -> str:
         if isinstance(message.content, str):
