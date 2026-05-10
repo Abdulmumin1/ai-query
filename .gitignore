@@ -5,6 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
+pi-mono/
+.chump/
 
 # Virtual environments
 .venv

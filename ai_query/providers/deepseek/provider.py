@@ -6,6 +6,8 @@ import os
 
 from ai_query.model import LanguageModel
 from ai_query.providers.openai.provider import OpenAIProvider
+from typing import Any
+from ai_query.types import Message
 
 
 class DeepSeekProvider(OpenAIProvider):
@@ -22,6 +24,29 @@ class DeepSeekProvider(OpenAIProvider):
             **kwargs,
         )
 
+    async def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
+        converted = await super()._convert_messages(messages)
+        for msg in converted:
+            if msg.get("role") == "assistant":
+                content = msg.get("content")
+                if isinstance(content, list):
+                    has_reasoning = any(
+                        isinstance(part, dict) and part.get("type") == "reasoning"
+                        for part in content
+                    )
+                    if not has_reasoning:
+                        content.append({"type": "reasoning", "text": ""})
+                elif isinstance(content, str):
+                    msg["content"] = [
+                        {"type": "text", "text": content},
+                        {"type": "reasoning", "text": ""},
+                    ]
+                elif not content:
+                    msg["content"] = [
+                        {"type": "text", "text": ""},
+                        {"type": "reasoning", "text": ""},
+                    ]
+        return converted
 
 # Cached provider instance
 _default_provider: DeepSeekProvider | None = None
