@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Add replay=False support for emitted agent events so ephemeral UI commands are delivered live without being replayed on reconnect."
-}
