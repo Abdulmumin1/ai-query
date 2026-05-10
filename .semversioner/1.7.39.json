@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Normalize injected hook messages and add safe transport cleanup while introducing typed agent runtime hooks.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-06T14:46:34+00:00",
+  "version": "1.7.39"
+}

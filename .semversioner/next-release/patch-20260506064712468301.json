@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Persist live turn history incrementally and keep aborted turns in message history instead of rolling them back."
-}

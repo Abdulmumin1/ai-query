@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Normalize injected hook messages and add safe transport cleanup while introducing typed agent runtime hooks."
-}

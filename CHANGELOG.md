@@ -1,6 +1,30 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.41
+
+- patch: Add replay=False support for emitted agent events so ephemeral UI commands are delivered live without being replayed on reconnect.
+
+## 1.7.40
+
+- patch: Preserve SSE event ids during replay so last_event_id recovery remains lossless.
+
+## 1.7.39
+
+- patch: Normalize injected hook messages and add safe transport cleanup while introducing typed agent runtime hooks.
+
+## 1.7.38
+
+- patch: Persist live turn history incrementally and keep aborted turns in message history instead of rolling them back.
+
+## 1.7.37
+
+- patch: Strip data URL prefixes from Google inline image inputs so Gemini providers receive raw base64 image data.
+
+## 1.7.36
+
+- patch: Preserve image attachments in the OpenAI Responses message conversion path so multimodal chat requests reach the model correctly.
+
 ## 1.7.35
 
 - patch: Add live agent turns, improve chat request passthrough, and restructure the documentation around a clearer learning path.
