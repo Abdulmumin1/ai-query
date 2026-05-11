@@ -481,6 +481,13 @@ class ToolResultPart:
     tool_result: Union[ToolResult, None] = None
 
 
+@dataclass
+class ReasoningPart:
+    type: Literal["reasoning"] = "reasoning"
+    text: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
+
+
 # =============================================================================
 # Stop Conditions
 # =============================================================================
@@ -491,6 +498,7 @@ class StepResult:
     text: str
     tool_calls: list[ToolCall]
     tool_results: list[ToolResult]
+    reasoning_parts: list[ReasoningPart] = field(default_factory=list)
     finish_reason: Union[str, None] = None
 
 
@@ -609,7 +617,14 @@ class FilePart:
     media_type: str = ""
 
 
-ContentPart = Union[TextPart, ImagePart, FilePart, ToolCallPart, ToolResultPart]
+ContentPart = Union[
+    TextPart,
+    ImagePart,
+    FilePart,
+    ToolCallPart,
+    ToolResultPart,
+    ReasoningPart,
+]
 
 
 @dataclass
@@ -669,6 +684,10 @@ class Message:
         elif isinstance(part, ToolResultPart):
             if part.tool_result:
                 part_dict["tool_result"] = cls._tool_result_to_dict(part.tool_result)
+        elif isinstance(part, ReasoningPart):
+            part_dict["text"] = part.text
+            if part.data:
+                part_dict["data"] = part.data
 
         return part_dict
 
@@ -710,6 +729,14 @@ class Message:
                     is_error=tool_result.get("is_error", False),
                 )
             return ToolResultPart(tool_result=tool_result)
+        if part_type == "reasoning":
+            data = part.get("data")
+            if not isinstance(data, dict):
+                data = {}
+            return ReasoningPart(
+                text=part.get("text", ""),
+                data=data,
+            )
 
         return part
 
@@ -745,6 +772,7 @@ class Usage:
 class GenerateTextResult:
     text: str
     steps: list[StepResult] = field(default_factory=list)
+    reasoning_parts: list[ReasoningPart] = field(default_factory=list)
     finish_reason: Union[str, None] = None
     usage: Union[Usage, None] = None
     response: dict[str, Any] = field(default_factory=dict)

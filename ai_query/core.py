@@ -10,6 +10,8 @@ from ai_query.types import (
     GenerateTextResult,
     Message,
     ProviderOptions,
+    ReasoningEvent,
+    ReasoningPart,
     TextPart,
     ToolCallPart,
     ToolResultPart,
@@ -96,6 +98,61 @@ def _build_initial_messages(
     if prompt:
         final_messages.append(Message(role="user", content=prompt))
     return final_messages
+
+
+def _reasoning_event_payload(event: ReasoningEvent) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "provider": event.provider,
+        "kind": event.kind,
+    }
+    payload.update(event.data)
+    return payload
+
+
+def _append_reasoning_event(
+    reasoning_parts: list[ReasoningPart],
+    event: ReasoningEvent,
+) -> None:
+    event_payload = _reasoning_event_payload(event)
+    if event.kind in {"signature", "state"}:
+        target = None
+        if reasoning_parts and reasoning_parts[-1].data.get("provider") == event.provider:
+            target = reasoning_parts[-1]
+        if target is None:
+            target = ReasoningPart(data={"provider": event.provider})
+            reasoning_parts.append(target)
+        target.data.update(event_payload)
+        if event.text:
+            target.text += event.text
+        return
+
+    if (
+        reasoning_parts
+        and reasoning_parts[-1].data.get("provider") == event.provider
+        and reasoning_parts[-1].data.get("kind") == event.kind
+        and {k: v for k, v in reasoning_parts[-1].data.items() if k not in {"provider", "kind"}}
+        == event.data
+    ):
+        reasoning_parts[-1].text += event.text or ""
+        reasoning_parts[-1].data.update(event_payload)
+        return
+
+    reasoning_parts.append(
+        ReasoningPart(
+            text=event.text or "",
+            data=event_payload,
+        )
+    )
+
+
+def _build_assistant_step_content(step: StepResult) -> str | list[Any]:
+    assistant_content: list[Any] = []
+    assistant_content.extend(step.reasoning_parts)
+    if step.text:
+        assistant_content.append(TextPart(text=step.text))
+    for tool_call in step.tool_calls:
+        assistant_content.append(ToolCallPart(tool_call=tool_call))
+    return assistant_content if assistant_content else ""
 
 
 async def generate_text(
@@ -195,6 +252,7 @@ async def generate_text(
             text=result.text,
             tool_calls=tool_calls,
             tool_results=[],
+            reasoning_parts=list(result.reasoning_parts),
             finish_reason=result.finish_reason,
         )
 
@@ -314,16 +372,12 @@ async def generate_text(
             final_result.usage = total_usage
             break
 
-        assistant_content: list = []
-        if result.text:
-            assistant_content.append(TextPart(text=result.text))
-        for tc in tool_calls:
-            assistant_content.append(ToolCallPart(tool_call=tc))
-
-        current_messages.append(Message(
-            role="assistant",
-            content=assistant_content if assistant_content else "",
-        ))
+        current_messages.append(
+            Message(
+                role="assistant",
+                content=_build_assistant_step_content(step),
+            )
+        )
 
         tool_result_parts = [ToolResultPart(tool_result=tr) for tr in tool_results]
         current_messages.append(Message(
@@ -427,11 +481,15 @@ def stream_text(
 
             step_text = ""
             step_tool_calls: list[ToolCall] = []
+            step_reasoning_parts: list[ReasoningPart] = []
             step_finish_reason = None
 
             async for chunk in stream:
-                if chunk.reasoning_events and on_reasoning_event:
+                if chunk.reasoning_events:
                     for event in chunk.reasoning_events:
+                        _append_reasoning_event(step_reasoning_parts, event)
+                        if not on_reasoning_event:
+                            continue
                         callback_result = on_reasoning_event(event)
                         if inspect.isawaitable(callback_result):
                             await callback_result
@@ -457,6 +515,7 @@ def stream_text(
                 text=step_text,
                 tool_calls=step_tool_calls,
                 tool_results=[],
+                reasoning_parts=step_reasoning_parts,
                 finish_reason=step_finish_reason,
             )
 
@@ -579,16 +638,12 @@ def stream_text(
                 )
                 break
 
-            assistant_content: list = []
-            if step_text:
-                assistant_content.append(TextPart(text=step_text))
-            for tc in step_tool_calls:
-                assistant_content.append(ToolCallPart(tool_call=tc))
-
-            current_messages.append(Message(
-                role="assistant",
-                content=assistant_content if assistant_content else "",
-            ))
+            current_messages.append(
+                Message(
+                    role="assistant",
+                    content=_build_assistant_step_content(step),
+                )
+            )
 
             tool_result_parts = [ToolResultPart(tool_result=tr) for tr in tool_results]
             current_messages.append(Message(

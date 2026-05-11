@@ -14,6 +14,7 @@ from ai_query.types import (
     ToolResult,
     ToolCallPart,
     ToolResultPart,
+    ReasoningPart,
     Message,
     TextPart,
     ImagePart,
@@ -567,6 +568,27 @@ class TestMessage:
         assert restored.content[0].tool_result is not None
         assert restored.content[0].tool_result.result == "Sunny"
 
+    def test_message_reasoning_round_trip(self):
+        """Message should preserve reasoning parts through dict serialization."""
+        msg = Message(
+            role="assistant",
+            content=[
+                ReasoningPart(text="plan", data={"provider": "mock", "signature": "sig"}),
+                TextPart(text="Answer"),
+            ],
+        )
+
+        stored = msg.to_dict()
+        restored = Message.from_dict(stored)
+
+        assert stored["content"][0] == {
+            "type": "reasoning",
+            "text": "plan",
+            "data": {"provider": "mock", "signature": "sig"},
+        }
+        assert isinstance(restored.content[0], ReasoningPart)
+        assert restored.content[0].data["signature"] == "sig"
+
 
 # =============================================================================
 # Usage Tests
@@ -621,6 +643,15 @@ class TestGenerateTextResult:
         assert result.response["id"] == "123"
         assert result.provider_metadata["model"] == "gpt-4"
 
+    def test_result_stores_reasoning_parts(self):
+        """GenerateTextResult should keep reasoning parts."""
+        result = GenerateTextResult(
+            text="Hello!",
+            reasoning_parts=[ReasoningPart(text="thinking", data={"provider": "mock"})],
+        )
+
+        assert result.reasoning_parts[0].text == "thinking"
+
 
 class TestStreamChunk:
     """Tests for StreamChunk."""
@@ -667,6 +698,17 @@ class TestStepResult:
         assert step.text == "Thinking..."
         assert len(step.tool_calls) == 1
         assert len(step.tool_results) == 1
+
+    def test_step_result_stores_reasoning_parts(self):
+        """StepResult should keep reasoning parts."""
+        step = StepResult(
+            text="",
+            tool_calls=[],
+            tool_results=[],
+            reasoning_parts=[ReasoningPart(text="plan", data={"provider": "mock"})],
+        )
+
+        assert step.reasoning_parts[0].text == "plan"
 
 
 # =============================================================================

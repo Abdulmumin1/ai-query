@@ -18,6 +18,7 @@ from ai_query.agents import (
 from ai_query.types import (
     Message,
     ReasoningEvent,
+    ReasoningPart,
     StreamChunk,
     ToolCall,
     ToolCallPart,
@@ -454,6 +455,75 @@ class TestAgentChat:
         await agent_reloaded.start()
         assert isinstance(agent_reloaded.messages[1].content[1], ToolCallPart)
         assert isinstance(agent_reloaded.messages[2].content[0], ToolResultPart)
+        await agent_reloaded.stop()
+
+    @pytest.mark.asyncio
+    async def test_chat_persists_reasoning_parts(self):
+        """chat() should persist reasoning parts in assistant messages."""
+
+        @tool(description="Read file")
+        def read_file(path: str) -> str:
+            return f"contents of {path}"
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        reasoning_events=[
+                            ReasoningEvent(
+                                kind="delta",
+                                provider="mock",
+                                text="Read file A, then update file B.",
+                            )
+                        ]
+                    ),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="read_file",
+                                arguments={"path": "file_a.txt"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="Updated file B."),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        storage = MemoryStorage()
+        agent = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"read_file": read_file},
+            stop_when=step_count_is(10),
+        )
+        await agent.start()
+
+        response = await agent.chat("Fix the bug")
+        stored = await storage.get("test:messages")
+
+        assert response == "Updated file B."
+        assert stored[1]["content"][0]["type"] == "reasoning"
+        assert stored[1]["content"][0]["text"] == "Read file A, then update file B."
+        await agent.stop()
+
+        agent_reloaded = Agent(
+            "test",
+            storage=storage,
+            model=model,
+            tools={"read_file": read_file},
+            stop_when=step_count_is(10),
+        )
+        await agent_reloaded.start()
+        assert isinstance(agent_reloaded.messages[1].content[0], ReasoningPart)
+        assert agent_reloaded.messages[1].content[0].text == "Read file A, then update file B."
         await agent_reloaded.stop()
 
 

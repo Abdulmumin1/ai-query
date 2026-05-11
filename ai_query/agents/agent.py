@@ -389,6 +389,7 @@ class Agent(Generic[StateT]):
     def _append_step_message(self, step: StepResult) -> None:
         if step.tool_calls:
             assistant_content: list[Any] = []
+            assistant_content.extend(step.reasoning_parts)
             if step.text:
                 assistant_content.append(TextPart(text=step.text))
             for tool_call in step.tool_calls:
@@ -407,6 +408,13 @@ class Agent(Generic[StateT]):
             ]
             if tool_result_parts:
                 self._messages.append(Message(role="tool", content=tool_result_parts))
+            return
+
+        if step.reasoning_parts:
+            assistant_content = [*step.reasoning_parts]
+            if step.text:
+                assistant_content.append(TextPart(text=step.text))
+            self._messages.append(Message(role="assistant", content=assistant_content))
             return
 
         if step.text:

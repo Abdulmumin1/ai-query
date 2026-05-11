@@ -12,6 +12,7 @@ from ai_query.types import (
     Message,
     ProviderOptions,
     ReasoningEvent,
+    ReasoningPart,
     Usage,
     StreamChunk,
     ToolSet,
@@ -504,6 +505,7 @@ class GoogleProvider(BaseProvider):
         # Extract text and function calls from response
         text = ""
         tool_calls: list[ToolCall] = []
+        reasoning_parts: list[ReasoningPart] = []
         candidates = response.get("candidates", [])
         candidate = candidates[0] if candidates else None
         if isinstance(candidate, dict):
@@ -514,7 +516,17 @@ class GoogleProvider(BaseProvider):
                 if not isinstance(part, dict):
                     continue
                 if "text" in part:
-                    text += part["text"]
+                    if part.get("thought"):
+                        reasoning_parts.append(
+                            ReasoningPart(
+                                text=part["text"],
+                                data={"provider": self.name},
+                            )
+                        )
+                        if "thoughtSignature" in part:
+                            reasoning_parts[-1].data["signature"] = part["thoughtSignature"]
+                    else:
+                        text += part["text"]
                 elif "functionCall" in part:
                     fc = part["functionCall"]
                     if not isinstance(fc, dict):
@@ -556,6 +568,7 @@ class GoogleProvider(BaseProvider):
 
         return GenerateTextResult(
             text=text,
+            reasoning_parts=reasoning_parts,
             finish_reason=finish_reason,
             usage=usage,
             response=response_with_tools,
