@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Persist assistant reasoning across tool loops and roundtrip provider-native thinking state so agents preserve in-flight plans between tool calls."
-}

@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.44
+
+- patch: Persist assistant reasoning across tool loops and roundtrip provider-native thinking state so agents preserve in-flight plans between tool calls.
+
 ## 1.7.43
 
 - patch: fix: deepseek reasoning and content serialization
