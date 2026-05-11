@@ -7,6 +7,7 @@ from typing import Any
 
 from ai_query.model import EmbeddingModel, LanguageModel
 from ai_query.providers.openai.provider import OpenAIProvider
+from ai_query.types import Message
 
 
 def _resolve_cloudflare_api_key(api_key: str | None) -> str | None:
@@ -111,6 +112,20 @@ class WorkersAIProvider(OpenAIProvider):
 
         super().__init__(api_key=resolved_api_key, base_url=resolved_base_url, **kwargs)
         self.account_id = resolved_account_id
+
+    async def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
+        converted: list[dict[str, Any]] = []
+
+        for message in messages:
+            converted_message = await super()._convert_messages([message])
+            if message.role == "assistant":
+                reasoning_text = self.reasoning_text(message)
+                for item in converted_message:
+                    if item.get("role") == "assistant":
+                        item["reasoning_content"] = reasoning_text
+            converted.extend(converted_message)
+
+        return converted
 
 
 _default_provider: WorkersAIProvider | None = None

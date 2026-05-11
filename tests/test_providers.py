@@ -6,7 +6,7 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from ai_query.types import Message, Usage, ToolCall, Tool, ImagePart
+from ai_query.types import Message, Usage, ToolCall, Tool, ImagePart, ReasoningPart, TextPart
 from ai_query.model import LanguageModel
 
 
@@ -143,6 +143,31 @@ class TestBaseProvider:
 
         with pytest.raises(ValueError, match="does not support normalized reasoning"):
             provider.apply_reasoning(None, {"effort": "high"}, model="test-model")
+
+    def test_iter_reasoning_parts_filters_other_providers(self):
+        """BaseProvider should keep only reasoning parts for the active provider."""
+        from ai_query.providers.base import BaseProvider
+
+        class TestProvider(BaseProvider):
+            name = "test"
+
+            async def generate(self, **kwargs):
+                pass
+
+            async def stream(self, **kwargs):
+                pass
+
+        provider = TestProvider()
+        message = Message(
+            role="assistant",
+            content=[
+                ReasoningPart(text="mine", data={"provider": "test"}),
+                ReasoningPart(text="other", data={"provider": "other"}),
+                {"type": "reasoning", "text": "legacy", "data": {}},
+            ],
+        )
+
+        assert [part.text for part in provider.iter_reasoning_parts(message)] == ["mine", "legacy"]
 
 
 # =============================================================================
@@ -514,6 +539,46 @@ class TestGoogleProvider:
         assert result.response["tool_calls"][0].metadata["openai_response_output"][0]["type"] == "reasoning"
 
     @pytest.mark.asyncio
+    async def test_openai_generate_captures_reasoning_content(self):
+        """OpenAI generate should capture reasoning content separately from text."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Answer",
+                                "reasoning_content": "think",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ]
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = OpenAIProvider(api_key="test", transport=FakeTransport())
+
+        result = await provider.generate(
+            model="gpt-5.4",
+            messages=[Message(role="user", content="Hello")],
+        )
+
+        assert result.text == "Answer"
+        assert result.reasoning_parts[0].text == "think"
+        assert result.reasoning_parts[0].data == {
+            "provider": "openai",
+            "field": "reasoning_content",
+        }
+
+    @pytest.mark.asyncio
     async def test_openai_stream_uses_responses_for_reasoning_effort_with_tools(self):
         """OpenAI streaming should use Responses fallback for tools with reasoning."""
         from ai_query.providers.openai import OpenAIProvider
@@ -689,6 +754,62 @@ class TestGoogleProvider:
 
 
 # =============================================================================
+# DeepSeek Provider Tests
+# =============================================================================
+
+
+class TestDeepSeekProvider:
+    """Tests for DeepSeek provider."""
+
+    @pytest.mark.asyncio
+    async def test_deepseek_sends_reasoning_content_for_assistant_messages(self):
+        """DeepSeek should always send reasoning_content on assistant messages."""
+        from ai_query.providers.deepseek import DeepSeekProvider
+
+        class CaptureTransport:
+            def __init__(self):
+                self.last_json = None
+
+            async def post(self, url, json, headers=None):
+                self.last_json = json
+                return {
+                    "choices": [
+                        {
+                            "message": {"content": "Answer"},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        transport = CaptureTransport()
+        provider = DeepSeekProvider(api_key="test", transport=transport)
+
+        await provider.generate(
+            model="deepseek-reasoner",
+            messages=[
+                Message(role="assistant", content=[TextPart(text="Answer")]),
+                Message(
+                    role="assistant",
+                    content=[
+                        ReasoningPart(text="think", data={"provider": "deepseek"}),
+                        TextPart(text="More answer"),
+                    ],
+                ),
+            ],
+        )
+
+        assert transport.last_json["messages"][0]["reasoning_content"] == ""
+        assert transport.last_json["messages"][1]["reasoning_content"] == "think"
+
+
+# =============================================================================
 # Anthropic Provider Tests
 # =============================================================================
 
@@ -800,6 +921,68 @@ class TestAnthropicProvider:
             )
 
     @pytest.mark.asyncio
+    async def test_anthropic_generate_roundtrips_reasoning_parts(self):
+        """Anthropic generate should send and restore thinking/signature blocks."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        class CaptureTransport:
+            def __init__(self):
+                self.last_json = None
+
+            async def post(self, url, json, headers=None):
+                self.last_json = json
+                return {
+                    "content": [
+                        {"type": "thinking", "thinking": "plan"},
+                        {"type": "signature", "signature": "sig"},
+                        {"type": "text", "text": "Answer"},
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 2},
+                    "stop_reason": "end_turn",
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        transport = CaptureTransport()
+        provider = AnthropicProvider(api_key="test", transport=transport)
+
+        result = await provider.generate(
+            model="claude-sonnet-4-20250514",
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[
+                        ReasoningPart(
+                            text="previous plan",
+                            data={"provider": "anthropic", "signature": "prev-sig"},
+                        ),
+                        TextPart(text="Previous answer"),
+                    ],
+                )
+            ],
+        )
+
+        assert transport.last_json["messages"][0]["content"][0] == {
+            "type": "thinking",
+            "thinking": "previous plan",
+        }
+        assert transport.last_json["messages"][0]["content"][1] == {
+            "type": "signature",
+            "signature": "prev-sig",
+        }
+        assert result.text == "Answer"
+        assert result.reasoning_parts[0].text == "plan"
+        assert result.reasoning_parts[0].data == {
+            "provider": "anthropic",
+            "signature": "sig",
+        }
+
+    @pytest.mark.asyncio
     async def test_anthropic_stream_emits_reasoning_events(self):
         """Anthropic stream should expose thinking deltas as reasoning events."""
         from ai_query.providers.anthropic import AnthropicProvider
@@ -905,6 +1088,53 @@ class TestWorkersAIProvider:
 
         assert transport.last_json["max_tokens"] == 123
         assert "max_completion_tokens" not in transport.last_json
+
+    @pytest.mark.asyncio
+    async def test_workers_ai_roundtrips_reasoning_content_on_assistant_messages(self):
+        """Workers AI should send reasoning_content for assistant messages."""
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        class CaptureTransport:
+            def __init__(self):
+                self.last_json = None
+
+            async def post(self, url, json, headers=None):
+                self.last_json = json
+                return {
+                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        transport = CaptureTransport()
+        provider = WorkersAIProvider(
+            api_key="token",
+            account_id="account-123",
+            transport=transport,
+        )
+
+        await provider.generate(
+            model="@cf/moonshotai/kimi-k2.5",
+            messages=[
+                Message(role="assistant", content=[TextPart(text="Answer")]),
+                Message(
+                    role="assistant",
+                    content=[
+                        ReasoningPart(text="think", data={"provider": "workers_ai"}),
+                        TextPart(text="More answer"),
+                    ],
+                ),
+            ],
+        )
+
+        assert transport.last_json["messages"][0]["reasoning_content"] == ""
+        assert transport.last_json["messages"][1]["reasoning_content"] == "think"
 
     @pytest.mark.asyncio
     async def test_workers_ai_stream_emits_openai_compatible_reasoning_events(self):
@@ -1169,6 +1399,48 @@ class TestGoogleReasoningProvider:
 
         with pytest.raises(ValueError, match="does not support normalized reasoning.effort"):
             provider.apply_reasoning(None, {"effort": "high"}, model="gemini-2.5-pro")
+
+    @pytest.mark.asyncio
+    async def test_google_generate_separates_thought_from_text(self):
+        """Google generate should keep thought text in reasoning parts."""
+        from ai_query.providers.google import GoogleProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": "think", "thought": True, "thoughtSignature": "sig"},
+                                    {"text": "Answer"},
+                                ]
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ]
+                }
+
+            async def stream(self, url, json, headers=None):
+                if False:
+                    yield b""
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = GoogleProvider(api_key="test", transport=FakeTransport())
+
+        result = await provider.generate(
+            model="gemini-2.5-pro",
+            messages=[Message(role="user", content="Hello")],
+        )
+
+        assert result.text == "Answer"
+        assert result.reasoning_parts[0].text == "think"
+        assert result.reasoning_parts[0].data == {
+            "provider": "google",
+            "signature": "sig",
+        }
 
     @pytest.mark.asyncio
     async def test_google_stream_emits_thought_reasoning_events(self):

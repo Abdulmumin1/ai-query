@@ -13,6 +13,7 @@ from ai_query.types import (
     Message,
     ProviderOptions,
     ReasoningEvent,
+    ReasoningPart,
     Usage,
     StreamChunk,
     ToolSet,
@@ -379,6 +380,40 @@ class OpenAIProvider(BaseProvider):
                     summaries.append(str(part["text"]))
         return summaries
 
+    def _extract_reasoning_parts_from_chat_message(
+        self, message: dict[str, Any]
+    ) -> list[ReasoningPart]:
+        reasoning_parts: list[ReasoningPart] = []
+        for field in ("reasoning_content", "thinking", "thought"):
+            value = message.get(field)
+            if value:
+                reasoning_parts.append(
+                    ReasoningPart(
+                        text=str(value),
+                        data={"provider": self.name, "field": field},
+                    )
+                )
+
+        reasoning = message.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            reasoning_parts.append(
+                ReasoningPart(
+                    text=reasoning,
+                    data={"provider": self.name, "field": "reasoning"},
+                )
+            )
+
+        reasoning_summary = message.get("reasoning_summary")
+        if reasoning_summary:
+            reasoning_parts.append(
+                ReasoningPart(
+                    text=str(reasoning_summary),
+                    data={"provider": self.name, "field": "reasoning_summary", "kind": "summary"},
+                )
+            )
+
+        return reasoning_parts
+
     async def _convert_messages_for_responses(
         self, messages: list[Message]
     ) -> list[dict[str, Any]]:
@@ -627,6 +662,13 @@ class OpenAIProvider(BaseProvider):
 
         return GenerateTextResult(
             text=self._extract_text_from_responses_output(response),
+            reasoning_parts=[
+                ReasoningPart(
+                    text=summary,
+                    data={"provider": self.name, "field": "reasoning.summary", "kind": "summary"},
+                )
+                for summary in self._extract_reasoning_summaries_from_responses_output(response)
+            ],
             finish_reason="tool_use" if tool_calls else response.get("status"),
             usage=usage,
             response=response_with_tools,
@@ -755,6 +797,7 @@ class OpenAIProvider(BaseProvider):
 
         return GenerateTextResult(
             text=message.get("content") or "",
+            reasoning_parts=self._extract_reasoning_parts_from_chat_message(message),
             finish_reason=choice.get("finish_reason"),
             usage=usage,
             response=response_with_tools,

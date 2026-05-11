@@ -9,6 +9,7 @@ from ai_query import stream_text, tool, Field, step_count_is
 from ai_query.types import (
     Message,
     ReasoningEvent,
+    ReasoningPart,
     StepControl,
     Usage,
     StreamChunk,
@@ -277,6 +278,60 @@ class TestStreamTextBasic:
             pass
 
         assert [event.text for event in reasoning_events] == ["summary"]
+
+    @pytest.mark.asyncio
+    async def test_stream_reasoning_parts_are_carried_into_next_tool_step(self):
+        """stream_text should preserve assistant reasoning between tool steps."""
+
+        @tool(description="Read file")
+        def read_file(path: str) -> str:
+            return f"contents of {path}"
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        reasoning_events=[
+                            ReasoningEvent(
+                                kind="delta",
+                                provider="mock",
+                                text="Read file A, then update file B.",
+                            )
+                        ]
+                    ),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            make_tool_call("read_file", {"path": "file_a.txt"}, id="call_1")
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="Updated file B."),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            prompt="Fix the bug",
+            tools={"read_file": read_file},
+            stop_when=step_count_is(10),
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        steps = await result.steps
+        assert steps[0].reasoning_parts[0].text == "Read file A, then update file B."
+        assistant_message = provider.last_messages[1]
+        assert assistant_message.role == "assistant"
+        assert isinstance(assistant_message.content, list)
+        assert isinstance(assistant_message.content[0], ReasoningPart)
+        assert assistant_message.content[0].text == "Read file A, then update file B."
 
     @pytest.mark.asyncio
     async def test_stream_direct_iteration(self):

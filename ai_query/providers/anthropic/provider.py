@@ -11,6 +11,7 @@ from ai_query.types import (
     GenerateTextResult,
     Message,
     ProviderOptions,
+    ReasoningPart,
     Usage,
     ReasoningEvent,
     StreamChunk,
@@ -128,6 +129,43 @@ class AnthropicProvider(BaseProvider):
 
         return updated
 
+    def _reasoning_blocks(self, part: ReasoningPart) -> list[dict[str, Any]]:
+        provider = part.data.get("provider")
+        if provider and provider != self.name:
+            return []
+
+        blocks: list[dict[str, Any]] = []
+        signature = part.data.get("signature")
+        if part.text or signature is not None:
+            blocks.append({"type": "thinking", "thinking": part.text})
+        if signature is not None:
+            blocks.append({"type": "signature", "signature": signature})
+        return blocks
+
+    def _extract_reasoning_parts(self, content: list[Any]) -> list[ReasoningPart]:
+        reasoning_parts: list[ReasoningPart] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "thinking":
+                reasoning_parts.append(
+                    ReasoningPart(
+                        text=str(block.get("thinking") or ""),
+                        data={"provider": self.name},
+                    )
+                )
+            elif block.get("type") == "signature":
+                signature = block.get("signature")
+                if reasoning_parts:
+                    reasoning_parts[-1].data["signature"] = signature
+                else:
+                    reasoning_parts.append(
+                        ReasoningPart(
+                            data={"provider": self.name, "signature": signature},
+                        )
+                    )
+        return reasoning_parts
+
     async def _convert_messages(
         self, messages: list[Message]
     ) -> tuple[str | None, list[dict[str, Any]]]:
@@ -243,6 +281,18 @@ class AnthropicProvider(BaseProvider):
                                         "is_error": tr.is_error,
                                     }
                                 )
+                        elif part.get("type") == "reasoning":
+                            data = part.get("data")
+                            if not isinstance(data, dict):
+                                data = {}
+                            content_parts.extend(
+                                self._reasoning_blocks(
+                                    ReasoningPart(
+                                        text=str(part.get("text") or ""),
+                                        data=data,
+                                    )
+                                )
+                            )
 
                     # Handle dataclass-style parts
                     elif isinstance(part, TextPart):
@@ -327,6 +377,8 @@ class AnthropicProvider(BaseProvider):
                                     "is_error": tr.is_error,
                                 }
                             )
+                    elif isinstance(part, ReasoningPart):
+                        content_parts.extend(self._reasoning_blocks(part))
 
             result.append({"role": role, "content": content_parts})
 
@@ -399,6 +451,7 @@ class AnthropicProvider(BaseProvider):
         # Extract text and tool calls from response
         text = ""
         tool_calls: list[ToolCall] = []
+        reasoning_parts = self._extract_reasoning_parts(response.get("content", []))
         for block in response.get("content", []):
             if not isinstance(block, dict):
                 continue
@@ -433,6 +486,7 @@ class AnthropicProvider(BaseProvider):
 
         return GenerateTextResult(
             text=text,
+            reasoning_parts=reasoning_parts,
             finish_reason=response.get("stop_reason"),
             usage=usage,
             response=response_with_tools,

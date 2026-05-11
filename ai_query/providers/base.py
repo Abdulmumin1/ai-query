@@ -14,6 +14,7 @@ from ai_query.types import (
     GenerateTextResult,
     Message,
     ProviderOptions,
+    ReasoningPart,
     StreamChunk,
     ToolSet,
     Usage,
@@ -183,6 +184,40 @@ class BaseProvider(ABC):
             f"Conflicting reasoning settings for {self.name}/{model}: {keys}. "
             f"Use either the top-level reasoning parameter or provider_options['{self.name}'], not both."
         )
+
+    def iter_reasoning_parts(self, message: Message) -> list[ReasoningPart]:
+        if isinstance(message.content, str):
+            return []
+
+        reasoning_parts: list[ReasoningPart] = []
+        for part in message.content:
+            normalized: ReasoningPart | None = None
+            if isinstance(part, ReasoningPart):
+                normalized = part
+            elif isinstance(part, dict) and part.get("type") == "reasoning":
+                data = part.get("data")
+                if not isinstance(data, dict):
+                    data = {}
+                normalized = ReasoningPart(
+                    text=str(part.get("text") or ""),
+                    data=data,
+                )
+
+            if normalized is None:
+                continue
+
+            provider = normalized.data.get("provider")
+            if provider and provider != self.name:
+                continue
+            reasoning_parts.append(normalized)
+
+        return reasoning_parts
+
+    def reasoning_text(self, message: Message) -> str:
+        return "".join(part.text for part in self.iter_reasoning_parts(message))
+
+    def has_reasoning_parts(self, message: Message) -> bool:
+        return bool(self.iter_reasoning_parts(message))
 
 
     async def _fetch_resource_as_base64(self, url: str) -> tuple[str, str]:

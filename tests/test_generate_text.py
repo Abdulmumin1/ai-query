@@ -9,6 +9,7 @@ from ai_query import generate_text, tool, Field, step_count_is
 from ai_query.types import (
     GenerateTextResult,
     Message,
+    ReasoningPart,
     StepControl,
     Usage,
     ToolCall,
@@ -286,6 +287,50 @@ class TestGenerateTextWithTools:
         )
 
         assert "5" in result.text and "20" in result.text
+
+    @pytest.mark.asyncio
+    async def test_reasoning_parts_are_carried_into_next_tool_step(self):
+        """generate_text should preserve assistant reasoning between tool steps."""
+
+        @tool(description="Read file")
+        def read_file(path: str) -> str:
+            return f"contents of {path}"
+
+        provider = MockProvider(
+            responses=[
+                GenerateTextResult(
+                    text="",
+                    reasoning_parts=[
+                        ReasoningPart(
+                            text="Read file A, then update file B.",
+                            data={"provider": "mock"},
+                        )
+                    ],
+                    finish_reason="tool_use",
+                    response={
+                        "tool_calls": [
+                            make_tool_call("read_file", {"path": "file_a.txt"}, id="call_1")
+                        ]
+                    },
+                ),
+                make_response(text="Updated file B.", finish_reason="stop"),
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = await generate_text(
+            model=model,
+            prompt="Fix the bug",
+            tools={"read_file": read_file},
+            stop_when=step_count_is(10),
+        )
+
+        assert result.steps[0].reasoning_parts[0].text == "Read file A, then update file B."
+        assistant_message = provider.last_messages[1]
+        assert assistant_message.role == "assistant"
+        assert isinstance(assistant_message.content, list)
+        assert isinstance(assistant_message.content[0], ReasoningPart)
+        assert assistant_message.content[0].text == "Read file A, then update file B."
 
     @pytest.mark.asyncio
     async def test_tool_not_found(self):

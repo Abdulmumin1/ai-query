@@ -34,9 +34,9 @@ class DeepSeekProvider(OpenAIProvider):
                 for item in converted_message
             ]
             if message.role == "assistant":
-                reasoning_text = self._extract_reasoning_text(message)
                 for item in converted_message:
-                    if item.get("role") == "assistant" and reasoning_text:
+                    if item.get("role") == "assistant":
+                        reasoning_text = self.reasoning_text(message)
                         item["reasoning_content"] = reasoning_text
             converted.extend(converted_message)
 
@@ -58,15 +58,6 @@ class DeepSeekProvider(OpenAIProvider):
             **message,
             "content": "".join(text_parts),
         }
-
-    def _extract_reasoning_text(self, message: Message) -> str:
-        if isinstance(message.content, str):
-            return ""
-        reasoning_parts: list[str] = []
-        for part in message.content:
-            if isinstance(part, dict) and part.get("type") == "reasoning":
-                reasoning_parts.append(str(part.get("text") or ""))
-        return "".join(reasoning_parts)
 
 # Cached provider instance
 _default_provider: DeepSeekProvider | None = None
