@@ -26,6 +26,8 @@ async def generate_text(
     stop_when: StopCondition | list[StopCondition] | None = None,
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
+    retry: RetryPolicy | None = None,
+    on_retry: OnRetry | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
@@ -67,6 +69,14 @@ async def generate_text(
   Called after each step completes, including tool calls and tool results.
 </ParamField>
 
+<ParamField path="retry" type="RetryPolicy | None">
+  Provider-call retry policy. By default, retries are conservative: transient HTTP statuses (`408`, `409`, `425`, `429`, `500`, `502`, `503`, `504`) and network/timeout failures are retried; clear client errors such as `400`, `401`, and `403` are not. Retries happen at the current model step and do not re-run completed tools.
+</ParamField>
+
+<ParamField path="on_retry" type="OnRetry | None">
+  Called before a retry attempt with the step number, attempt, delay, and sanitized error string.
+</ParamField>
+
 <ParamField path="provider_options" type="ProviderOptions | None">
   Provider-specific options keyed by provider name.
 </ParamField>
@@ -76,7 +86,7 @@ async def generate_text(
 </ParamField>
 
 <ParamField path="signal" type="AbortSignal | None">
-  Abort signal used to cancel the generation loop.
+  Abort signal used to cancel the generation loop, including in-flight provider calls, retry sleeps, embeddings, and async tool calls.
 </ParamField>
 
 <ParamField path="**kwargs" type="Any">
@@ -199,6 +209,24 @@ result = await generate_text(
     prompt="Research this topic.",
     tools=tools,
     on_step_start=on_step_start,
+)
+```
+
+### Retry provider failures
+
+```python
+from ai_query import RetryPolicy
+
+
+async def on_retry(event):
+    print(f"retrying step {event.step_number}, attempt {event.attempt}")
+
+
+result = await generate_text(
+    model=model,
+    prompt="Summarize the incident.",
+    retry=RetryPolicy(max_attempts=3),
+    on_retry=on_retry,
 )
 ```
 

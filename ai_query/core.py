@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import inspect
+import random
 from typing import Any, AsyncIterator
+
+import aiohttp
 
 from ai_query.types import (
     GenerateTextResult,
@@ -33,14 +39,31 @@ from ai_query.types import (
     OnBeforeToolCall,
     OnAfterToolCall,
     OnReasoningEvent,
+    OnRetry,
     EmbedResult,
     EmbedManyResult,
     EmbeddingUsage,
     AbortSignal,
     AbortError,
     ReasoningConfig,
+    RetryEvent,
+    RetryPolicy,
 )
+from ai_query.transport import HTTPStatusError
 from ai_query.model import LanguageModel, EmbeddingModel
+
+
+_RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+def _is_retryable_exception(exc: Exception) -> bool:
+    if isinstance(exc, HTTPStatusError):
+        return exc.status_code in _RETRYABLE_HTTP_STATUS_CODES
+    if isinstance(exc, aiohttp.ClientError):
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError, asyncio.TimeoutError)):
+        return True
+    return False
 
 
 def _apply_reasoning(
@@ -155,6 +178,125 @@ def _build_assistant_step_content(step: StepResult) -> str | list[Any]:
     return assistant_content if assistant_content else ""
 
 
+def _should_retry(exc: Exception, retry: RetryPolicy | None, attempt: int) -> bool:
+    if retry is None or retry.max_attempts <= 1 or attempt >= retry.max_attempts:
+        return False
+    if isinstance(exc, AbortError):
+        return False
+    if retry.retry_on is not None:
+        return retry.retry_on(exc)
+    return _is_retryable_exception(exc)
+
+
+def _retry_after_delay(exc: Exception) -> float | None:
+    if not isinstance(exc, HTTPStatusError):
+        return None
+    retry_after = None
+    for key, value in exc.headers.items():
+        if key.lower() == "retry-after":
+            retry_after = value
+            break
+    if retry_after is None:
+        return None
+    try:
+        return max(float(retry_after), 0)
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(retry_after)
+    except (TypeError, ValueError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max((retry_at - datetime.now(timezone.utc)).total_seconds(), 0)
+
+
+def _retry_delay(retry: RetryPolicy, attempt: int, exc: Exception) -> float:
+    retry_after = _retry_after_delay(exc)
+    if retry_after is not None:
+        return min(retry_after, retry.max_delay)
+    delay = min(retry.initial_delay * (retry.backoff ** (attempt - 1)), retry.max_delay)
+    if retry.jitter and delay > 0:
+        delay = random.uniform(0, delay)
+    return delay
+
+
+async def _notify_retry(on_retry: OnRetry | None, event: RetryEvent) -> None:
+    if on_retry is None:
+        return
+    callback_result = on_retry(event)
+    if inspect.isawaitable(callback_result):
+        await callback_result
+
+
+async def _sleep_before_retry(delay: float, signal: AbortSignal | None) -> None:
+    if delay <= 0:
+        return
+    if signal is None:
+        await asyncio.sleep(delay)
+        return
+    sleep_task = asyncio.create_task(asyncio.sleep(delay))
+    abort_task = asyncio.create_task(signal.wait())
+    done, pending = await asyncio.wait(
+        [sleep_task, abort_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for task in pending:
+        task.cancel()
+    if abort_task in done:
+        raise AbortError(signal.reason)
+
+
+async def _await_with_abort(awaitable: Any, signal: AbortSignal | None) -> Any:
+    if signal is None:
+        return await awaitable
+    if signal.aborted:
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        raise AbortError(signal.reason)
+    operation_task = asyncio.ensure_future(awaitable)
+    abort_task = asyncio.create_task(signal.wait())
+    done, pending = await asyncio.wait(
+        [operation_task, abort_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if abort_task in done:
+        operation_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await operation_task
+        raise AbortError(signal.reason)
+    abort_task.cancel()
+    for task in pending:
+        task.cancel()
+    return operation_task.result()
+
+
+async def _anext_with_abort(
+    iterator: AsyncIterator[StreamChunk],
+    signal: AbortSignal | None,
+) -> StreamChunk:
+    if signal is None:
+        return await anext(iterator)
+    signal.throw_if_aborted()
+    next_task = asyncio.create_task(anext(iterator))
+    abort_task = asyncio.create_task(signal.wait())
+    done, pending = await asyncio.wait(
+        [next_task, abort_task],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if abort_task in done:
+        next_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+            await next_task
+        with contextlib.suppress(Exception):
+            await iterator.aclose()
+        raise AbortError(signal.reason)
+    abort_task.cancel()
+    for task in pending:
+        task.cancel()
+    return next_task.result()
+
+
 async def generate_text(
     *,
     model: LanguageModel,
@@ -167,6 +309,8 @@ async def generate_text(
     on_step_finish: OnStepFinish | None = None,
     before_tool_call: OnBeforeToolCall | None = None,
     after_tool_call: OnAfterToolCall | None = None,
+    retry: RetryPolicy | None = None,
+    on_retry: OnRetry | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
@@ -232,13 +376,37 @@ async def generate_text(
                         )
                         break
 
-        result = await model.provider.generate(
-            model=model.model_id,
-            messages=current_messages,
-            tools=tools,
-            provider_options=_apply_reasoning(model, provider_options, reasoning),
-            **kwargs,
-        )
+        attempt = 1
+        while True:
+            try:
+                result = await _await_with_abort(
+                    model.provider.generate(
+                        model=model.model_id,
+                        messages=current_messages,
+                        tools=tools,
+                        provider_options=_apply_reasoning(model, provider_options, reasoning),
+                        **kwargs,
+                    ),
+                    signal,
+                )
+                break
+            except Exception as exc:
+                if not _should_retry(exc, retry, attempt):
+                    raise
+                delay = _retry_delay(retry, attempt, exc)
+                await _notify_retry(
+                    on_retry,
+                    RetryEvent(
+                        step_number=step_number,
+                        attempt=attempt + 1,
+                        max_attempts=retry.max_attempts,
+                        delay=delay,
+                        error=str(exc),
+                        exception=exc,
+                    ),
+                )
+                await _sleep_before_retry(delay, signal)
+                attempt += 1
 
         if result.usage:
             total_usage.input_tokens += result.usage.input_tokens
@@ -309,7 +477,7 @@ async def generate_text(
                 )
             else:
                 try:
-                    output = await tool_def.run(**tc.arguments)
+                    output = await _await_with_abort(tool_def.run(**tc.arguments), signal)
                     tool_result = ToolResult(
                         tool_call_id=tc.id,
                         tool_name=tc.name,
@@ -405,6 +573,8 @@ def stream_text(
     before_tool_call: OnBeforeToolCall | None = None,
     after_tool_call: OnAfterToolCall | None = None,
     on_reasoning_event: OnReasoningEvent | None = None,
+    retry: RetryPolicy | None = None,
+    on_retry: OnRetry | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
@@ -471,45 +641,72 @@ def stream_text(
                         )
                         break
 
-            stream = model.provider.stream(
-                model=model.model_id,
-                messages=current_messages,
-                tools=tools,
-                provider_options=_apply_reasoning(model, provider_options, reasoning),
-                **kwargs,
-            )
-
             step_text = ""
             step_tool_calls: list[ToolCall] = []
             step_reasoning_parts: list[ReasoningPart] = []
             step_finish_reason = None
 
-            async for chunk in stream:
-                if chunk.reasoning_events:
-                    for event in chunk.reasoning_events:
-                        _append_reasoning_event(step_reasoning_parts, event)
-                        if not on_reasoning_event:
-                            continue
-                        callback_result = on_reasoning_event(event)
-                        if inspect.isawaitable(callback_result):
-                            await callback_result
+            attempt = 1
+            while True:
+                saw_provider_output = False
+                try:
+                    stream = model.provider.stream(
+                        model=model.model_id,
+                        messages=current_messages,
+                        tools=tools,
+                        provider_options=_apply_reasoning(model, provider_options, reasoning),
+                        **kwargs,
+                    )
 
-                if chunk.is_final:
-                    if chunk.usage:
-                        total_usage.input_tokens += chunk.usage.input_tokens
-                        total_usage.output_tokens += chunk.usage.output_tokens
-                        total_usage.cached_tokens += chunk.usage.cached_tokens
-                        total_usage.total_tokens += chunk.usage.total_tokens
-                    step_finish_reason = chunk.finish_reason
-                    if chunk.tool_calls:
-                        step_tool_calls = chunk.tool_calls
-                else:
-                    if chunk.text:
-                        if signal and signal.aborted:
-                            raise AbortError(signal.reason)
-                        step_text += chunk.text
-                        accumulated_text += chunk.text
-                        yield StreamChunk(text=chunk.text)
+                    while True:
+                        try:
+                            chunk = await _anext_with_abort(stream, signal)
+                        except StopAsyncIteration:
+                            break
+                        saw_provider_output = True
+                        if chunk.reasoning_events:
+                            for event in chunk.reasoning_events:
+                                _append_reasoning_event(step_reasoning_parts, event)
+                                if not on_reasoning_event:
+                                    continue
+                                callback_result = on_reasoning_event(event)
+                                if inspect.isawaitable(callback_result):
+                                    await callback_result
+
+                        if chunk.is_final:
+                            if chunk.usage:
+                                total_usage.input_tokens += chunk.usage.input_tokens
+                                total_usage.output_tokens += chunk.usage.output_tokens
+                                total_usage.cached_tokens += chunk.usage.cached_tokens
+                                total_usage.total_tokens += chunk.usage.total_tokens
+                            step_finish_reason = chunk.finish_reason
+                            if chunk.tool_calls:
+                                step_tool_calls = chunk.tool_calls
+                        else:
+                            if chunk.text:
+                                if signal and signal.aborted:
+                                    raise AbortError(signal.reason)
+                                step_text += chunk.text
+                                accumulated_text += chunk.text
+                                yield StreamChunk(text=chunk.text)
+                    break
+                except Exception as exc:
+                    if saw_provider_output or not _should_retry(exc, retry, attempt):
+                        raise
+                    delay = _retry_delay(retry, attempt, exc)
+                    await _notify_retry(
+                        on_retry,
+                        RetryEvent(
+                            step_number=step_number,
+                            attempt=attempt + 1,
+                            max_attempts=retry.max_attempts,
+                            delay=delay,
+                            error=str(exc),
+                            exception=exc,
+                        ),
+                    )
+                    await _sleep_before_retry(delay, signal)
+                    attempt += 1
 
             step = StepResult(
                 text=step_text,
@@ -572,7 +769,7 @@ def stream_text(
                     )
                 else:
                     try:
-                        output = await tool_def.run(**tc.arguments)
+                        output = await _await_with_abort(tool_def.run(**tc.arguments), signal)
                         tool_result = ToolResult(
                             tool_call_id=tc.id,
                             tool_name=tc.name,
@@ -667,28 +864,15 @@ async def embed(
         signal.throw_if_aborted()
 
     if signal:
-        embed_task = asyncio.create_task(
+        return await _await_with_abort(
             model.provider.embed(
                 model=model.model_id,
                 value=value,
                 provider_options=provider_options,
                 **kwargs,
-            )
+            ),
+            signal,
         )
-        abort_task = asyncio.create_task(signal.wait())
-
-        done, pending = await asyncio.wait(
-            [embed_task, abort_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        for task in pending:
-            task.cancel()
-
-        if abort_task in done:
-            raise AbortError(signal.reason)
-
-        return embed_task.result()
     else:
         return await model.provider.embed(
             model=model.model_id,

@@ -4,6 +4,24 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
 
+class HTTPStatusError(Exception):
+    """HTTP response error raised by transports."""
+
+    def __init__(
+        self,
+        status_code: int,
+        body: str,
+        *,
+        headers: dict[str, str] | None = None,
+        url: str | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.body = body
+        self.headers = headers or {}
+        self.url = url
+        super().__init__(f"HTTP {status_code}: {body}")
+
+
 class HTTPTransport(ABC):
     """Abstract HTTP transport for making requests to AI provider APIs.
 
@@ -31,7 +49,7 @@ class HTTPTransport(ABC):
             Parsed JSON response as a dict.
 
         Raises:
-            Exception: If the request fails or returns non-2xx status.
+            HTTPStatusError: If the request returns non-2xx status.
         """
         ...
 
@@ -53,7 +71,7 @@ class HTTPTransport(ABC):
             Raw bytes from the response stream.
 
         Raises:
-            Exception: If the request fails or returns non-2xx status.
+            HTTPStatusError: If the request returns non-2xx status.
         """
         ...
 
@@ -73,7 +91,7 @@ class HTTPTransport(ABC):
             Tuple of (body_bytes, content_type).
 
         Raises:
-            Exception: If the request fails or returns non-2xx status.
+            HTTPStatusError: If the request returns non-2xx status.
         """
         ...
 

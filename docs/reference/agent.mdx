@@ -29,6 +29,7 @@ class Agent(Generic[StateT]):
         stop_when: StopCondition | list[StopCondition] | None = None,
         provider_options: ProviderOptions | None = None,
         reasoning: ReasoningConfig | None = None,
+        retry: RetryPolicy | None = None,
         on_reasoning_event: OnReasoningEvent | None = None,
         hooks: AgentHooks | None = None,
         transport: AgentTransport | None = None,
@@ -72,6 +73,10 @@ class Agent(Generic[StateT]):
 
 <ParamField path="reasoning" type="ReasoningConfig | None">
   Default reasoning controls.
+</ParamField>
+
+<ParamField path="retry" type="RetryPolicy | None">
+  Default provider-call retry policy for `chat()`, `stream()`, `run()`, and `turn()`.
 </ParamField>
 
 <ParamField path="on_reasoning_event" type="OnReasoningEvent | None">

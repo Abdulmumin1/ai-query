@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Add provider-call retry policy with retry status events and conservative transient error classification, and make abort signals actively cancel in-flight provider, stream, embedding, retry sleep, and async tool work."
+}

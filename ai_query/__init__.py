@@ -5,6 +5,9 @@ from __future__ import annotations
 from ai_query.types import (
     AfterToolCallEvent,
     AfterToolCallResult,
+    AbortController,
+    AbortError,
+    AbortSignal,
     BeforeToolCallEvent,
     BeforeToolCallResult,
     GenerateTextResult,
@@ -17,7 +20,10 @@ from ai_query.types import (
     StepStartEvent,
     StepFinishEvent,
     ReasoningEvent,
+    RetryEvent,
+    RetryPolicy,
     OnReasoningEvent,
+    OnRetry,
     OnBeforeToolCall,
     OnAfterToolCall,
     OnStepStart,
@@ -29,6 +35,7 @@ from ai_query.types import (
     ReasoningEffort,
 )
 from ai_query.model import LanguageModel, EmbeddingModel
+from ai_query.transport import HTTPStatusError
 from ai_query.core import (
     generate_text,
     stream_text,
@@ -82,6 +89,7 @@ __all__ = [
     # Common types
     "LanguageModel",
     "EmbeddingModel",
+    "HTTPStatusError",
     "GenerateTextResult",
     "TextStreamResult",
     "EmbedResult",
@@ -89,11 +97,16 @@ __all__ = [
     "ReasoningConfig",
     "ReasoningEffort",
     "ReasoningEvent",
+    "RetryEvent",
+    "RetryPolicy",
     "StepControl",
     "BeforeToolCallEvent",
     "BeforeToolCallResult",
     "AfterToolCallEvent",
     "AfterToolCallResult",
+    "AbortController",
+    "AbortError",
+    "AbortSignal",
     # Stop conditions
     "StopCondition",
     "step_count_is",
@@ -106,4 +119,5 @@ __all__ = [
     "OnBeforeToolCall",
     "OnAfterToolCall",
     "OnReasoningEvent",
+    "OnRetry",
 ]

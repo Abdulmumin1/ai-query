@@ -5,6 +5,8 @@ description: "Cancel long-running operations with AbortController and AbortSigna
 
 ai-query provides a cancellation system inspired by JavaScript's `AbortController` and `AbortSignal`. This works with all async operations: `generate_text`, `stream_text`, `embed`, `embed_many`, and `Agent.chat`/`Agent.stream`.
 
+Abort actively cancels in-flight provider requests, streaming reads, retry sleeps, embeddings, and tool calls when they are running in cancellable asyncio code. CPU-bound synchronous tools cannot be interrupted mid-function; they should periodically check the signal or run in a cancellable worker.
+
 ## Quick Start
 
 ```python

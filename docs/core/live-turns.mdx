@@ -55,6 +55,7 @@ Current turn events:
 | `text.delta` | A text chunk streamed from the assistant |
 | `reasoning.delta` | Provider reasoning/thinking event |
 | `step.started` | A model step is about to begin |
+| `step.retrying` | A provider call failed and the runtime is waiting before another attempt |
 | `step.finished` | A model step finished |
 | `turn.finished` | The final `TurnResult` is available |
 | `turn.failed` | The turn failed or was aborted |

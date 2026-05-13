@@ -547,8 +547,29 @@ class StepFinishEvent:
     steps: list[StepResult]
 
 
+@dataclass
+class RetryPolicy:
+    max_attempts: int = 1
+    initial_delay: float = 0.5
+    max_delay: float = 8.0
+    backoff: float = 2.0
+    jitter: bool = True
+    retry_on: Callable[[Exception], bool] | None = None
+
+
+@dataclass
+class RetryEvent:
+    step_number: int
+    attempt: int
+    max_attempts: int
+    delay: float
+    error: str
+    exception: Exception
+
+
 OnStepStart = Callable[[StepStartEvent], Union[StepControl, None, Awaitable[Union[StepControl, None]]]]
 OnStepFinish = Callable[[StepFinishEvent], Union[None, Awaitable[None]]]
+OnRetry = Callable[[RetryEvent], Union[None, Awaitable[None]]]
 
 
 @dataclass

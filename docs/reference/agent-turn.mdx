@@ -189,6 +189,7 @@ class TurnOptions:
     stop_when: StopCondition | list[StopCondition] | None = None
     reasoning: ReasoningConfig | None = None
     provider_options: ProviderOptions | None = None
+    retry: RetryPolicy | None = None
     signal: AbortSignal | None = None
     hooks: AgentHooks | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -210,6 +211,10 @@ Fields:
 
 <ParamField path="provider_options" type="ProviderOptions | None">
   Per-turn provider options. Defaults to the agent's `provider_options`.
+</ParamField>
+
+<ParamField path="retry" type="RetryPolicy | None">
+  Per-turn provider-call retry policy. Defaults to the agent's `retry`.
 </ParamField>
 
 <ParamField path="signal" type="AbortSignal | None">
@@ -248,6 +253,7 @@ TurnEvent = (
     | TextDelta
     | ReasoningDelta
     | StepStarted
+    | StepRetrying
     | StepFinished
     | TurnFinished
     | TurnFailed
@@ -304,6 +310,19 @@ class StepFinished:
     usage: Usage | None
 ```
 
+### StepRetrying
+
+```python
+@dataclass
+class StepRetrying:
+    type: Literal["step.retrying"]
+    step_number: int
+    attempt: int
+    max_attempts: int
+    delay: float
+    error: str
+```
+
 ### TurnFinished
 
 ```python
@@ -333,6 +352,8 @@ async for event in turn.events():
             print(event.text, end="", flush=True)
         case "step.started":
             print(f"step {event.step_number}")
+        case "step.retrying":
+            print(f"retrying step {event.step_number}, attempt {event.attempt}")
         case "turn.failed":
             print(event.error)
 
