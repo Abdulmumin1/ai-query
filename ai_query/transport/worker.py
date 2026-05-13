@@ -2,7 +2,7 @@
 
 from typing import Any, AsyncIterator
 
-from .base import HTTPTransport
+from .base import HTTPStatusError, HTTPTransport
 
 
 class WorkerFetchTransport(HTTPTransport):
@@ -39,7 +39,7 @@ class WorkerFetchTransport(HTTPTransport):
         resp = await fetch(url, options)
         if not resp.ok:
             text = await resp.text()
-            raise Exception(f"HTTP {resp.status}: {text}")
+            raise HTTPStatusError(resp.status, text, url=url)
 
         data = await resp.json()
         return data.to_py() if hasattr(data, "to_py") else dict(data)
@@ -71,7 +71,7 @@ class WorkerFetchTransport(HTTPTransport):
         resp = await fetch(url, options)
         if not resp.ok:
             text = await resp.text()
-            raise Exception(f"HTTP {resp.status}: {text}")
+            raise HTTPStatusError(resp.status, text, url=url)
 
         reader = resp.body.getReader()
         while True:
@@ -105,7 +105,7 @@ class WorkerFetchTransport(HTTPTransport):
         resp = await fetch(url, options)
         if not resp.ok:
             text = await resp.text()
-            raise Exception(f"HTTP {resp.status}: {text}")
+            raise HTTPStatusError(resp.status, text, url=url)
 
         buffer = await resp.arrayBuffer()
         content_type = resp.headers.get("content-type") or "application/octet-stream"

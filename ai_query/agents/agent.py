@@ -63,6 +63,7 @@ if TYPE_CHECKING:
         OnReasoningEvent,
         ProviderOptions,
         ReasoningConfig,
+        RetryPolicy,
         StopCondition,
         ToolSet,
     )
@@ -207,6 +208,7 @@ class Agent(Generic[StateT]):
         stop_when: Union[StopCondition, List[StopCondition], None] = None,
         provider_options: Union[ProviderOptions, None] = None,
         reasoning: Union[ReasoningConfig, None] = None,
+        retry: RetryPolicy | None = None,
         on_reasoning_event: Union[OnReasoningEvent, None] = None,
         hooks: AgentHooks | None = None,
         transport: Union[AgentTransport, None] = None,
@@ -230,6 +232,7 @@ class Agent(Generic[StateT]):
         self.stop_when = stop_when
         self.provider_options = provider_options
         self.reasoning = reasoning
+        self.retry = retry
         self._on_reasoning_event_callback = on_reasoning_event
         self.hooks = hooks
 
@@ -676,6 +679,7 @@ class Agent(Generic[StateT]):
             after_tool_call=after_tool_call,
             provider_options=self.provider_options,
             reasoning=self.reasoning,
+            retry=self.retry,
             signal=signal,
             on_reasoning_event=reasoning_handler,
         )
@@ -758,6 +762,7 @@ class Agent(Generic[StateT]):
             after_tool_call=after_tool_call,
             provider_options=self.provider_options,
             reasoning=self.reasoning,
+            retry=self.retry,
             signal=signal,
             on_reasoning_event=reasoning_handler,
         )

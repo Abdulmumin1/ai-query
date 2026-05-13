@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
+import aiohttp
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ai_query import generate_text, tool, Field, step_count_is
 from ai_query.types import (
     GenerateTextResult,
+    AbortController,
+    AbortError,
     Message,
     ReasoningPart,
     StepControl,
+    RetryPolicy,
     Usage,
     ToolCall,
     StepStartEvent,
     StepFinishEvent,
 )
 from ai_query.model import LanguageModel
+from ai_query.transport import HTTPStatusError
 
 
 # Import fixtures from conftest
@@ -50,6 +56,195 @@ class TestGenerateTextBasic:
         assert len(provider.last_messages) == 1
         assert provider.last_messages[0].role == "user"
         assert provider.last_messages[0].content == "Hello, who are you?"
+
+    @pytest.mark.asyncio
+    async def test_retries_provider_generate_failures(self):
+        """generate_text should retry provider failures at the same step."""
+
+        class FlakyProvider(MockProvider):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.failed_once = False
+
+            async def generate(self, **kwargs):
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise HTTPStatusError(429, "rate limited")
+                return await super().generate(**kwargs)
+
+        retry_events = []
+        provider = FlakyProvider(responses=[make_response(text="Recovered")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = await generate_text(
+            model=model,
+            prompt="Hello",
+            retry=RetryPolicy(max_attempts=2, initial_delay=0, jitter=False),
+            on_retry=retry_events.append,
+        )
+
+        assert result.text == "Recovered"
+        assert provider.failed_once
+        assert provider.call_count == 1
+        assert len(retry_events) == 1
+        assert retry_events[0].step_number == 1
+        assert retry_events[0].attempt == 2
+
+    @pytest.mark.asyncio
+    async def test_does_not_retry_non_transient_http_status(self):
+        """generate_text should not retry clear client/provider request errors."""
+
+        class BadRequestProvider(MockProvider):
+            async def generate(self, **kwargs):
+                self.call_count += 1
+                raise HTTPStatusError(400, "bad schema")
+
+        provider = BadRequestProvider()
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        with pytest.raises(HTTPStatusError) as exc_info:
+            await generate_text(
+                model=model,
+                prompt="Hello",
+                retry=RetryPolicy(max_attempts=3, initial_delay=0, jitter=False),
+            )
+
+        assert exc_info.value.status_code == 400
+        assert provider.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_uses_retry_after_header(self):
+        """generate_text should surface Retry-After delay on retry events."""
+
+        class RateLimitedProvider(MockProvider):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.failed_once = False
+
+            async def generate(self, **kwargs):
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise HTTPStatusError(
+                        429,
+                        "rate limited",
+                        headers={"Retry-After": "0"},
+                    )
+                return await super().generate(**kwargs)
+
+        retry_events = []
+        provider = RateLimitedProvider(responses=[make_response(text="Recovered")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        await generate_text(
+            model=model,
+            prompt="Hello",
+            retry=RetryPolicy(max_attempts=2, initial_delay=10, jitter=False),
+            on_retry=retry_events.append,
+        )
+
+        assert retry_events[0].delay == 0
+
+    @pytest.mark.asyncio
+    async def test_retries_aiohttp_transfer_errors(self):
+        """generate_text should classify aiohttp transfer failures as retryable."""
+
+        class TransferFailProvider(MockProvider):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.failed_once = False
+
+            async def generate(self, **kwargs):
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise aiohttp.ClientPayloadError("incomplete transfer")
+                return await super().generate(**kwargs)
+
+        provider = TransferFailProvider(responses=[make_response(text="Recovered")])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = await generate_text(
+            model=model,
+            prompt="Hello",
+            retry=RetryPolicy(max_attempts=2, initial_delay=0, jitter=False),
+        )
+
+        assert result.text == "Recovered"
+        assert provider.failed_once
+
+    @pytest.mark.asyncio
+    async def test_abort_cancels_in_flight_provider_generate(self):
+        """generate_text should abort while provider.generate is still awaiting."""
+
+        class SlowProvider(MockProvider):
+            def __init__(self):
+                super().__init__()
+                self.cancelled = False
+
+            async def generate(self, **kwargs):
+                try:
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+                return make_response(text="late")
+
+        provider = SlowProvider()
+        model = LanguageModel(provider=provider, model_id="test-model")
+        controller = AbortController()
+        task = asyncio.create_task(generate_text(
+            model=model,
+            prompt="Hello",
+            signal=controller.signal,
+        ))
+        await asyncio.sleep(0)
+        controller.abort("user cancelled")
+
+        with pytest.raises(AbortError, match="user cancelled"):
+            await task
+
+        assert provider.cancelled
+
+    @pytest.mark.asyncio
+    async def test_abort_cancels_in_flight_tool(self):
+        """generate_text should abort while a tool is still awaiting."""
+
+        tool_cancelled = False
+        tool_started = asyncio.Event()
+
+        @tool(description="Slow")
+        async def slow_tool() -> str:
+            nonlocal tool_cancelled
+            tool_started.set()
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                tool_cancelled = True
+                raise
+            return "late"
+
+        provider = MockProvider(responses=[
+            make_response(
+                text="",
+                finish_reason="tool_use",
+                tool_calls=[make_tool_call("slow_tool", {})],
+            )
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        controller = AbortController()
+        task = asyncio.create_task(generate_text(
+            model=model,
+            prompt="Hello",
+            tools={"slow_tool": slow_tool},
+            stop_when=step_count_is(5),
+            signal=controller.signal,
+        ))
+        await tool_started.wait()
+        controller.abort("user cancelled")
+
+        with pytest.raises(AbortError, match="user cancelled"):
+            await task
+
+        assert tool_cancelled
 
     @pytest.mark.asyncio
     async def test_with_system_prompt(self):

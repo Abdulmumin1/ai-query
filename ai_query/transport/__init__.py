@@ -13,9 +13,9 @@ Usage:
     response = await transport.post(url, json_body)
 """
 
-from .base import HTTPTransport
+from .base import HTTPStatusError, HTTPTransport
 
-__all__ = ["HTTPTransport", "get_default_transport"]
+__all__ = ["HTTPStatusError", "HTTPTransport", "get_default_transport"]
 
 
 def get_default_transport() -> HTTPTransport:

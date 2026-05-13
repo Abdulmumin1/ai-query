@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock
 
 from ai_query import stream_text, tool, Field, step_count_is
 from ai_query.types import (
     Message,
+    AbortController,
+    AbortError,
     ReasoningEvent,
     ReasoningPart,
+    RetryPolicy,
     StepControl,
     Usage,
     StreamChunk,
@@ -18,6 +22,7 @@ from ai_query.types import (
     StepFinishEvent,
 )
 from ai_query.model import LanguageModel
+from ai_query.transport import HTTPStatusError
 
 
 # Import fixtures from conftest
@@ -55,6 +60,132 @@ class TestStreamTextBasic:
             chunks.append(chunk)
 
         assert chunks == ["Hello ", "world!"]
+
+    @pytest.mark.asyncio
+    async def test_retries_stream_before_output(self):
+        """stream_text should retry when the provider fails before any chunk."""
+
+        class FlakyProvider(MockProvider):
+            async def stream(self, **kwargs):
+                self.last_messages = kwargs["messages"]
+                self.stream_call_count += 1
+                if self.stream_call_count == 1:
+                    raise ConnectionError("connection reset")
+                yield StreamChunk(text="Recovered")
+                yield StreamChunk(is_final=True, finish_reason="stop")
+
+        retry_events = []
+        provider = FlakyProvider()
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            prompt="Hello",
+            retry=RetryPolicy(max_attempts=2, initial_delay=0, jitter=False),
+            on_retry=retry_events.append,
+        )
+
+        chunks = []
+        async for chunk in result.text_stream:
+            chunks.append(chunk)
+
+        assert chunks == ["Recovered"]
+        assert provider.stream_call_count == 2
+        assert len(retry_events) == 1
+        assert retry_events[0].attempt == 2
+
+    @pytest.mark.asyncio
+    async def test_does_not_retry_stream_non_transient_http_status(self):
+        """stream_text should not retry non-transient provider request errors."""
+
+        class BadRequestProvider(MockProvider):
+            async def stream(self, **kwargs):
+                self.stream_call_count += 1
+                raise HTTPStatusError(401, "unauthorized")
+                yield StreamChunk(text="unreachable")
+
+        provider = BadRequestProvider()
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            prompt="Hello",
+            retry=RetryPolicy(max_attempts=3, initial_delay=0, jitter=False),
+        )
+
+        with pytest.raises(HTTPStatusError) as exc_info:
+            async for _ in result.text_stream:
+                pass
+
+        assert exc_info.value.status_code == 401
+        assert provider.stream_call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_does_not_retry_stream_after_output(self):
+        """stream_text should not replay a stream after user-visible output."""
+
+        class FailingAfterOutputProvider(MockProvider):
+            async def stream(self, **kwargs):
+                self.stream_call_count += 1
+                yield StreamChunk(text="partial")
+                raise ConnectionError("lost connection")
+
+        provider = FailingAfterOutputProvider()
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(
+            model=model,
+            prompt="Hello",
+            retry=RetryPolicy(max_attempts=2, initial_delay=0, jitter=False),
+        )
+
+        chunks = []
+        with pytest.raises(ConnectionError, match="lost connection"):
+            async for chunk in result.text_stream:
+                chunks.append(chunk)
+
+        assert chunks == ["partial"]
+        assert provider.stream_call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_abort_cancels_in_flight_stream_read(self):
+        """stream_text should abort while waiting for the next provider chunk."""
+
+        class SlowStreamProvider(MockProvider):
+            def __init__(self):
+                super().__init__()
+                self.cancelled = False
+
+            async def stream(self, **kwargs):
+                self.stream_call_count += 1
+                try:
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+                yield StreamChunk(text="late")
+
+        provider = SlowStreamProvider()
+        model = LanguageModel(provider=provider, model_id="test-model")
+        controller = AbortController()
+        result = stream_text(
+            model=model,
+            prompt="Hello",
+            signal=controller.signal,
+        )
+
+        async def consume():
+            async for _ in result.text_stream:
+                pass
+
+        task = asyncio.create_task(consume())
+        await asyncio.sleep(0)
+        controller.abort("user cancelled")
+
+        with pytest.raises(AbortError, match="user cancelled"):
+            await task
+
+        assert provider.cancelled
 
     @pytest.mark.asyncio
     async def test_stream_with_usage(self):

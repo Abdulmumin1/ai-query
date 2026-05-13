@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator
 
 import aiohttp
 
-from .base import HTTPTransport
+from .base import HTTPStatusError, HTTPTransport
 
 
 class AioHTTPTransport(HTTPTransport):
@@ -37,7 +37,12 @@ class AioHTTPTransport(HTTPTransport):
         async with session.post(url, json=json, headers=headers) as resp:
             if resp.status >= 400:
                 error_text = await resp.text()
-                raise Exception(f"HTTP {resp.status}: {error_text}")
+                raise HTTPStatusError(
+                    resp.status,
+                    error_text,
+                    headers=dict(resp.headers),
+                    url=url,
+                )
             return await resp.json()
 
     async def stream(
@@ -51,7 +56,12 @@ class AioHTTPTransport(HTTPTransport):
         async with session.post(url, json=json, headers=headers) as resp:
             if resp.status >= 400:
                 error_text = await resp.text()
-                raise Exception(f"HTTP {resp.status}: {error_text}")
+                raise HTTPStatusError(
+                    resp.status,
+                    error_text,
+                    headers=dict(resp.headers),
+                    url=url,
+                )
             async for chunk in resp.content:
                 yield chunk
 
@@ -65,7 +75,12 @@ class AioHTTPTransport(HTTPTransport):
         async with session.get(url, headers=headers) as resp:
             if resp.status >= 400:
                 error_text = await resp.text()
-                raise Exception(f"HTTP {resp.status}: {error_text}")
+                raise HTTPStatusError(
+                    resp.status,
+                    error_text,
+                    headers=dict(resp.headers),
+                    url=url,
+                )
             content_type = resp.headers.get("Content-Type", "application/octet-stream")
             return await resp.read(), content_type
 

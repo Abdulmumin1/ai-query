@@ -20,6 +20,8 @@ from ai_query.types import (
     Message,
     ReasoningConfig,
     ReasoningEvent,
+    RetryEvent,
+    RetryPolicy,
     StepControl,
     StepFinishEvent,
     StepResult,
@@ -40,6 +42,7 @@ class TurnOptions:
     stop_when: StopCondition | list[StopCondition] | None = None
     reasoning: ReasoningConfig | None = None
     provider_options: "ProviderOptions | None" = None
+    retry: RetryPolicy | None = None
     signal: AbortSignal | None = None
     hooks: AgentHooks | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -94,6 +97,16 @@ class StepFinished:
 
 
 @dataclass
+class StepRetrying:
+    type: Literal["step.retrying"]
+    step_number: int
+    attempt: int
+    max_attempts: int
+    delay: float
+    error: str
+
+
+@dataclass
 class TurnFinished:
     type: Literal["turn.finished"]
     result: TurnResult
@@ -105,7 +118,7 @@ class TurnFailed:
     error: str
 
 
-TurnEvent = TurnStarted | TextDelta | ReasoningDelta | StepStarted | StepFinished | TurnFinished | TurnFailed
+TurnEvent = TurnStarted | TextDelta | ReasoningDelta | StepStarted | StepRetrying | StepFinished | TurnFinished | TurnFailed
 
 
 class AgentTurn:
@@ -256,6 +269,16 @@ class AgentTurn:
             await reasoning_handler(event)
             await self._put_event(ReasoningDelta(type="reasoning.delta", event=event))
 
+        async def on_retry(event: RetryEvent) -> None:
+            await self._put_event(StepRetrying(
+                type="step.retrying",
+                step_number=event.step_number,
+                attempt=event.attempt,
+                max_attempts=event.max_attempts,
+                delay=event.delay,
+                error=event.error,
+            ))
+
         try:
             if external_signal:
                 external_signal.throw_if_aborted()
@@ -269,6 +292,8 @@ class AgentTurn:
                 stop_when=self.options.stop_when if self.options.stop_when is not None else self.agent.stop_when,
                 provider_options=self.options.provider_options if self.options.provider_options is not None else self.agent.provider_options,
                 reasoning=self.options.reasoning if self.options.reasoning is not None else self.agent.reasoning,
+                retry=self.options.retry if self.options.retry is not None else self.agent.retry,
+                on_retry=on_retry,
                 signal=signal,
                 on_reasoning_event=on_reasoning_event,
                 on_step_start=on_step_start,

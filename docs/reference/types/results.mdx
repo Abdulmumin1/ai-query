@@ -232,6 +232,38 @@ class StepControl:
   If true, stops at the step boundary.
 </ResponseField>
 
+## RetryPolicy
+
+Configures provider-call retries for `generate_text()`, `stream_text()`, and agents.
+
+Default classification retries transient HTTP statuses (`408`, `409`, `425`, `429`, `500`, `502`, `503`, `504`) and network/timeout failures. It does not retry clear client errors such as `400`, `401`, and `403`. Set `retry_on` to override the classifier.
+
+```python
+@dataclass
+class RetryPolicy:
+    max_attempts: int = 1
+    initial_delay: float = 0.5
+    max_delay: float = 8.0
+    backoff: float = 2.0
+    jitter: bool = True
+    retry_on: Callable[[Exception], bool] | None = None
+```
+
+## RetryEvent
+
+Passed to `on_retry` before the runtime waits and starts another provider attempt.
+
+```python
+@dataclass
+class RetryEvent:
+    step_number: int
+    attempt: int
+    max_attempts: int
+    delay: float
+    error: str
+    exception: Exception
+```
+
 ## StepStartEvent
 
 Passed to `on_step_start`.

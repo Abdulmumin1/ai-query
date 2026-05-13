@@ -27,6 +27,8 @@ def stream_text(
     on_step_start: OnStepStart | None = None,
     on_step_finish: OnStepFinish | None = None,
     on_reasoning_event: OnReasoningEvent | None = None,
+    retry: RetryPolicy | None = None,
+    on_retry: OnRetry | None = None,
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
@@ -72,6 +74,14 @@ def stream_text(
   Called for provider reasoning/thinking events. These are not mixed into `text_stream`.
 </ParamField>
 
+<ParamField path="retry" type="RetryPolicy | None">
+  Provider-call retry policy. By default, retries are conservative: transient HTTP statuses (`408`, `409`, `425`, `429`, `500`, `502`, `503`, `504`) and network/timeout failures are retried; clear client errors such as `400`, `401`, and `403` are not. Streaming retries only happen before the provider has emitted any output for that attempt.
+</ParamField>
+
+<ParamField path="on_retry" type="OnRetry | None">
+  Called before a retry attempt with the step number, attempt, delay, and sanitized error string.
+</ParamField>
+
 <ParamField path="provider_options" type="ProviderOptions | None">
   Provider-specific options keyed by provider name.
 </ParamField>
@@ -81,7 +91,7 @@ def stream_text(
 </ParamField>
 
 <ParamField path="signal" type="AbortSignal | None">
-  Abort signal used to cancel the streaming loop.
+  Abort signal used to cancel the streaming loop, including in-flight provider stream reads, retry sleeps, and async tool calls.
 </ParamField>
 
 <ParamField path="**kwargs" type="Any">
@@ -183,6 +193,24 @@ result = stream_text(
 
 async for chunk in result.text_stream:
     print(chunk, end="", flush=True)
+```
+
+### Show retry status
+
+```python
+from ai_query import RetryPolicy
+
+
+async def on_retry(event):
+    await publish_status({"phase": "retrying", "attempt": event.attempt})
+
+
+result = stream_text(
+    model=model,
+    prompt="Generate the report.",
+    retry=RetryPolicy(max_attempts=3),
+    on_retry=on_retry,
+)
 ```
 
 ## See Also

@@ -19,6 +19,7 @@ from ai_query.types import (
     Message,
     ReasoningEvent,
     ReasoningPart,
+    RetryPolicy,
     StreamChunk,
     ToolCall,
     ToolCallPart,
@@ -30,6 +31,7 @@ from ai_query.types import (
 )
 from ai_query.providers.base import BaseProvider
 from ai_query.model import LanguageModel
+from ai_query.transport import HTTPStatusError
 from tests.conftest import MockProvider
 
 
@@ -695,6 +697,84 @@ class TestAgentTurn:
         assert stored[0]["content"] == "Start"
         assert stored[1]["content"][0]["type"] == "tool_call"
         assert stored[2]["content"][0]["type"] == "tool_result"
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_emits_retrying_and_continues_after_tool_step(self):
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            return value
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        tool_calls=[
+                            ToolCall(
+                                id="call_1",
+                                name="echo",
+                                arguments={"value": "first"},
+                            )
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="Done"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ],
+            ]
+        )
+        original_stream = provider.stream
+        failed_once = False
+
+        async def flaky_stream(**kwargs):
+            nonlocal failed_once
+            if provider.stream_call_count == 1 and not failed_once:
+                failed_once = True
+                raise HTTPStatusError(503, "provider failed")
+            async for chunk in original_stream(**kwargs):
+                yield chunk
+
+        provider.stream = flaky_stream
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(5),
+            retry=RetryPolicy(max_attempts=2, initial_delay=0, jitter=False),
+        )
+        await agent.start()
+
+        turn = agent.turn("Start")
+        events = []
+        async for event in turn.events():
+            events.append(event)
+
+        assert [event.type for event in events] == [
+            "turn.started",
+            "step.started",
+            "step.finished",
+            "step.started",
+            "step.retrying",
+            "text.delta",
+            "step.finished",
+            "turn.finished",
+        ]
+        retry_event = next(event for event in events if event.type == "step.retrying")
+        assert retry_event.step_number == 2
+        assert retry_event.attempt == 2
+        assert failed_once
+        assert provider.stream_call_count == 2
+        assert [message.role for message in agent.messages] == [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+        ]
         await agent.stop()
 
     @pytest.mark.asyncio
