@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.45
+
+- patch: Add provider-call retry policy with retry status events and conservative transient error classification, and make abort signals actively cancel in-flight provider, stream, embedding, retry sleep, and async tool work.
+
 ## 1.7.44
 
 - patch: Persist assistant reasoning across tool loops and roundtrip provider-native thinking state so agents preserve in-flight plans between tool calls.
