@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from typing import TYPE_CHECKING, Any, Union
 
 try:
@@ -15,6 +18,12 @@ except ImportError:
 if TYPE_CHECKING:
     from ai_query.agents.agent import Agent
     from ai_query.agents.registry import AgentRegistry
+
+
+logger = logging.getLogger(__name__)
+
+_SSE_KEEPALIVE_INTERVAL = 30.0
+_SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
 
 
 class AgentRouter(APIRouter):
@@ -119,8 +128,40 @@ class AgentRouter(APIRouter):
 
     async def _stream_generator(self, agent: "Agent", message: str) -> Any:
         stream_req = {"action": "chat", "message": message}
-        async for chunk in agent.handle_request_stream(stream_req):
-            yield chunk
+        iterator = agent.handle_request_stream(stream_req).__aiter__()
+        next_chunk = asyncio.create_task(iterator.__anext__())
+
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {next_chunk},
+                    timeout=_SSE_KEEPALIVE_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    yield _SSE_KEEPALIVE_FRAME
+                    continue
+
+                try:
+                    yield next_chunk.result()
+                except StopAsyncIteration:
+                    break
+
+                next_chunk = asyncio.create_task(iterator.__anext__())
+        except Exception as e:
+            logger.exception("Streaming chat failed for agent %s", agent.id)
+            payload = {"error": str(e), "type": type(e).__name__}
+            yield f"event: error\ndata: {json.dumps(payload)}\n\n"
+        finally:
+            if not next_chunk.done():
+                next_chunk.cancel()
+                try:
+                    await next_chunk
+                except asyncio.CancelledError:
+                    pass
+            aclose = getattr(iterator, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     async def _handle_invoke(self, request: Request, agent_id: Union[str, None] = None) -> Any:
         agent = await self._get_agent(agent_id)

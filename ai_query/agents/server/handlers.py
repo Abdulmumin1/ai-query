@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,12 @@ from ai_query.agents.websocket import ConnectionContext
 
 if TYPE_CHECKING:
     from ai_query.agents.server.base import AgentServer
+
+
+logger = logging.getLogger(__name__)
+
+_SSE_KEEPALIVE_INTERVAL = 30.0
+_SSE_KEEPALIVE_FRAME = b": keepalive\n\n"
 
 
 def setup_routes(server: "AgentServer") -> web.Application:
@@ -109,6 +116,43 @@ class ServerHandlers:
             allowed = await self.server._config.auth(request)
             if not allowed:
                 raise web.HTTPUnauthorized(text="Authentication required")
+
+    async def _write_sse_stream_with_keepalives(
+        self,
+        response: web.StreamResponse,
+        stream: Any,
+    ) -> None:
+        iterator = stream.__aiter__()
+        next_chunk = asyncio.create_task(iterator.__anext__())
+
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {next_chunk},
+                    timeout=_SSE_KEEPALIVE_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    await response.write(_SSE_KEEPALIVE_FRAME)
+                    continue
+
+                try:
+                    chunk = next_chunk.result()
+                except StopAsyncIteration:
+                    break
+
+                await response.write(chunk.encode())
+                next_chunk = asyncio.create_task(iterator.__anext__())
+        finally:
+            if not next_chunk.done():
+                next_chunk.cancel()
+                try:
+                    await next_chunk
+                except asyncio.CancelledError:
+                    pass
+            aclose = getattr(iterator, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     async def handle_options(self, request: web.Request) -> web.Response:
         return add_cors_headers(self.server, web.Response(), request)
@@ -230,12 +274,12 @@ class ServerHandlers:
 
         try:
             while True:
-                await asyncio.sleep(30)
+                await asyncio.sleep(_SSE_KEEPALIVE_INTERVAL)
                 meta.last_activity = time.time()
                 if response.task is None or response.task.done():
                     break
                 try:
-                    await response.write(b": keepalive\n\n")
+                    await response.write(_SSE_KEEPALIVE_FRAME)
                 except Exception:
                     break
         except asyncio.CancelledError:
@@ -284,10 +328,16 @@ class ServerHandlers:
                 "payload": body.get("payload", {}),
             }
             try:
-                async for chunk in agent.handle_request_stream(stream_req):
-                    await response.write(chunk.encode())
+                await self._write_sse_stream_with_keepalives(
+                    response,
+                    agent.handle_request_stream(stream_req),
+                )
             except Exception as e:
-                await response.write(f"event: error\ndata: {str(e)}\n\n".encode())
+                logger.exception("Streaming chat failed for agent %s", agent_id)
+                payload = {"error": str(e), "type": type(e).__name__}
+                await response.write(
+                    f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
+                )
             return response
 
         result = await agent.handle_request({

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import os
 from typing import Any, Dict, List, Optional, Type, Union
@@ -33,6 +34,12 @@ from ai_query.agents.agent import Agent
 from ai_query.agents.storage.cloudflare import DurableObjectStorage
 from ai_query.agents.transport.cloudflare import DurableObjectTransport
 from ai_query.agents.websocket import Connection, ConnectionContext
+
+
+logger = logging.getLogger(__name__)
+
+_SSE_KEEPALIVE_INTERVAL = 30.0
+_SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
 
 
 def _safe_wait_until(ctx: Any, awaitable: Any) -> None:
@@ -298,14 +305,44 @@ class AgentDO(DurableObject):
         writer = writable.getWriter()
 
         async def stream_task():
+            encoder = js.TextEncoder.new()
+            iterator = self.agent.handle_request_stream(data).__aiter__()
+            next_chunk = asyncio.create_task(iterator.__anext__())
+
             try:
-                async for sse_chunk in self.agent.handle_request_stream(data):
+                while True:
+                    done, _ = await asyncio.wait(
+                        {next_chunk},
+                        timeout=_SSE_KEEPALIVE_INTERVAL,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if not done:
+                        await writer.write(encoder.encode(_SSE_KEEPALIVE_FRAME))
+                        continue
+
+                    try:
+                        sse_chunk = next_chunk.result()
+                    except StopAsyncIteration:
+                        break
+
                     # Write raw SSE chunk (already formatted by handle_request_stream)
-                    await writer.write(js.TextEncoder.new().encode(sse_chunk))
+                    await writer.write(encoder.encode(sse_chunk))
+                    next_chunk = asyncio.create_task(iterator.__anext__())
             except Exception as e:
-                error_msg = f"event: error\ndata: {str(e)}\n\n"
-                await writer.write(js.TextEncoder.new().encode(error_msg))
+                logger.exception("Streaming request failed for Cloudflare agent %s", self.agent.id)
+                payload = {"error": str(e), "type": type(e).__name__}
+                error_msg = f"event: error\ndata: {json.dumps(payload)}\n\n"
+                await writer.write(encoder.encode(error_msg))
             finally:
+                if not next_chunk.done():
+                    next_chunk.cancel()
+                    try:
+                        await next_chunk
+                    except asyncio.CancelledError:
+                        pass
+                aclose = getattr(iterator, "aclose", None)
+                if aclose is not None:
+                    await aclose()
                 await writer.close()
                 _safe_wait_until(self.ctx, self._drain_mailbox())
 

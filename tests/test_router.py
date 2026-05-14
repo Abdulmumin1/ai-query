@@ -1,9 +1,12 @@
 """Tests for AgentServer router."""
 
+import asyncio
 import json
+import logging
 import pytest
 from unittest.mock import MagicMock, patch
 from aiohttp import web
+import ai_query.agents.server.handlers as server_handlers
 from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig
 from ai_query.types import Message, ToolCall, ToolCallPart, ToolResult, ToolResultPart
 
@@ -464,6 +467,67 @@ class TestAgentServerStreaming:
         content = await resp.text()
         expected = {**body, "action": "chat", "message": "", "payload": {}}
         assert json.dumps(expected) in content
+
+    @pytest.mark.asyncio
+    async def test_streaming_chat_endpoint_sends_keepalive_while_idle(
+        self, aiohttp_client, monkeypatch
+    ):
+        """Streaming chat should keep SSE connections alive while waiting for chunks."""
+
+        class IdleStreamAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            async def handle_request_stream(self, request):
+                await asyncio.sleep(0.03)
+                yield "event: chunk\ndata: done\n\n"
+
+        monkeypatch.setattr(server_handlers, "_SSE_KEEPALIVE_INTERVAL", 0.01)
+
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(IdleStreamAgent, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        resp = await client.post("/agent/idle-stream/chat?stream=true", json={"message": "Hi"})
+
+        assert resp.status == 200
+        first_chunk = await resp.content.readuntil(b"\n\n")
+        assert first_chunk == b": keepalive\n\n"
+
+        content = await resp.text()
+        assert "event: chunk" in content
+        assert "data: done" in content
+
+    @pytest.mark.asyncio
+    async def test_streaming_chat_endpoint_sends_json_error_and_logs_traceback(
+        self, aiohttp_client, caplog
+    ):
+        """Streaming chat errors should be structured for clients and logged server-side."""
+
+        class ErrorStreamAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            async def handle_request_stream(self, request):
+                raise RuntimeError("stream broke")
+                yield "unreachable"
+
+        config = AgentServerConfig(enable_rest_api=True)
+        server = AgentServer(ErrorStreamAgent, config=config)
+        app = server.create_app()
+        client = await aiohttp_client(app)
+
+        caplog.set_level(logging.ERROR, logger=server_handlers.__name__)
+
+        resp = await client.post("/agent/error-stream/chat?stream=true", json={"message": "Hi"})
+
+        assert resp.status == 200
+        content = await resp.text()
+        assert "event: error" in content
+        assert f"data: {json.dumps({'error': 'stream broke', 'type': 'RuntimeError'})}" in content
+        assert "Streaming chat failed for agent error-stream" in caplog.text
+        assert "Traceback" in caplog.text
 
 
 class TestAgentServerCORS:
