@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.46
+
+- patch: Keep SSE streaming chat connections alive with internal heartbeat comments and emit structured logged error events across server adapters.
+
 ## 1.7.45
 
 - patch: Add provider-call retry policy with retry status events and conservative transient error classification, and make abort signals actively cancel in-flight provider, stream, embedding, retry sleep, and async tool work.
