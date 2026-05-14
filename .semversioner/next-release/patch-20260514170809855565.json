@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Keep SSE streaming chat connections alive with internal heartbeat comments and emit structured logged error events across server adapters."
+}
