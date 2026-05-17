@@ -972,3 +972,42 @@ class TestGenerateTextUsage:
         assert result.usage.input_tokens == 30  # 10 + 20
         assert result.usage.output_tokens == 15  # 5 + 10
         assert result.usage.total_tokens == 45  # 15 + 30
+
+        assert result.steps[0].usage is not None
+        assert result.steps[0].usage.total_tokens == 15
+        assert result.steps[1].usage is not None
+        assert result.steps[1].usage.total_tokens == 30
+
+    @pytest.mark.asyncio
+    async def test_step_finish_event_exposes_step_and_cumulative_usage(self):
+        """Step finish events should distinguish per-step and cumulative usage."""
+        @tool(description="Echo")
+        def echo(msg: str) -> str:
+            return msg
+
+        provider = MockProvider(responses=[
+            make_response(
+                text="",
+                finish_reason="tool_use",
+                tool_calls=[make_tool_call("echo", {"msg": "1"}, id="call_1")],
+                usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15),
+            ),
+            make_response(
+                text="Done",
+                usage=Usage(input_tokens=20, output_tokens=10, total_tokens=30),
+            ),
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        events: list[StepFinishEvent] = []
+
+        await generate_text(
+            model=model,
+            prompt="Test",
+            tools={"echo": echo},
+            stop_when=step_count_is(10),
+            on_step_finish=events.append,
+        )
+
+        assert [event.step_usage.total_tokens for event in events] == [15, 30]
+        assert [event.cumulative_usage.total_tokens for event in events] == [15, 45]
+        assert [event.usage.total_tokens for event in events] == [15, 45]

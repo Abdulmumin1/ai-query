@@ -308,7 +308,12 @@ class StepFinished:
     step_number: int
     step: StepResult
     usage: Usage | None
+    step_usage: Usage | None = None
+    cumulative_usage: Usage | None = None
 ```
+
+`usage` is kept as a backward-compatible alias for `cumulative_usage`.
+Use `step_usage` for the current step's token delta.
 
 ### StepRetrying
 

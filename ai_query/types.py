@@ -500,6 +500,7 @@ class StepResult:
     tool_results: list[ToolResult]
     reasoning_parts: list[ReasoningPart] = field(default_factory=list)
     finish_reason: Union[str, None] = None
+    usage: Union["Usage", None] = None
 
 
 StopCondition = Callable[[list[StepResult]], Union[bool, Awaitable[bool]]]
@@ -545,6 +546,14 @@ class StepFinishEvent:
     text: str
     usage: Usage
     steps: list[StepResult]
+    step_usage: Union[Usage, None] = None
+    cumulative_usage: Union[Usage, None] = None
+
+    def __post_init__(self) -> None:
+        if self.cumulative_usage is None:
+            self.cumulative_usage = self.usage
+        if self.step_usage is None:
+            self.step_usage = self.step.usage
 
 
 @dataclass

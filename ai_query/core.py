@@ -56,6 +56,22 @@ from ai_query.model import LanguageModel, EmbeddingModel
 _RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
+def _copy_usage(usage: Usage) -> Usage:
+    return Usage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cached_tokens=usage.cached_tokens,
+        total_tokens=usage.total_tokens,
+    )
+
+
+def _add_usage(total: Usage, usage: Usage) -> None:
+    total.input_tokens += usage.input_tokens
+    total.output_tokens += usage.output_tokens
+    total.cached_tokens += usage.cached_tokens
+    total.total_tokens += usage.total_tokens
+
+
 def _is_retryable_exception(exc: Exception) -> bool:
     if isinstance(exc, HTTPStatusError):
         return exc.status_code in _RETRYABLE_HTTP_STATUS_CODES
@@ -408,11 +424,9 @@ async def generate_text(
                 await _sleep_before_retry(delay, signal)
                 attempt += 1
 
-        if result.usage:
-            total_usage.input_tokens += result.usage.input_tokens
-            total_usage.output_tokens += result.usage.output_tokens
-            total_usage.cached_tokens += result.usage.cached_tokens
-            total_usage.total_tokens += result.usage.total_tokens
+        step_usage = _copy_usage(result.usage) if result.usage else None
+        if step_usage:
+            _add_usage(total_usage, step_usage)
 
         tool_calls: list[ToolCall] = result.response.get("tool_calls", [])
 
@@ -422,6 +436,7 @@ async def generate_text(
             tool_results=[],
             reasoning_parts=list(result.reasoning_parts),
             finish_reason=result.finish_reason,
+            usage=step_usage,
         )
 
         if result.text:
@@ -437,8 +452,10 @@ async def generate_text(
                     step_number=step_number,
                     step=step,
                     text=accumulated_text,
-                    usage=total_usage,
+                    usage=_copy_usage(total_usage),
                     steps=steps,
+                    step_usage=step_usage,
+                    cumulative_usage=_copy_usage(total_usage),
                 )
                 callback_result = on_step_finish(finish_event)
                 if inspect.isawaitable(callback_result):
@@ -519,8 +536,10 @@ async def generate_text(
                 step_number=step_number,
                 step=step,
                 text=accumulated_text,
-                usage=total_usage,
+                usage=_copy_usage(total_usage),
                 steps=steps,
+                step_usage=step_usage,
+                cumulative_usage=_copy_usage(total_usage),
             )
             callback_result = on_step_finish(finish_event)
             if inspect.isawaitable(callback_result):
@@ -645,6 +664,7 @@ def stream_text(
             step_tool_calls: list[ToolCall] = []
             step_reasoning_parts: list[ReasoningPart] = []
             step_finish_reason = None
+            step_usage: Usage | None = None
 
             attempt = 1
             while True:
@@ -675,10 +695,8 @@ def stream_text(
 
                         if chunk.is_final:
                             if chunk.usage:
-                                total_usage.input_tokens += chunk.usage.input_tokens
-                                total_usage.output_tokens += chunk.usage.output_tokens
-                                total_usage.cached_tokens += chunk.usage.cached_tokens
-                                total_usage.total_tokens += chunk.usage.total_tokens
+                                step_usage = _copy_usage(chunk.usage)
+                                _add_usage(total_usage, step_usage)
                             step_finish_reason = chunk.finish_reason
                             if chunk.tool_calls:
                                 step_tool_calls = chunk.tool_calls
@@ -714,6 +732,7 @@ def stream_text(
                 tool_results=[],
                 reasoning_parts=step_reasoning_parts,
                 finish_reason=step_finish_reason,
+                usage=step_usage,
             )
 
             if not step_tool_calls:
@@ -724,8 +743,10 @@ def stream_text(
                         step_number=step_number,
                         step=step,
                         text=accumulated_text,
-                        usage=total_usage,
+                        usage=_copy_usage(total_usage),
                         steps=steps,
+                        step_usage=step_usage,
+                        cumulative_usage=_copy_usage(total_usage),
                     )
                     callback_result = on_step_finish(finish_event)
                     if inspect.isawaitable(callback_result):
@@ -811,8 +832,10 @@ def stream_text(
                     step_number=step_number,
                     step=step,
                     text=accumulated_text,
-                    usage=total_usage,
+                    usage=_copy_usage(total_usage),
                     steps=steps,
+                    step_usage=step_usage,
+                    cumulative_usage=_copy_usage(total_usage),
                 )
                 callback_result = on_step_finish(finish_event)
                 if inspect.isawaitable(callback_result):
