@@ -589,6 +589,55 @@ class TestAgentTurn:
         await agent.stop()
 
     @pytest.mark.asyncio
+    async def test_turn_step_finished_exposes_step_and_cumulative_usage(self):
+        @tool(description="Echo")
+        def echo(msg: str) -> str:
+            return msg
+
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="tool_use",
+                        usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15),
+                        tool_calls=[
+                            ToolCall(id="call_1", name="echo", arguments={"msg": "hi"})
+                        ],
+                    ),
+                ],
+                [
+                    StreamChunk(text="Done"),
+                    StreamChunk(
+                        is_final=True,
+                        finish_reason="stop",
+                        usage=Usage(input_tokens=20, output_tokens=10, total_tokens=30),
+                    ),
+                ],
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(10),
+        )
+        await agent.start()
+
+        turn = agent.turn("Hello")
+        step_events = []
+        async for event in turn.events():
+            if event.type == "step.finished":
+                step_events.append(event)
+
+        assert [event.step_usage.total_tokens for event in step_events] == [15, 30]
+        assert [event.cumulative_usage.total_tokens for event in step_events] == [15, 45]
+        assert [event.usage.total_tokens for event in step_events] == [15, 45]
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_turn_send_injects_message_at_next_step(self):
         @tool(description="Echo")
         async def echo(value: str) -> str:

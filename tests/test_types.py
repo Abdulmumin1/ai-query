@@ -805,3 +805,30 @@ class TestStepEvents:
         assert event.step == step
         assert event.text == "Accumulated text"
         assert event.usage.total_tokens == 50
+        assert event.cumulative_usage.total_tokens == 50
+        assert event.step_usage is None
+
+    def test_step_finish_event_explicit_usage_fields(self):
+        """StepFinishEvent should store explicit step and cumulative usage."""
+        step_usage = Usage(total_tokens=10)
+        cumulative_usage = Usage(total_tokens=25)
+        step = StepResult(
+            text="Done",
+            tool_calls=[],
+            tool_results=[],
+            usage=step_usage,
+        )
+
+        event = StepFinishEvent(
+            step_number=2,
+            step=step,
+            text="Accumulated text",
+            usage=cumulative_usage,
+            steps=[step],
+            step_usage=step_usage,
+            cumulative_usage=cumulative_usage,
+        )
+
+        assert event.step_usage.total_tokens == 10
+        assert event.cumulative_usage.total_tokens == 25
+        assert event.usage.total_tokens == 25

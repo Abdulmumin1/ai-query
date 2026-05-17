@@ -633,6 +633,56 @@ class TestStreamTextWithTools:
         assert usage.input_tokens == 30  # 10 + 20
         assert usage.output_tokens == 15  # 5 + 10
 
+        steps = await result.steps
+        assert steps[0].usage is not None
+        assert steps[0].usage.total_tokens == 15
+        assert steps[1].usage is not None
+        assert steps[1].usage.total_tokens == 30
+
+    @pytest.mark.asyncio
+    async def test_stream_step_finish_event_exposes_step_and_cumulative_usage(self):
+        """Stream step finish events should distinguish step and cumulative usage."""
+        @tool(description="Echo")
+        def echo(msg: str) -> str:
+            return msg
+
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(text="Calling"),
+                StreamChunk(
+                    is_final=True,
+                    finish_reason="tool_use",
+                    usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15),
+                    tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hi"})],
+                ),
+            ],
+            [
+                StreamChunk(text="Done"),
+                StreamChunk(
+                    is_final=True,
+                    finish_reason="stop",
+                    usage=Usage(input_tokens=20, output_tokens=10, total_tokens=30),
+                ),
+            ],
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        events: list[StepFinishEvent] = []
+
+        result = stream_text(
+            model=model,
+            prompt="Test",
+            tools={"echo": echo},
+            stop_when=step_count_is(10),
+            on_step_finish=events.append,
+        )
+
+        async for _ in result.text_stream:
+            pass
+
+        assert [event.step_usage.total_tokens for event in events] == [15, 30]
+        assert [event.cumulative_usage.total_tokens for event in events] == [15, 45]
+        assert [event.usage.total_tokens for event in events] == [15, 45]
+
     @pytest.mark.asyncio
     async def test_stream_steps_include_tool_messages(self):
         """stream_text should retain tool-call steps after consumption."""

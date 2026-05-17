@@ -167,6 +167,7 @@ class StepResult:
     tool_calls: list[ToolCall]
     tool_results: list[ToolResult]
     finish_reason: str | None = None
+    usage: Usage | None = None
 ```
 
 <ResponseField name="text" type="str">
@@ -183,6 +184,10 @@ class StepResult:
 
 <ResponseField name="finish_reason" type="str | None">
   Provider finish reason for this step.
+</ResponseField>
+
+<ResponseField name="usage" type="Usage | None">
+  Token usage for this step only.
 </ResponseField>
 
 ## StreamChunk
@@ -288,7 +293,12 @@ class StepFinishEvent:
     text: str
     usage: Usage
     steps: list[StepResult]
+    step_usage: Usage | None = None
+    cumulative_usage: Usage | None = None
 ```
+
+`usage` is kept as a backward-compatible alias for `cumulative_usage`.
+Use `step_usage` for the current step's token delta.
 
 ## ToolCall
 
