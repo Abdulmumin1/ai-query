@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.47
+
+- patch: Expose explicit per-step and cumulative token usage on step results and events.
+
 ## 1.7.46
 
 - patch: Keep SSE streaming chat connections alive with internal heartbeat comments and emit structured logged error events across server adapters.

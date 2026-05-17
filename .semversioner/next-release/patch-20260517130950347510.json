@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Expose explicit per-step and cumulative token usage on step results and events."
-}

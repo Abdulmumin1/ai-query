@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Expose explicit per-step and cumulative token usage on step results and events.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-17T13:13:44+00:00",
+  "version": "1.7.47"
+}
