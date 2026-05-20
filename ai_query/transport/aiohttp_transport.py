@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator
 import aiohttp
 
 from .base import HTTPStatusError, HTTPTransport
+from .tls import certifi_ssl_context
 
 
 class AioHTTPTransport(HTTPTransport):
@@ -23,7 +24,8 @@ class AioHTTPTransport(HTTPTransport):
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector(ssl=certifi_ssl_context())
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def post(

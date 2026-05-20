@@ -8,6 +8,8 @@ from typing import Any, AsyncIterator, Union, TYPE_CHECKING
 
 import httpx
 
+from ai_query.transport.tls import certifi_ca_bundle
+
 from .base import AgentTransport
 
 if TYPE_CHECKING:
@@ -51,7 +53,10 @@ class HTTPTransport(AgentTransport):
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(headers=self.headers)
+            self._client = httpx.AsyncClient(
+                headers=self.headers,
+                verify=certifi_ca_bundle(),
+            )
         return self._client
 
     def _get_url(self, agent_id: str) -> str:
