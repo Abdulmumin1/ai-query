@@ -9,6 +9,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
+    { name = "certifi" },
     { name = "httpx" },
 ]
 
@@ -41,6 +42,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34.0" },
+    { name = "certifi", specifier = ">=2024.2.2" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.25.0" },

@@ -124,11 +124,16 @@ class MCPClient:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
         import httpx
+        from ai_query.transport.tls import certifi_ca_bundle
 
         self._exit_stack = AsyncExitStack()
 
-        # Create httpx client with headers if provided
-        http_client = httpx.AsyncClient(headers=headers) if headers else None
+        http_client = await self._exit_stack.enter_async_context(
+            httpx.AsyncClient(
+                headers=headers,
+                verify=certifi_ca_bundle(),
+            )
+        )
 
         # Set up Streamable HTTP transport and session
         # streamable_http_client returns (read_stream, write_stream, get_session_id)

@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Use certifi-backed TLS verification for aiohttp and httpx transports."
+}
