@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.48
+
+- patch: Use certifi-backed TLS verification for aiohttp and httpx transports.
+
 ## 1.7.47
 
 - patch: Expose explicit per-step and cumulative token usage on step results and events.

@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Use certifi-backed TLS verification for aiohttp and httpx transports.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-05-20T13:08:59+00:00",
+  "version": "1.7.48"
+}
