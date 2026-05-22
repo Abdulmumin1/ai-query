@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.49
+
+- patch: Keep SSE event broadcasts isolated when a client disconnects mid-write.
+
 ## 1.7.48
 
 - patch: Use certifi-backed TLS verification for aiohttp and httpx transports.
