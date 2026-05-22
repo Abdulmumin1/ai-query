@@ -212,6 +212,11 @@ def _create_emit_handler(agent: "Agent"):
         for sse in list(agent._sse_connections):
             try:
                 await sse.write(sse_msg.encode())
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise
+                agent._sse_connections.discard(sse)
             except Exception:
                 agent._sse_connections.discard(sse)
 
