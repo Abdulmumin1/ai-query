@@ -1,10 +1,21 @@
 """Tests for SSE event replay."""
 
+import asyncio
+import importlib.util
 import json
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from aiohttp import web
 from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig, Event
+
+
+class OrderedConnections(list):
+    """List with set-like discard for deterministic broadcast-order tests."""
+
+    def discard(self, item):
+        if item in self:
+            self.remove(item)
 
 
 class TestSSEReplay:
@@ -273,5 +284,61 @@ class TestSSEConnectionManagement:
 
         for conn in connections:
             conn.write.assert_called_once()
+
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_agent_server_emit_handler_isolates_cancelled_sse_connection(self):
+        """A cancelled SSE write should not stop delivery to other SSE clients."""
+        server = AgentServer(Agent)
+        agent = Agent("test", storage=MemoryStorage())
+        await agent.start()
+
+        bad = MagicMock()
+        bad.write = AsyncMock(side_effect=asyncio.CancelledError())
+
+        good = MagicMock()
+        good.write = AsyncMock()
+
+        agent._sse_connections = OrderedConnections([bad, good])
+        agent._emit_handler = server._create_emit_handler(agent)
+
+        await agent.emit("broadcast", {"msg": "hello"})
+
+        bad.write.assert_called_once()
+        good.write.assert_called_once()
+        assert bad not in agent._sse_connections
+        assert good in agent._sse_connections
+
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_legacy_server_emit_handler_isolates_cancelled_sse_connection(self):
+        """The legacy single-agent server should isolate cancelled SSE writes too."""
+        server_file = Path(__file__).parents[1] / "ai_query" / "agents" / "server.py"
+        spec = importlib.util.spec_from_file_location("legacy_agent_server", server_file)
+        assert spec is not None
+        legacy_server = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(legacy_server)
+
+        agent = Agent("test", storage=MemoryStorage())
+        await agent.start()
+
+        bad = MagicMock()
+        bad.write = AsyncMock(side_effect=asyncio.CancelledError())
+
+        good = MagicMock()
+        good.write = AsyncMock()
+
+        agent._sse_connections = OrderedConnections([bad, good])
+        agent._emit_handler = legacy_server._create_emit_handler(agent)
+
+        await agent.emit("broadcast", {"msg": "hello"})
+
+        bad.write.assert_called_once()
+        good.write.assert_called_once()
+        assert bad not in agent._sse_connections
+        assert good in agent._sse_connections
 
         await agent.stop()

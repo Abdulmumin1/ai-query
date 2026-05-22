@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Keep SSE event broadcasts isolated when a client disconnects mid-write."
+}
