@@ -589,7 +589,7 @@ class TestAgentTurn:
         await agent.stop()
 
     @pytest.mark.asyncio
-    async def test_turn_step_finished_exposes_step_and_cumulative_usage(self):
+    async def test_turn_step_finished_exposes_step_usage(self):
         @tool(description="Echo")
         def echo(msg: str) -> str:
             return msg
@@ -632,9 +632,7 @@ class TestAgentTurn:
             if event.type == "step.finished":
                 step_events.append(event)
 
-        assert [event.step_usage.total_tokens for event in step_events] == [15, 30]
-        assert [event.cumulative_usage.total_tokens for event in step_events] == [15, 45]
-        assert [event.usage.total_tokens for event in step_events] == [15, 45]
+        assert [event.usage.total_tokens for event in step_events] == [15, 30]
         await agent.stop()
 
     @pytest.mark.asyncio

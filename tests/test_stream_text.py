@@ -592,8 +592,8 @@ class TestStreamTextWithTools:
         assert "calculate" in full_text.lower() or "5" in full_text
 
     @pytest.mark.asyncio
-    async def test_stream_accumulated_usage_with_tools(self):
-        """stream_text should accumulate usage across tool calls."""
+    async def test_stream_usage_is_from_last_step_with_tools(self):
+        """stream_text usage should come from the last provider step."""
         @tool(description="Echo")
         def echo(msg: str) -> str:
             return msg
@@ -630,8 +630,8 @@ class TestStreamTextWithTools:
             pass
 
         usage = await result.usage
-        assert usage.input_tokens == 30  # 10 + 20
-        assert usage.output_tokens == 15  # 5 + 10
+        assert usage.input_tokens == 20
+        assert usage.output_tokens == 10
 
         steps = await result.steps
         assert steps[0].usage is not None
@@ -640,8 +640,8 @@ class TestStreamTextWithTools:
         assert steps[1].usage.total_tokens == 30
 
     @pytest.mark.asyncio
-    async def test_stream_step_finish_event_exposes_step_and_cumulative_usage(self):
-        """Stream step finish events should distinguish step and cumulative usage."""
+    async def test_stream_step_finish_event_exposes_step_usage(self):
+        """Stream step finish events should expose provider usage for that step."""
         @tool(description="Echo")
         def echo(msg: str) -> str:
             return msg
@@ -679,9 +679,13 @@ class TestStreamTextWithTools:
         async for _ in result.text_stream:
             pass
 
-        assert [event.step_usage.total_tokens for event in events] == [15, 30]
-        assert [event.cumulative_usage.total_tokens for event in events] == [15, 45]
-        assert [event.usage.total_tokens for event in events] == [15, 45]
+        assert [event.usage.total_tokens for event in events] == [15, 30]
+
+        steps = await result.steps
+        assert steps[0].usage is not None
+        assert steps[0].usage.total_tokens == 15
+        assert steps[1].usage is not None
+        assert steps[1].usage.total_tokens == 30
 
     @pytest.mark.asyncio
     async def test_stream_steps_include_tool_messages(self):

@@ -66,9 +66,10 @@ usage = await result.usage
 print(f"\nTotal tokens: {usage.total_tokens}")
 ```
 
-### Accumulated Usage
+### Multi-Step Usage
 
-When using tools, usage is accumulated across all steps:
+When using tools, `result.usage` contains the final model step's usage.
+Each model call's usage is available on its corresponding step:
 
 ```python
 result = await generate_text(
@@ -77,10 +78,10 @@ result = await generate_text(
     tools=tools
 )
 
-# Total usage across all tool execution steps
-print(f"Total tokens: {result.usage.total_tokens}")
+# Usage reported by the final model call
+print(f"Final step tokens: {result.usage.total_tokens}")
 
-# Per-step usage
+# Provider-reported usage for every model call
 for i, step in enumerate(result.steps):
     print(f"Step {i+1}: {step.usage.total_tokens} tokens")
 ```

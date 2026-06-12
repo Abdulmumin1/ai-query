@@ -915,7 +915,7 @@ class TestGenerateTextCallbacks:
 
 
 # =============================================================================
-# Usage Accumulation Tests
+# Usage Tests
 # =============================================================================
 
 
@@ -941,8 +941,8 @@ class TestGenerateTextUsage:
         assert result.usage.total_tokens == 15
 
     @pytest.mark.asyncio
-    async def test_usage_accumulated_with_tools(self):
-        """Usage should accumulate across tool calls."""
+    async def test_usage_is_from_last_step_with_tools(self):
+        """Result usage should be the provider-reported usage from the last step."""
         @tool(description="Echo")
         def echo(msg: str) -> str:
             return msg
@@ -968,10 +968,9 @@ class TestGenerateTextUsage:
             stop_when=step_count_is(10),
         )
 
-        # Usage should be accumulated
-        assert result.usage.input_tokens == 30  # 10 + 20
-        assert result.usage.output_tokens == 15  # 5 + 10
-        assert result.usage.total_tokens == 45  # 15 + 30
+        assert result.usage.input_tokens == 20
+        assert result.usage.output_tokens == 10
+        assert result.usage.total_tokens == 30
 
         assert result.steps[0].usage is not None
         assert result.steps[0].usage.total_tokens == 15
@@ -979,8 +978,8 @@ class TestGenerateTextUsage:
         assert result.steps[1].usage.total_tokens == 30
 
     @pytest.mark.asyncio
-    async def test_step_finish_event_exposes_step_and_cumulative_usage(self):
-        """Step finish events should distinguish per-step and cumulative usage."""
+    async def test_step_finish_event_exposes_step_usage(self):
+        """Step finish events should expose provider usage for that step."""
         @tool(description="Echo")
         def echo(msg: str) -> str:
             return msg
@@ -1008,6 +1007,4 @@ class TestGenerateTextUsage:
             on_step_finish=events.append,
         )
 
-        assert [event.step_usage.total_tokens for event in events] == [15, 30]
-        assert [event.cumulative_usage.total_tokens for event in events] == [15, 45]
-        assert [event.usage.total_tokens for event in events] == [15, 45]
+        assert [event.usage.total_tokens for event in events] == [15, 30]

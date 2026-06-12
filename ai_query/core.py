@@ -65,13 +65,6 @@ def _copy_usage(usage: Usage) -> Usage:
     )
 
 
-def _add_usage(total: Usage, usage: Usage) -> None:
-    total.input_tokens += usage.input_tokens
-    total.output_tokens += usage.output_tokens
-    total.cached_tokens += usage.cached_tokens
-    total.total_tokens += usage.total_tokens
-
-
 def _is_retryable_exception(exc: Exception) -> bool:
     if isinstance(exc, HTTPStatusError):
         return exc.status_code in _RETRYABLE_HTTP_STATUS_CODES
@@ -354,7 +347,7 @@ async def generate_text(
 
     steps: list[StepResult] = []
     current_messages = list(final_messages)
-    total_usage = Usage()
+    latest_usage: Usage | None = None
     accumulated_text = ""
     final_result: GenerateTextResult | None = None
     step_number = 0
@@ -388,7 +381,7 @@ async def generate_text(
                             text=accumulated_text,
                             steps=steps,
                             finish_reason="stop",
-                            usage=total_usage,
+                            usage=_copy_usage(latest_usage) if latest_usage else None,
                         )
                         break
 
@@ -425,8 +418,7 @@ async def generate_text(
                 attempt += 1
 
         step_usage = _copy_usage(result.usage) if result.usage else None
-        if step_usage:
-            _add_usage(total_usage, step_usage)
+        latest_usage = step_usage
 
         tool_calls: list[ToolCall] = result.response.get("tool_calls", [])
 
@@ -444,7 +436,7 @@ async def generate_text(
 
         if not tool_calls:
             final_result = result
-            final_result.usage = total_usage
+            final_result.usage = _copy_usage(latest_usage) if latest_usage else None
             steps.append(step)
 
             if on_step_finish:
@@ -452,10 +444,8 @@ async def generate_text(
                     step_number=step_number,
                     step=step,
                     text=accumulated_text,
-                    usage=_copy_usage(total_usage),
+                    usage=_copy_usage(step_usage) if step_usage else None,
                     steps=steps,
-                    step_usage=step_usage,
-                    cumulative_usage=_copy_usage(total_usage),
                 )
                 callback_result = on_step_finish(finish_event)
                 if inspect.isawaitable(callback_result):
@@ -536,10 +526,8 @@ async def generate_text(
                 step_number=step_number,
                 step=step,
                 text=accumulated_text,
-                usage=_copy_usage(total_usage),
+                usage=_copy_usage(step_usage) if step_usage else None,
                 steps=steps,
-                step_usage=step_usage,
-                cumulative_usage=_copy_usage(total_usage),
             )
             callback_result = on_step_finish(finish_event)
             if inspect.isawaitable(callback_result):
@@ -556,7 +544,7 @@ async def generate_text(
 
         if should_stop:
             final_result = result
-            final_result.usage = total_usage
+            final_result.usage = _copy_usage(latest_usage) if latest_usage else None
             break
 
         current_messages.append(
@@ -625,7 +613,7 @@ def stream_text(
         nonlocal shared_steps
         steps: list[StepResult] = shared_steps
         current_messages = list(final_messages)
-        total_usage = Usage()
+        latest_usage: Usage | None = None
         accumulated_text = ""
         step_number = 0
 
@@ -655,7 +643,7 @@ def stream_text(
                     if callback_result.stop:
                         yield StreamChunk(
                             is_final=True,
-                            usage=total_usage,
+                            usage=_copy_usage(latest_usage) if latest_usage else None,
                             finish_reason="stop",
                         )
                         break
@@ -696,7 +684,7 @@ def stream_text(
                         if chunk.is_final:
                             if chunk.usage:
                                 step_usage = _copy_usage(chunk.usage)
-                                _add_usage(total_usage, step_usage)
+                                latest_usage = step_usage
                             step_finish_reason = chunk.finish_reason
                             if chunk.tool_calls:
                                 step_tool_calls = chunk.tool_calls
@@ -743,10 +731,8 @@ def stream_text(
                         step_number=step_number,
                         step=step,
                         text=accumulated_text,
-                        usage=_copy_usage(total_usage),
+                        usage=_copy_usage(step_usage) if step_usage else None,
                         steps=steps,
-                        step_usage=step_usage,
-                        cumulative_usage=_copy_usage(total_usage),
                     )
                     callback_result = on_step_finish(finish_event)
                     if inspect.isawaitable(callback_result):
@@ -754,7 +740,7 @@ def stream_text(
 
                 yield StreamChunk(
                     is_final=True,
-                    usage=total_usage,
+                    usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason=step_finish_reason,
                 )
                 break
@@ -832,10 +818,8 @@ def stream_text(
                     step_number=step_number,
                     step=step,
                     text=accumulated_text,
-                    usage=_copy_usage(total_usage),
+                    usage=_copy_usage(step_usage) if step_usage else None,
                     steps=steps,
-                    step_usage=step_usage,
-                    cumulative_usage=_copy_usage(total_usage),
                 )
                 callback_result = on_step_finish(finish_event)
                 if inspect.isawaitable(callback_result):
@@ -853,7 +837,7 @@ def stream_text(
             if should_stop:
                 yield StreamChunk(
                     is_final=True,
-                    usage=total_usage,
+                    usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason=step_finish_reason,
                 )
                 break
