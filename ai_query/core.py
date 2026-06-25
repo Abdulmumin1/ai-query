@@ -10,8 +10,6 @@ import inspect
 import random
 from typing import Any, AsyncIterator
 
-import aiohttp
-
 from ai_query.types import (
     GenerateTextResult,
     Message,
@@ -75,7 +73,11 @@ def _add_usage(total: Usage, usage: Usage) -> None:
 def _is_retryable_exception(exc: Exception) -> bool:
     if isinstance(exc, HTTPStatusError):
         return exc.status_code in _RETRYABLE_HTTP_STATUS_CODES
-    if isinstance(exc, aiohttp.ClientError):
+    try:
+        from aiohttp import ClientError
+    except ImportError:
+        ClientError = None
+    if ClientError is not None and isinstance(exc, ClientError):
         return True
     if isinstance(exc, (TimeoutError, ConnectionError, OSError, asyncio.TimeoutError)):
         return True
