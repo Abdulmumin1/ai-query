@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.50
+
+- patch: Report provider usage per model step and return the final step usage from generation results.
+
 ## 1.7.49
 
 - patch: Keep SSE event broadcasts isolated when a client disconnects mid-write.
