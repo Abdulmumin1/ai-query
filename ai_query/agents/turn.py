@@ -94,8 +94,6 @@ class StepFinished:
     step_number: int
     step: StepResult
     usage: Usage | None
-    step_usage: Usage | None = None
-    cumulative_usage: Usage | None = None
 
 
 @dataclass
@@ -258,8 +256,6 @@ class AgentTurn:
                 step_number=event.step_number,
                 step=event.step,
                 usage=event.usage,
-                step_usage=event.step_usage,
-                cumulative_usage=event.cumulative_usage,
             ))
             await after_step_hook(event)
 

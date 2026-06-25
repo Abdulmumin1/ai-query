@@ -291,14 +291,11 @@ class StepFinishEvent:
     step_number: int
     step: StepResult
     text: str
-    usage: Usage
+    usage: Usage | None
     steps: list[StepResult]
-    step_usage: Usage | None = None
-    cumulative_usage: Usage | None = None
 ```
 
-`usage` is kept as a backward-compatible alias for `cumulative_usage`.
-Use `step_usage` for the current step's token delta.
+`usage` is the provider-reported usage for this step.
 
 ## ToolCall
 

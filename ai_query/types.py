@@ -544,16 +544,8 @@ class StepFinishEvent:
     step_number: int
     step: StepResult
     text: str
-    usage: Usage
+    usage: Union[Usage, None]
     steps: list[StepResult]
-    step_usage: Union[Usage, None] = None
-    cumulative_usage: Union[Usage, None] = None
-
-    def __post_init__(self) -> None:
-        if self.cumulative_usage is None:
-            self.cumulative_usage = self.usage
-        if self.step_usage is None:
-            self.step_usage = self.step.usage
 
 
 @dataclass
