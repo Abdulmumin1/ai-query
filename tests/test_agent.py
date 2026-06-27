@@ -589,6 +589,59 @@ class TestAgentTurn:
         await agent.stop()
 
     @pytest.mark.asyncio
+    async def test_turn_forwards_tool_lifecycle_events(self):
+        """AgentTurn should expose tool events from the typed stream."""
+        @tool(description="Echo")
+        async def echo(value: str) -> str:
+            await asyncio.sleep(0.01)
+            return value
+
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(
+                    is_final=True,
+                    finish_reason="tool_use",
+                    tool_calls=[
+                        ToolCall(id="call_1", name="echo", arguments={"value": "ok"})
+                    ],
+                )
+            ],
+            [
+                StreamChunk(text="Done"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ],
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent(
+            "test",
+            storage=MemoryStorage(),
+            model=model,
+            tools={"echo": echo},
+            stop_when=step_count_is(2),
+        )
+        await agent.start()
+
+        events = [event async for event in agent.turn("Hello").events()]
+
+        assert [event.type for event in events] == [
+            "turn.started",
+            "step.started",
+            "tool_call.ready",
+            "tool_execution.started",
+            "tool_execution.finished",
+            "tool_result",
+            "step.finished",
+            "step.started",
+            "text.delta",
+            "step.finished",
+            "turn.finished",
+        ]
+        tool_events = [event for event in events if event.type.startswith("tool_")]
+        assert [event.tool_call.id for event in tool_events] == ["call_1"] * 4
+        assert tool_events[-1].tool_result.result == "ok"
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_turn_step_finished_exposes_step_usage(self):
         @tool(description="Echo")
         def echo(msg: str) -> str:
@@ -804,6 +857,10 @@ class TestAgentTurn:
         assert [event.type for event in events] == [
             "turn.started",
             "step.started",
+            "tool_call.ready",
+            "tool_execution.started",
+            "tool_execution.finished",
+            "tool_result",
             "step.finished",
             "step.started",
             "step.retrying",

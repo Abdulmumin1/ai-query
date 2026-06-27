@@ -13,6 +13,10 @@ from ai_query import (
     StreamStepFinishedEvent,
     StreamStepStartedEvent,
     TextDeltaEvent,
+    ToolCallReadyEvent,
+    ToolExecutionFinishedEvent,
+    ToolExecutionStartedEvent,
+    ToolResultEvent,
     stream_text,
     tool,
     Field,
@@ -22,6 +26,8 @@ from ai_query.types import (
     Message,
     AbortController,
     AbortError,
+    AfterToolCallResult,
+    BeforeToolCallResult,
     ReasoningEvent,
     ReasoningPart,
     RetryPolicy,
@@ -745,18 +751,22 @@ class TestStreamTextWithTools:
 
         assert [event.type for event in events] == [
             "step.started",
+            "tool_call.ready",
+            "tool_execution.started",
+            "tool_execution.finished",
+            "tool_result",
             "step.finished",
             "step.started",
             "text.delta",
             "step.finished",
             "stream.finished",
         ]
-        assert [events[0].step_number, events[1].step_number] == [1, 1]
-        assert [events[2].step_number, events[3].step_number, events[4].step_number] == [2, 2, 2]
-        assert len(events[1].steps) == 1
-        assert len(events[4].steps) == 2
-        assert len(events[5].steps) == 2
-        assert events[1].step.tool_results[0].result == "ok"
+        assert [events[0].step_number, events[5].step_number] == [1, 1]
+        assert [events[6].step_number, events[7].step_number, events[8].step_number] == [2, 2, 2]
+        assert len(events[5].steps) == 1
+        assert len(events[8].steps) == 2
+        assert len(events[9].steps) == 2
+        assert events[5].step.tool_results[0].result == "ok"
 
     @pytest.mark.asyncio
     async def test_multiple_async_tool_calls_run_in_parallel(self):
@@ -795,6 +805,181 @@ class TestStreamTextWithTools:
         steps = await result.steps
         assert elapsed < 0.4
         assert [tr.result for tr in steps[0].tool_results] == ["a", "b", "c"]
+
+    @pytest.mark.asyncio
+    async def test_tool_lifecycle_events_show_parallel_completion_order(self):
+        """Tool execution events should be live while final results stay ordered."""
+        delays = {"a": 0.12, "b": 0.02, "c": 0.07}
+
+        @tool(description="Delayed tool")
+        async def delayed_tool(name: str) -> str:
+            await asyncio.sleep(delays[name])
+            return name
+
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(
+                is_final=True,
+                finish_reason="tool_use",
+                tool_calls=[
+                    ToolCall(id="call_a", name="delayed_tool", arguments={"name": "a"}),
+                    ToolCall(id="call_b", name="delayed_tool", arguments={"name": "b"}),
+                    ToolCall(id="call_c", name="delayed_tool", arguments={"name": "c"}),
+                ],
+            )
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        result = stream_text(
+            model=model,
+            prompt="Run all tools",
+            tools={"delayed_tool": delayed_tool},
+            stop_when=step_count_is(1),
+        )
+
+        events = [event async for event in result.event_stream]
+        ready = [event for event in events if isinstance(event, ToolCallReadyEvent)]
+        started = [
+            event for event in events if isinstance(event, ToolExecutionStartedEvent)
+        ]
+        finished = [
+            event for event in events if isinstance(event, ToolExecutionFinishedEvent)
+        ]
+        tool_results = [event for event in events if isinstance(event, ToolResultEvent)]
+        steps = await result.steps
+
+        assert [event.tool_call.id for event in ready] == ["call_a", "call_b", "call_c"]
+        assert [event.tool_call.id for event in started] == ["call_a", "call_b", "call_c"]
+        assert [event.tool_call.id for event in finished] == ["call_b", "call_c", "call_a"]
+        assert [event.tool_call.id for event in tool_results] == [
+            "call_a",
+            "call_b",
+            "call_c",
+        ]
+        assert [event.index for event in tool_results] == [0, 1, 2]
+        assert all(event.tool_result is not None for event in finished)
+        assert all(event.duration > 0 for event in finished)
+        assert [item.result for item in steps[0].tool_results] == ["a", "b", "c"]
+        assert [event.type for event in events[-5:]] == [
+            "tool_result",
+            "tool_result",
+            "tool_result",
+            "step.finished",
+            "stream.finished",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_tool_result_event_contains_post_hook_result(self):
+        """The result event should match the normalized result sent to the model."""
+        @tool(description="Return a raw value")
+        def raw_tool() -> str:
+            return "raw"
+
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(
+                is_final=True,
+                finish_reason="tool_use",
+                tool_calls=[ToolCall(id="call_1", name="raw_tool", arguments={})],
+            )
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        def after_tool_call(_event):
+            return AfterToolCallResult(result="normalized")
+
+        result = stream_text(
+            model=model,
+            prompt="Run the tool",
+            tools={"raw_tool": raw_tool},
+            after_tool_call=after_tool_call,
+            stop_when=step_count_is(1),
+        )
+        events = [event async for event in result.event_stream]
+        execution_finished = next(
+            event for event in events if isinstance(event, ToolExecutionFinishedEvent)
+        )
+        tool_result = next(event for event in events if isinstance(event, ToolResultEvent))
+
+        assert execution_finished.tool_result is not None
+        assert execution_finished.tool_result.result == "raw"
+        assert tool_result.tool_result.result == "normalized"
+        assert (await result.steps)[0].tool_results[0].result == "normalized"
+
+    @pytest.mark.asyncio
+    async def test_blocked_and_unknown_tools_emit_results_without_execution(self):
+        """Non-runnable calls should be observable without fake execution events."""
+        @tool(description="Blocked tool")
+        def blocked_tool() -> str:
+            raise AssertionError("blocked tool must not run")
+
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(
+                is_final=True,
+                finish_reason="tool_use",
+                tool_calls=[
+                    ToolCall(id="blocked", name="blocked_tool", arguments={}),
+                    ToolCall(id="unknown", name="missing_tool", arguments={}),
+                ],
+            )
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        def before_tool_call(event):
+            if event.tool_call.id == "blocked":
+                return BeforeToolCallResult(block=True, reason="not allowed")
+            return None
+
+        result = stream_text(
+            model=model,
+            prompt="Run tools",
+            tools={"blocked_tool": blocked_tool},
+            before_tool_call=before_tool_call,
+            stop_when=step_count_is(1),
+        )
+        events = [event async for event in result.event_stream]
+
+        assert [event.type for event in events] == [
+            "step.started",
+            "tool_call.ready",
+            "tool_call.ready",
+            "tool_result",
+            "tool_result",
+            "step.finished",
+            "stream.finished",
+        ]
+        result_events = [event for event in events if isinstance(event, ToolResultEvent)]
+        assert [event.tool_call.id for event in result_events] == ["blocked", "unknown"]
+        assert all(event.tool_result.is_error for event in result_events)
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_error_is_streamed_and_normalized(self):
+        """Execution failures should be visible on finish and result events."""
+        @tool(description="Fail")
+        def fail() -> str:
+            raise ValueError("broken")
+
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(
+                is_final=True,
+                finish_reason="tool_use",
+                tool_calls=[ToolCall(id="call_1", name="fail", arguments={})],
+            )
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        result = stream_text(
+            model=model,
+            prompt="Run the tool",
+            tools={"fail": fail},
+            stop_when=step_count_is(1),
+        )
+        events = [event async for event in result.event_stream]
+        finished = next(
+            event for event in events if isinstance(event, ToolExecutionFinishedEvent)
+        )
+        tool_result = next(event for event in events if isinstance(event, ToolResultEvent))
+
+        assert finished.error == "broken"
+        assert finished.tool_result is not None
+        assert finished.tool_result.is_error is True
+        assert tool_result.tool_result.is_error is True
 
     @pytest.mark.asyncio
     async def test_stream_usage_is_from_last_step_with_tools(self):

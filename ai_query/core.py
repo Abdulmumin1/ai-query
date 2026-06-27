@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import contextlib
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import inspect
 import random
-from typing import Any, AsyncIterator
+import time
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 from ai_query.types import (
     GenerateTextResult,
@@ -23,6 +25,10 @@ from ai_query.types import (
     TextPart,
     TextDeltaEvent,
     TextStreamEvent,
+    ToolCallReadyEvent,
+    ToolExecutionFinishedEvent,
+    ToolExecutionStartedEvent,
+    ToolResultEvent,
     ToolCallPart,
     ToolResultPart,
     Usage,
@@ -66,6 +72,19 @@ def _copy_usage(usage: Usage) -> Usage:
         output_tokens=usage.output_tokens,
         cached_tokens=usage.cached_tokens,
         total_tokens=usage.total_tokens,
+    )
+
+
+def _copy_tool_result(tool_result: ToolResult) -> ToolResult:
+    try:
+        result = copy.deepcopy(tool_result.result)
+    except Exception:
+        result = tool_result.result
+    return ToolResult(
+        tool_call_id=tool_result.tool_call_id,
+        tool_name=tool_result.tool_name,
+        result=result,
+        is_error=tool_result.is_error,
     )
 
 
@@ -196,26 +215,64 @@ def _build_assistant_step_content(step: StepResult) -> str | list[Any]:
 
 
 async def _run_tool_call(
+    *,
+    step_number: int,
+    index: int,
     tool_call: ToolCall,
     tool_def: Any,
     signal: AbortSignal | None,
+    publish_tool_event: Callable[[TextStreamEvent], Awaitable[None]] | None,
 ) -> ToolResult:
+    started_at = time.perf_counter()
+    execution_error: str | None = None
+    if publish_tool_event:
+        await publish_tool_event(ToolExecutionStartedEvent(
+            type="tool_execution.started",
+            step_number=step_number,
+            index=index,
+            tool_call=tool_call,
+        ))
+
     try:
         output = await _await_with_abort(tool_def.run(**tool_call.arguments), signal)
-        return ToolResult(
+        tool_result = ToolResult(
             tool_call_id=tool_call.id,
             tool_name=tool_call.name,
             result=output,
         )
-    except AbortError:
+    except AbortError as exc:
+        if publish_tool_event:
+            await publish_tool_event(ToolExecutionFinishedEvent(
+                type="tool_execution.finished",
+                step_number=step_number,
+                index=index,
+                tool_call=tool_call,
+                tool_result=None,
+                duration=time.perf_counter() - started_at,
+                error=str(exc),
+                aborted=True,
+            ))
         raise
     except Exception as exc:
-        return ToolResult(
+        execution_error = str(exc)
+        tool_result = ToolResult(
             tool_call_id=tool_call.id,
             tool_name=tool_call.name,
             result=f"Error: {exc}",
             is_error=True,
         )
+
+    if publish_tool_event:
+        await publish_tool_event(ToolExecutionFinishedEvent(
+            type="tool_execution.finished",
+            step_number=step_number,
+            index=index,
+            tool_call=tool_call,
+            tool_result=_copy_tool_result(tool_result),
+            duration=time.perf_counter() - started_at,
+            error=execution_error,
+        ))
+    return tool_result
 
 
 async def _execute_tool_calls(
@@ -227,11 +284,12 @@ async def _execute_tool_calls(
     before_tool_call: OnBeforeToolCall | None,
     after_tool_call: OnAfterToolCall | None,
     signal: AbortSignal | None,
+    publish_tool_event: Callable[[TextStreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[list[ToolResult], bool]:
     ordered_results: list[ToolResult | None] = []
     runnable_tools: list[tuple[int, ToolCall, Any]] = []
 
-    for tool_call in tool_calls:
+    for index, tool_call in enumerate(tool_calls):
         before_result = None
         if before_tool_call:
             before_event = BeforeToolCallEvent(
@@ -264,13 +322,20 @@ async def _execute_tool_calls(
             )
         else:
             ordered_results.append(None)
-            runnable_tools.append((len(ordered_results) - 1, tool_call, tool_def))
+            runnable_tools.append((index, tool_call, tool_def))
 
     if runnable_tools:
         tool_results = await asyncio.gather(
             *(
-                _run_tool_call(tool_call, tool_def, signal)
-                for _, tool_call, tool_def in runnable_tools
+                _run_tool_call(
+                    step_number=step_number,
+                    index=index,
+                    tool_call=tool_call,
+                    tool_def=tool_def,
+                    signal=signal,
+                    publish_tool_event=publish_tool_event,
+                )
+                for index, tool_call, tool_def in runnable_tools
             )
         )
         for (index, _, _), tool_result in zip(runnable_tools, tool_results):
@@ -278,7 +343,7 @@ async def _execute_tool_calls(
 
     should_terminate_after_step = False
     final_results: list[ToolResult] = []
-    for tool_call, tool_result in zip(tool_calls, ordered_results):
+    for index, (tool_call, tool_result) in enumerate(zip(tool_calls, ordered_results)):
         if tool_result is None:
             raise RuntimeError(f"Tool call '{tool_call.id}' did not produce a result")
 
@@ -299,6 +364,15 @@ async def _execute_tool_calls(
                     tool_result.is_error = after_result.is_error
                 if after_result.terminate:
                     should_terminate_after_step = True
+
+        if publish_tool_event:
+            await publish_tool_event(ToolResultEvent(
+                type="tool_result",
+                step_number=step_number,
+                index=index,
+                tool_call=tool_call,
+                tool_result=_copy_tool_result(tool_result),
+            ))
 
         final_results.append(tool_result)
 
@@ -839,15 +913,47 @@ def stream_text(
                 )
                 break
 
-            tool_results, should_terminate_after_step = await _execute_tool_calls(
-                step_number=step_number,
-                tool_calls=step_tool_calls,
-                tools=tools,
-                messages=current_messages,
-                before_tool_call=before_tool_call,
-                after_tool_call=after_tool_call,
-                signal=signal,
-            )
+            for index, tool_call in enumerate(step_tool_calls):
+                yield ToolCallReadyEvent(
+                    type="tool_call.ready",
+                    step_number=step_number,
+                    index=index,
+                    tool_call=tool_call,
+                )
+
+            tool_event_queue: asyncio.Queue[TextStreamEvent | None] = asyncio.Queue()
+
+            async def publish_tool_event(event: TextStreamEvent) -> None:
+                await tool_event_queue.put(event)
+
+            async def execute_tools() -> tuple[list[ToolResult], bool]:
+                try:
+                    return await _execute_tool_calls(
+                        step_number=step_number,
+                        tool_calls=step_tool_calls,
+                        tools=tools,
+                        messages=current_messages,
+                        before_tool_call=before_tool_call,
+                        after_tool_call=after_tool_call,
+                        signal=signal,
+                        publish_tool_event=publish_tool_event,
+                    )
+                finally:
+                    await tool_event_queue.put(None)
+
+            execution_task = asyncio.create_task(execute_tools())
+            try:
+                while True:
+                    tool_event = await tool_event_queue.get()
+                    if tool_event is None:
+                        break
+                    yield tool_event
+                tool_results, should_terminate_after_step = await execution_task
+            finally:
+                if not execution_task.done():
+                    execution_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await execution_task
 
             step.tool_results = tool_results
             steps.append(step)

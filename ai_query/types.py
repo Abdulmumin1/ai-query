@@ -875,6 +875,43 @@ class StreamReasoningEvent:
 
 
 @dataclass
+class ToolCallReadyEvent:
+    type: Literal["tool_call.ready"]
+    step_number: int
+    index: int
+    tool_call: ToolCall
+
+
+@dataclass
+class ToolExecutionStartedEvent:
+    type: Literal["tool_execution.started"]
+    step_number: int
+    index: int
+    tool_call: ToolCall
+
+
+@dataclass
+class ToolExecutionFinishedEvent:
+    type: Literal["tool_execution.finished"]
+    step_number: int
+    index: int
+    tool_call: ToolCall
+    tool_result: Union[ToolResult, None]
+    duration: float
+    error: Union[str, None] = None
+    aborted: bool = False
+
+
+@dataclass
+class ToolResultEvent:
+    type: Literal["tool_result"]
+    step_number: int
+    index: int
+    tool_call: ToolCall
+    tool_result: ToolResult
+
+
+@dataclass
 class StreamStepStartedEvent:
     type: Literal["step.started"]
     step_number: int
@@ -904,6 +941,10 @@ class StreamFinishedEvent:
 TextStreamEvent = Union[
     TextDeltaEvent,
     StreamReasoningEvent,
+    ToolCallReadyEvent,
+    ToolExecutionStartedEvent,
+    ToolExecutionFinishedEvent,
+    ToolResultEvent,
     StreamStepStartedEvent,
     StreamStepFinishedEvent,
     StreamFinishedEvent,
