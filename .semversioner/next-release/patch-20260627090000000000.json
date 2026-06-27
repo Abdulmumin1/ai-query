@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Execute same-step tool calls concurrently while preserving ordered results and hook behavior."
-}
