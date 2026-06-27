@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import pytest
+import time
 from unittest.mock import AsyncMock
 
 from ai_query import stream_text, tool, Field, step_count_is
@@ -590,6 +591,44 @@ class TestStreamTextWithTools:
         assert len(chunks) > 0
         full_text = "".join(chunks)
         assert "calculate" in full_text.lower() or "5" in full_text
+
+    @pytest.mark.asyncio
+    async def test_multiple_async_tool_calls_run_in_parallel(self):
+        """stream_text should execute same-step async tool calls concurrently."""
+        @tool(description="Slow tool")
+        async def slow_tool(name: str) -> str:
+            await asyncio.sleep(0.2)
+            return name
+
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(
+                    is_final=True,
+                    finish_reason="tool_use",
+                    tool_calls=[
+                        ToolCall(id="call_1", name="slow_tool", arguments={"name": "a"}),
+                        ToolCall(id="call_2", name="slow_tool", arguments={"name": "b"}),
+                        ToolCall(id="call_3", name="slow_tool", arguments={"name": "c"}),
+                    ],
+                )
+            ]
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        started = time.perf_counter()
+        result = stream_text(
+            model=model,
+            prompt="Run all tools",
+            tools={"slow_tool": slow_tool},
+            stop_when=step_count_is(1),
+        )
+        async for _ in result.text_stream:
+            pass
+        elapsed = time.perf_counter() - started
+
+        steps = await result.steps
+        assert elapsed < 0.4
+        assert [tr.result for tr in steps[0].tool_results] == ["a", "b", "c"]
 
     @pytest.mark.asyncio
     async def test_stream_usage_is_from_last_step_with_tools(self):
