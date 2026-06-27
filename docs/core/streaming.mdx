@@ -126,11 +126,19 @@ When a completed tool call is available, the same stream emits
 `tool_result`. Parallel finish events arrive as tools complete; normalized result
 events remain in provider order.
 
+OpenAI-compatible, Anthropic, and Bedrock streams also emit `tool_call.started`
+and `tool_call.delta` while function names and JSON arguments are being assembled.
+Use the step number and provider index for correlation until a tool call ID is
+available. Providers that only return completed calls, such as Gemini
+`functionCall` parts, still get normalized start/delta events immediately before
+`tool_call.ready`.
+
 ## Thinking Events
 
 Reasoning is emitted as `reasoning.summary`, `reasoning.delta`,
-`reasoning.signature`, or `reasoning.state`. Callback-based integrations can
-continue using `on_reasoning_event`:
+`reasoning.signature`, or `reasoning.state`. Summary and delta events are both
+streamed reasoning output, but neither is included in `text_stream`.
+Callback-based integrations can continue using `on_reasoning_event`:
 
 ```python
 from ai_query import stream_text

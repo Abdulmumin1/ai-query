@@ -29,7 +29,9 @@ from ai_query.types import (
     StopCondition,
     ToolSet,
     TextDeltaEvent,
+    ToolCallDeltaEvent,
     ToolCallReadyEvent,
+    ToolCallStartedEvent,
     ToolExecutionFinishedEvent,
     ToolExecutionStartedEvent,
     ToolResultEvent,
@@ -129,6 +131,8 @@ TurnEvent = (
     | ReasoningDelta
     | StepStarted
     | StepRetrying
+    | ToolCallStartedEvent
+    | ToolCallDeltaEvent
     | ToolCallReadyEvent
     | ToolExecutionStartedEvent
     | ToolExecutionFinishedEvent
@@ -330,6 +334,8 @@ class AgentTurn:
                 elif isinstance(
                     stream_event,
                     (
+                        ToolCallStartedEvent,
+                        ToolCallDeltaEvent,
                         ToolCallReadyEvent,
                         ToolExecutionStartedEvent,
                         ToolExecutionFinishedEvent,

@@ -14,6 +14,8 @@ from ai_query import (
     StreamStepStartedEvent,
     TextDeltaEvent,
     ToolCallReadyEvent,
+    ToolCallDeltaEvent,
+    ToolCallStartedEvent,
     ToolExecutionFinishedEvent,
     ToolExecutionStartedEvent,
     ToolResultEvent,
@@ -35,6 +37,7 @@ from ai_query.types import (
     Usage,
     StreamChunk,
     ToolCall,
+    ToolCallStreamEvent,
     StepStartEvent,
     StepFinishEvent,
 )
@@ -412,8 +415,13 @@ class TestStreamTextBasic:
             StreamChunk(is_final=True, finish_reason="stop", usage=usage),
         ]])
         model = LanguageModel(provider=provider, model_id="test-model")
+        observed_reasoning = []
 
-        result = stream_text(model=model, prompt="Test typed events")
+        result = stream_text(
+            model=model,
+            prompt="Test typed events",
+            on_reasoning_event=observed_reasoning.append,
+        )
         events = [event async for event in result.event_stream]
 
         assert [event.type for event in events] == [
@@ -436,6 +444,16 @@ class TestStreamTextBasic:
         assert events[6].step.text == "Answer"
         assert events[7].text == "Answer"
         assert events[7].usage == usage
+        assert [event.kind for event in observed_reasoning] == [
+            "summary",
+            "delta",
+            "signature",
+            "state",
+        ]
+        assert [event.text for event in observed_reasoning[:2]] == [
+            "summary",
+            "thinking",
+        ]
 
     @pytest.mark.asyncio
     async def test_event_and_text_streams_are_replayable_projections(self):
@@ -751,6 +769,8 @@ class TestStreamTextWithTools:
 
         assert [event.type for event in events] == [
             "step.started",
+            "tool_call.started",
+            "tool_call.delta",
             "tool_call.ready",
             "tool_execution.started",
             "tool_execution.finished",
@@ -761,12 +781,13 @@ class TestStreamTextWithTools:
             "step.finished",
             "stream.finished",
         ]
-        assert [events[0].step_number, events[5].step_number] == [1, 1]
-        assert [events[6].step_number, events[7].step_number, events[8].step_number] == [2, 2, 2]
-        assert len(events[5].steps) == 1
-        assert len(events[8].steps) == 2
-        assert len(events[9].steps) == 2
-        assert events[5].step.tool_results[0].result == "ok"
+        assert [events[0].step_number, events[7].step_number] == [1, 1]
+        assert [events[8].step_number, events[9].step_number, events[10].step_number] == [2, 2, 2]
+        assert len(events[7].steps) == 1
+        assert len(events[10].steps) == 2
+        assert len(events[11].steps) == 2
+        assert events[2].arguments_delta == '{"value":"ok"}'
+        assert events[7].step.tool_results[0].result == "ok"
 
     @pytest.mark.asyncio
     async def test_multiple_async_tool_calls_run_in_parallel(self):
@@ -836,6 +857,12 @@ class TestStreamTextWithTools:
         )
 
         events = [event async for event in result.event_stream]
+        call_started = [
+            event for event in events if isinstance(event, ToolCallStartedEvent)
+        ]
+        call_deltas = [
+            event for event in events if isinstance(event, ToolCallDeltaEvent)
+        ]
         ready = [event for event in events if isinstance(event, ToolCallReadyEvent)]
         started = [
             event for event in events if isinstance(event, ToolExecutionStartedEvent)
@@ -846,6 +873,12 @@ class TestStreamTextWithTools:
         tool_results = [event for event in events if isinstance(event, ToolResultEvent)]
         steps = await result.steps
 
+        assert [event.tool_call_id for event in call_started] == ["call_a", "call_b", "call_c"]
+        assert [event.arguments_delta for event in call_deltas] == [
+            '{"name":"a"}',
+            '{"name":"b"}',
+            '{"name":"c"}',
+        ]
         assert [event.tool_call.id for event in ready] == ["call_a", "call_b", "call_c"]
         assert [event.tool_call.id for event in started] == ["call_a", "call_b", "call_c"]
         assert [event.tool_call.id for event in finished] == ["call_b", "call_c", "call_a"]
@@ -865,6 +898,71 @@ class TestStreamTextWithTools:
             "step.finished",
             "stream.finished",
         ]
+
+    @pytest.mark.asyncio
+    async def test_tool_call_fragments_are_forwarded_before_ready(self):
+        """Provider fragments should become correlated public stream events."""
+        @tool(description="Search")
+        def search(query: str) -> str:
+            return query
+
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(tool_call_events=[
+                ToolCallStreamEvent(
+                    kind="start",
+                    index=0,
+                    tool_call_id="call_1",
+                    name="search",
+                )
+            ]),
+            StreamChunk(tool_call_events=[
+                ToolCallStreamEvent(
+                    kind="delta",
+                    index=0,
+                    tool_call_id="call_1",
+                    arguments_delta='{"query":',
+                )
+            ]),
+            StreamChunk(tool_call_events=[
+                ToolCallStreamEvent(
+                    kind="delta",
+                    index=0,
+                    tool_call_id="call_1",
+                    arguments_delta='"docs"}',
+                )
+            ]),
+            StreamChunk(
+                is_final=True,
+                finish_reason="tool_use",
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="search",
+                        arguments={"query": "docs"},
+                    )
+                ],
+            ),
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        result = stream_text(
+            model=model,
+            prompt="Search docs",
+            tools={"search": search},
+            stop_when=step_count_is(1),
+        )
+
+        events = [event async for event in result.event_stream]
+        started = next(event for event in events if isinstance(event, ToolCallStartedEvent))
+        deltas = [event for event in events if isinstance(event, ToolCallDeltaEvent)]
+        ready = next(event for event in events if isinstance(event, ToolCallReadyEvent))
+
+        assert started.step_number == 1
+        assert started.index == 0
+        assert started.tool_call_id == "call_1"
+        assert started.name == "search"
+        assert "".join(event.arguments_delta or "" for event in deltas) == '{"query":"docs"}'
+        assert ready.tool_call.arguments == {"query": "docs"}
+        assert events.index(started) < events.index(deltas[0]) < events.index(ready)
 
     @pytest.mark.asyncio
     async def test_tool_result_event_contains_post_hook_result(self):
@@ -938,6 +1036,10 @@ class TestStreamTextWithTools:
 
         assert [event.type for event in events] == [
             "step.started",
+            "tool_call.started",
+            "tool_call.delta",
+            "tool_call.started",
+            "tool_call.delta",
             "tool_call.ready",
             "tool_call.ready",
             "tool_result",

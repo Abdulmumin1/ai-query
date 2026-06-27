@@ -850,6 +850,19 @@ class ReasoningEvent:
 OnReasoningEvent = Callable[[ReasoningEvent], Union[None, Awaitable[None]]]
 
 
+ToolCallStreamEventKind = Literal["start", "delta"]
+
+
+@dataclass
+class ToolCallStreamEvent:
+    kind: ToolCallStreamEventKind
+    index: int
+    tool_call_id: Union[str, None] = None
+    name: Union[str, None] = None
+    name_delta: Union[str, None] = None
+    arguments_delta: Union[str, None] = None
+
+
 @dataclass
 class StreamChunk:
     text: str = ""
@@ -858,6 +871,7 @@ class StreamChunk:
     finish_reason: Union[str, None] = None
     tool_calls: Union[list[ToolCall], None] = None
     reasoning_events: Union[list[ReasoningEvent], None] = None
+    tool_call_events: Union[list[ToolCallStreamEvent], None] = None
 
 
 @dataclass
@@ -872,6 +886,25 @@ class StreamReasoningEvent:
     type: StreamReasoningEventType
     event: ReasoningEvent
     step_number: int
+
+
+@dataclass
+class ToolCallStartedEvent:
+    type: Literal["tool_call.started"]
+    step_number: int
+    index: int
+    tool_call_id: Union[str, None]
+    name: Union[str, None]
+
+
+@dataclass
+class ToolCallDeltaEvent:
+    type: Literal["tool_call.delta"]
+    step_number: int
+    index: int
+    tool_call_id: Union[str, None]
+    name_delta: Union[str, None] = None
+    arguments_delta: Union[str, None] = None
 
 
 @dataclass
@@ -941,6 +974,8 @@ class StreamFinishedEvent:
 TextStreamEvent = Union[
     TextDeltaEvent,
     StreamReasoningEvent,
+    ToolCallStartedEvent,
+    ToolCallDeltaEvent,
     ToolCallReadyEvent,
     ToolExecutionStartedEvent,
     ToolExecutionFinishedEvent,
