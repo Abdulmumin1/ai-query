@@ -2,67 +2,7 @@
 
 from __future__ import annotations
 
-from ai_query.types import (
-    AfterToolCallEvent,
-    AfterToolCallResult,
-    AbortController,
-    AbortError,
-    AbortSignal,
-    BeforeToolCallEvent,
-    BeforeToolCallResult,
-    GenerateTextResult,
-    TextStreamResult,
-    EmbedResult,
-    EmbedManyResult,
-    tool,
-    Field,
-    StepControl,
-    StepStartEvent,
-    StepFinishEvent,
-    ReasoningEvent,
-    StreamFinishedEvent,
-    StreamReasoningEvent,
-    StreamStepFinishedEvent,
-    StreamStepStartedEvent,
-    TextDeltaEvent,
-    TextStreamEvent,
-    RetryEvent,
-    RetryPolicy,
-    OnReasoningEvent,
-    OnRetry,
-    OnBeforeToolCall,
-    OnAfterToolCall,
-    OnStepStart,
-    OnStepFinish,
-    StopCondition,
-    step_count_is,
-    has_tool_call,
-    ReasoningConfig,
-    ReasoningEffort,
-)
-from ai_query.model import LanguageModel, EmbeddingModel
-from ai_query.transport import HTTPStatusError
-from ai_query.core import (
-    generate_text,
-    stream_text,
-    embed,
-    embed_many,
-)
-
-from ai_query.agents.agent import Agent, Event, action
-from ai_query.agents.hooks import (
-    AgentHooks,
-    AfterStepContext,
-    AfterToolCallContext,
-    BeforeStepContext,
-    BeforeToolCallContext,
-)
-from ai_query.agents.turn import AgentTurn, TurnEvent, TurnOptions, TurnResult
-from ai_query.agents.registry import AgentRegistry
-from ai_query.agents.remote import connect
-from ai_query.agents.server import AgentServer, AgentServerConfig
-from ai_query.agents.transport.http import HTTPTransport
-from ai_query.agents.transport import LocalTransport
+from importlib import import_module
 
 __all__ = [
     # Main functions
@@ -133,3 +73,89 @@ __all__ = [
     "OnReasoningEvent",
     "OnRetry",
 ]
+
+
+_EXPORTS: dict[str, tuple[str, str]] = {
+    # Main functions
+    "generate_text": ("ai_query.core", "generate_text"),
+    "stream_text": ("ai_query.core", "stream_text"),
+    "embed": ("ai_query.core", "embed"),
+    "embed_many": ("ai_query.core", "embed_many"),
+    # Agents
+    "Agent": ("ai_query.agents.agent", "Agent"),
+    "Event": ("ai_query.agents.agent", "Event"),
+    "action": ("ai_query.agents.agent", "action"),
+    "AgentHooks": ("ai_query.agents.hooks", "AgentHooks"),
+    "BeforeStepContext": ("ai_query.agents.hooks", "BeforeStepContext"),
+    "AfterStepContext": ("ai_query.agents.hooks", "AfterStepContext"),
+    "BeforeToolCallContext": ("ai_query.agents.hooks", "BeforeToolCallContext"),
+    "AfterToolCallContext": ("ai_query.agents.hooks", "AfterToolCallContext"),
+    "AgentTurn": ("ai_query.agents.turn", "AgentTurn"),
+    "TurnEvent": ("ai_query.agents.turn", "TurnEvent"),
+    "TurnOptions": ("ai_query.agents.turn", "TurnOptions"),
+    "TurnResult": ("ai_query.agents.turn", "TurnResult"),
+    "AgentRegistry": ("ai_query.agents.registry", "AgentRegistry"),
+    "AgentServer": ("ai_query.agents.server", "AgentServer"),
+    "AgentServerConfig": ("ai_query.agents.server", "AgentServerConfig"),
+    "connect": ("ai_query.agents.remote", "connect"),
+    "HTTPTransport": ("ai_query.agents.transport.http", "HTTPTransport"),
+    "LocalTransport": ("ai_query.agents.transport", "LocalTransport"),
+    # Tool decorators
+    "tool": ("ai_query.types", "tool"),
+    "Field": ("ai_query.types", "Field"),
+    # Common types
+    "LanguageModel": ("ai_query.model", "LanguageModel"),
+    "EmbeddingModel": ("ai_query.model", "EmbeddingModel"),
+    "HTTPStatusError": ("ai_query.transport", "HTTPStatusError"),
+    "GenerateTextResult": ("ai_query.types", "GenerateTextResult"),
+    "TextStreamResult": ("ai_query.types", "TextStreamResult"),
+    "EmbedResult": ("ai_query.types", "EmbedResult"),
+    "EmbedManyResult": ("ai_query.types", "EmbedManyResult"),
+    "ReasoningConfig": ("ai_query.types", "ReasoningConfig"),
+    "ReasoningEffort": ("ai_query.types", "ReasoningEffort"),
+    "ReasoningEvent": ("ai_query.types", "ReasoningEvent"),
+    "StreamFinishedEvent": ("ai_query.types", "StreamFinishedEvent"),
+    "StreamReasoningEvent": ("ai_query.types", "StreamReasoningEvent"),
+    "StreamStepFinishedEvent": ("ai_query.types", "StreamStepFinishedEvent"),
+    "StreamStepStartedEvent": ("ai_query.types", "StreamStepStartedEvent"),
+    "TextDeltaEvent": ("ai_query.types", "TextDeltaEvent"),
+    "TextStreamEvent": ("ai_query.types", "TextStreamEvent"),
+    "RetryEvent": ("ai_query.types", "RetryEvent"),
+    "RetryPolicy": ("ai_query.types", "RetryPolicy"),
+    "StepControl": ("ai_query.types", "StepControl"),
+    "BeforeToolCallEvent": ("ai_query.types", "BeforeToolCallEvent"),
+    "BeforeToolCallResult": ("ai_query.types", "BeforeToolCallResult"),
+    "AfterToolCallEvent": ("ai_query.types", "AfterToolCallEvent"),
+    "AfterToolCallResult": ("ai_query.types", "AfterToolCallResult"),
+    "AbortController": ("ai_query.types", "AbortController"),
+    "AbortError": ("ai_query.types", "AbortError"),
+    "AbortSignal": ("ai_query.types", "AbortSignal"),
+    # Stop conditions
+    "StopCondition": ("ai_query.types", "StopCondition"),
+    "step_count_is": ("ai_query.types", "step_count_is"),
+    "has_tool_call": ("ai_query.types", "has_tool_call"),
+    # Callbacks
+    "StepStartEvent": ("ai_query.types", "StepStartEvent"),
+    "StepFinishEvent": ("ai_query.types", "StepFinishEvent"),
+    "OnStepStart": ("ai_query.types", "OnStepStart"),
+    "OnStepFinish": ("ai_query.types", "OnStepFinish"),
+    "OnBeforeToolCall": ("ai_query.types", "OnBeforeToolCall"),
+    "OnAfterToolCall": ("ai_query.types", "OnAfterToolCall"),
+    "OnReasoningEvent": ("ai_query.types", "OnReasoningEvent"),
+    "OnRetry": ("ai_query.types", "OnRetry"),
+}
+
+
+def __getattr__(name: str) -> object:
+    try:
+        module_name, attr_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

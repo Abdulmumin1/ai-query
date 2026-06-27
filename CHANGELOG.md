@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.51
+
+- patch: Execute same-step tool calls concurrently while preserving ordered results and hook behavior.
+
 ## 1.7.50
 
 - patch: Report provider usage per model step and return the final step usage from generation results.

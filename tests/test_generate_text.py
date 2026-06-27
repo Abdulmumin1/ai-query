@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import aiohttp
 import pytest
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ai_query import generate_text, tool, Field, step_count_is
@@ -482,6 +483,39 @@ class TestGenerateTextWithTools:
         )
 
         assert "5" in result.text and "20" in result.text
+
+    @pytest.mark.asyncio
+    async def test_multiple_async_tool_calls_run_in_parallel(self):
+        """generate_text should execute same-step async tool calls concurrently."""
+        @tool(description="Slow tool")
+        async def slow_tool(name: str) -> str:
+            await asyncio.sleep(0.2)
+            return name
+
+        provider = MockProvider(responses=[
+            make_response(
+                text="",
+                finish_reason="tool_use",
+                tool_calls=[
+                    make_tool_call("slow_tool", {"name": "a"}, id="call_1"),
+                    make_tool_call("slow_tool", {"name": "b"}, id="call_2"),
+                    make_tool_call("slow_tool", {"name": "c"}, id="call_3"),
+                ],
+            )
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        started = time.perf_counter()
+        result = await generate_text(
+            model=model,
+            prompt="Run all tools",
+            tools={"slow_tool": slow_tool},
+            stop_when=step_count_is(1),
+        )
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < 0.4
+        assert [tr.result for tr in result.steps[0].tool_results] == ["a", "b", "c"]
 
     @pytest.mark.asyncio
     async def test_reasoning_parts_are_carried_into_next_tool_step(self):
