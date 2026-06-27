@@ -831,6 +831,12 @@ class StreamTextResult:
 
 
 ReasoningEventKind = Literal["summary", "delta", "signature", "state"]
+StreamReasoningEventType = Literal[
+    "reasoning.summary",
+    "reasoning.delta",
+    "reasoning.signature",
+    "reasoning.state",
+]
 
 
 @dataclass
@@ -854,34 +860,115 @@ class StreamChunk:
     reasoning_events: Union[list[ReasoningEvent], None] = None
 
 
+@dataclass
+class TextDeltaEvent:
+    type: Literal["text.delta"]
+    text: str
+    step_number: int
+
+
+@dataclass
+class StreamReasoningEvent:
+    type: StreamReasoningEventType
+    event: ReasoningEvent
+    step_number: int
+
+
+@dataclass
+class StreamStepStartedEvent:
+    type: Literal["step.started"]
+    step_number: int
+    messages: list[Message]
+    tools: Union[ToolSet, None]
+
+
+@dataclass
+class StreamStepFinishedEvent:
+    type: Literal["step.finished"]
+    step_number: int
+    step: StepResult
+    text: str
+    usage: Union[Usage, None]
+    steps: list[StepResult]
+
+
+@dataclass
+class StreamFinishedEvent:
+    type: Literal["stream.finished"]
+    text: str
+    finish_reason: Union[str, None]
+    usage: Union[Usage, None]
+    steps: list[StepResult]
+
+
+TextStreamEvent = Union[
+    TextDeltaEvent,
+    StreamReasoningEvent,
+    StreamStepStartedEvent,
+    StreamStepFinishedEvent,
+    StreamFinishedEvent,
+]
+
+
 class TextStreamResult:
-    def __init__(self, stream: AsyncIterator[StreamChunk], steps: Union[list[StepResult], None] = None) -> None:
+    def __init__(
+        self,
+        stream: AsyncIterator[TextStreamEvent],
+        steps: Union[list[StepResult], None] = None,
+    ) -> None:
         self._stream = stream
+        self._events: list[TextStreamEvent] = []
         self._chunks: list[str] = []
         self._usage: Union[Usage, None] = None
         self._finish_reason: Union[str, None] = None
         self._steps: list[StepResult] = steps if steps is not None else []
         self._done = False
-        self._done_event = asyncio.Event()
-        self._consumed = False
+        self._error: BaseException | None = None
+        self._pull_lock = asyncio.Lock()
+
+    def _record_event(self, event: TextStreamEvent) -> None:
+        self._events.append(event)
+        if isinstance(event, TextDeltaEvent):
+            self._chunks.append(event.text)
+        elif isinstance(event, StreamFinishedEvent):
+            self._usage = event.usage
+            self._finish_reason = event.finish_reason
+
+    async def _iterate_events(self) -> AsyncIterator[TextStreamEvent]:
+        index = 0
+        while True:
+            if index < len(self._events):
+                event = self._events[index]
+                index += 1
+                yield event
+                continue
+
+            if self._done:
+                if self._error is not None:
+                    raise self._error
+                return
+
+            async with self._pull_lock:
+                if index < len(self._events) or self._done:
+                    continue
+                try:
+                    event = await anext(self._stream)
+                except StopAsyncIteration:
+                    self._done = True
+                except BaseException as exc:
+                    self._error = exc
+                    self._done = True
+                else:
+                    self._record_event(event)
 
     async def _consume_stream(self) -> AsyncIterator[str]:
-        if self._consumed:
-            for chunk in self._chunks:
-                yield chunk
-            return
+        async for event in self._iterate_events():
+            if isinstance(event, TextDeltaEvent):
+                yield event.text
 
-        self._consumed = True
-        async for chunk in self._stream:
-            if chunk.is_final:
-                self._usage = chunk.usage
-                self._finish_reason = chunk.finish_reason
-            elif chunk.text:
-                self._chunks.append(chunk.text)
-                yield chunk.text
-
-        self._done = True
-        self._done_event.set()
+    @property
+    def event_stream(self) -> AsyncIterator[TextStreamEvent]:
+        return self._iterate_events()
 
     @property
     def text_stream(self) -> AsyncIterator[str]:
@@ -889,11 +976,8 @@ class TextStreamResult:
 
     async def _wait_for_completion(self) -> None:
         if not self._done:
-            if not self._consumed:
-                async for _ in self._consume_stream():
-                    pass
-            else:
-                await self._done_event.wait()
+            async for _ in self._iterate_events():
+                pass
 
     @property
     async def text(self) -> str:

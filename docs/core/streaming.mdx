@@ -5,7 +5,9 @@ description: "Stream AI responses in real-time"
 
 The `stream_text` function enables real-time streaming of AI responses. This provides a better user experience by showing text as it's generated rather than waiting for the complete response.
 
-`stream_text` can also surface provider thinking output separately through `on_reasoning_event`, without mixing it into the visible assistant text stream.
+`stream_text` exposes a unified typed `event_stream` for text, provider thinking,
+and lifecycle events. Its `text_stream` property remains a text-only projection,
+and `on_reasoning_event` remains available for callback-based integrations.
 
 ## Basic Streaming
 
@@ -29,7 +31,7 @@ asyncio.run(main())
 ```
 
 <Note>
-`stream_text` returns immediately with a [`TextStreamResult`](/reference/types/results) object. The actual streaming happens when you iterate over `text_stream`.
+`stream_text` returns immediately with a [`TextStreamResult`](/reference/types/results) object. The provider request starts when you iterate over `event_stream` or `text_stream`, or await a final result property.
 </Note>
 
 ## Getting Usage Statistics
@@ -98,9 +100,32 @@ When tools are provided, the streaming handles the full execution loop:
 | `reasoning` | `ReasoningConfig` | Normalized reasoning-depth controls like `effort` and `budget` |
 | `provider_options` | `dict` | Provider-specific options |
 
+## Typed Events
+
+Consume `event_stream` when one ordered channel needs to drive a UI, transport,
+or log:
+
+```python
+result = stream_text(model=model, prompt="Explain binary search.")
+
+async for event in result.event_stream:
+    if event.type == "text.delta":
+        render_text(event.text)
+    elif event.type.startswith("reasoning."):
+        render_reasoning(event.event)
+    elif event.type == "step.finished":
+        record_step(event.step)
+```
+
+The stream emits `step.started` and `step.finished` around each model step, then
+one `stream.finished` event. Both stream views are replayable and share one
+provider request, including when consumed concurrently.
+
 ## Thinking Events
 
-If a provider exposes visible thinking output, receive it with `on_reasoning_event`:
+Reasoning is emitted as `reasoning.summary`, `reasoning.delta`,
+`reasoning.signature`, or `reasoning.state`. Callback-based integrations can
+continue using `on_reasoning_event`:
 
 ```python
 from ai_query import stream_text

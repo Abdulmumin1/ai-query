@@ -106,8 +106,14 @@ def stream_text(
 
 Properties:
 
+<ResponseField name="event_stream" type="AsyncIterator[TextStreamEvent]">
+  Async iterator yielding typed events in generation order. Event types are
+  `step.started`, `text.delta`, `reasoning.summary`, `reasoning.delta`,
+  `reasoning.signature`, `reasoning.state`, `step.finished`, and `stream.finished`.
+</ResponseField>
+
 <ResponseField name="text_stream" type="AsyncIterator[str]">
-  Async iterator yielding text chunks.
+  Text-only projection of `event_stream`.
 </ResponseField>
 
 <ResponseField name="text" type="Awaitable[str]">
@@ -126,6 +132,23 @@ Properties:
   Step history after the stream completes.
 </ResponseField>
 
+### TextStreamEvent
+
+`TextStreamEvent` is a discriminated union. Branch on `event.type` before reading
+event-specific fields.
+
+| Type | Event class | Fields |
+|------|-------------|--------|
+| `step.started` | `StreamStepStartedEvent` | `step_number`, `messages`, `tools` |
+| `text.delta` | `TextDeltaEvent` | `text`, `step_number` |
+| `reasoning.*` | `StreamReasoningEvent` | `event`, `step_number` |
+| `step.finished` | `StreamStepFinishedEvent` | `step_number`, `step`, `text`, `usage`, `steps` |
+| `stream.finished` | `StreamFinishedEvent` | `text`, `finish_reason`, `usage`, `steps` |
+
+The `reasoning.*` discriminator preserves the underlying `ReasoningEvent.kind`:
+`summary`, `delta`, `signature`, or `state`. Step history fields are snapshots of
+the completed steps at the time that event was emitted.
+
 ## Raises
 
 Errors occur while consuming the stream, not when calling `stream_text()`.
@@ -139,6 +162,27 @@ Errors occur while consuming the stream, not when calling `stream_text()`.
 </ResponseField>
 
 ## Examples
+
+### Typed event stream
+
+```python
+result = stream_text(
+    model=model,
+    prompt="Solve this problem step by step.",
+    reasoning={"effort": "high"},
+)
+
+async for event in result.event_stream:
+    if event.type == "text.delta":
+        print(event.text, end="", flush=True)
+    elif event.type.startswith("reasoning.") and event.event.text:
+        print(f"thinking: {event.event.text}")
+    elif event.type == "step.finished":
+        record_step(event.step)
+```
+
+The event stream is replayable and shares its source with `text_stream`. Reading
+both views does not make a second provider request.
 
 ### Basic stream
 
@@ -180,6 +224,9 @@ result = stream_text(
     on_reasoning_event=on_reasoning,
 )
 ```
+
+`on_reasoning_event` remains supported for compatibility. New integrations that
+need text, reasoning, and lifecycle ordering should consume `event_stream`.
 
 ### Streaming with tools
 

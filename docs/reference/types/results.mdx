@@ -65,6 +65,9 @@ Returned by `stream_text()`.
 ```python
 class TextStreamResult:
     @property
+    def event_stream(self) -> AsyncIterator[TextStreamEvent]: ...
+
+    @property
     def text_stream(self) -> AsyncIterator[str]: ...
 
     @property
@@ -82,8 +85,12 @@ class TextStreamResult:
     def __aiter__(self) -> AsyncIterator[str]: ...
 ```
 
+<ResponseField name="event_stream" type="AsyncIterator[TextStreamEvent]">
+  Replayable async iterator yielding typed text, reasoning, step lifecycle, and final events.
+</ResponseField>
+
 <ResponseField name="text_stream" type="AsyncIterator[str]">
-  Async iterator yielding streamed text chunks.
+  Replayable text-only projection of `event_stream`.
 </ResponseField>
 
 <ResponseField name="text" type="Awaitable[str]">
@@ -101,6 +108,9 @@ class TextStreamResult:
 <ResponseField name="steps" type="Awaitable[list[StepResult]]">
   Step history after stream completion.
 </ResponseField>
+
+`event_stream` and `text_stream` share one provider request. They can be consumed in
+either order or concurrently, and later consumers replay events already received.
 
 ## TurnResult
 

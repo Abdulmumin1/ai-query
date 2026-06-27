@@ -6,9 +6,11 @@ description: "Control reasoning depth and receive provider thinking output safel
 ai-query treats thinking as two separate concerns:
 
 - `reasoning=...` controls how much reasoning a model should use
-- `on_reasoning_event=...` receives provider reasoning output during streaming when the provider exposes it
+- `event_stream` emits provider reasoning output during streaming when the provider exposes it
 
-This separation is intentional. Thinking output is not mixed into assistant text, and not every provider exposes the same kind of data.
+`on_reasoning_event=...` remains available as a callback observer. Thinking
+output is not mixed into `text_stream`, and not every provider exposes the same
+kind of data.
 
 ## 1. Control Thinking Depth
 
@@ -43,14 +45,12 @@ If you need provider-specific options like Gemini `include_thoughts` or Anthropi
 
 ## 2. Receive Thinking Output While Streaming
 
-Use `stream_text(..., on_reasoning_event=...)` to receive provider reasoning output separately from assistant text:
+Use the typed event stream to receive provider reasoning output in order with
+text and lifecycle events:
 
 ```python
 from ai_query import stream_text
 from ai_query.providers import google
-
-def on_reasoning(event):
-    print(f"[{event.provider}:{event.kind}]", event.text or event.data)
 
 result = stream_text(
     model=google("gemini-2.5-pro"),
@@ -63,14 +63,19 @@ result = stream_text(
             }
         }
     },
-    on_reasoning_event=on_reasoning,
 )
 
-async for chunk in result.text_stream:
-    print(chunk, end="", flush=True)
+async for event in result.event_stream:
+    if event.type.startswith("reasoning."):
+        reasoning = event.event
+        print(f"[{reasoning.provider}:{reasoning.kind}]", reasoning.text or reasoning.data)
+    elif event.type == "text.delta":
+        print(event.text, end="", flush=True)
 ```
 
-`text_stream` still contains only assistant-visible text.
+`on_reasoning_event` can still observe the same reasoning events without
+consuming the typed stream. `text_stream` still contains only assistant-visible
+text.
 
 ## ReasoningEvent
 
