@@ -187,6 +187,116 @@ def _build_assistant_step_content(step: StepResult) -> str | list[Any]:
     return assistant_content if assistant_content else ""
 
 
+async def _run_tool_call(
+    tool_call: ToolCall,
+    tool_def: Any,
+    signal: AbortSignal | None,
+) -> ToolResult:
+    try:
+        output = await _await_with_abort(tool_def.run(**tool_call.arguments), signal)
+        return ToolResult(
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            result=output,
+        )
+    except AbortError:
+        raise
+    except Exception as exc:
+        return ToolResult(
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            result=f"Error: {exc}",
+            is_error=True,
+        )
+
+
+async def _execute_tool_calls(
+    *,
+    step_number: int,
+    tool_calls: list[ToolCall],
+    tools: ToolSet | None,
+    messages: list[Message],
+    before_tool_call: OnBeforeToolCall | None,
+    after_tool_call: OnAfterToolCall | None,
+    signal: AbortSignal | None,
+) -> tuple[list[ToolResult], bool]:
+    ordered_results: list[ToolResult | None] = []
+    runnable_tools: list[tuple[int, ToolCall, Any]] = []
+
+    for tool_call in tool_calls:
+        before_result = None
+        if before_tool_call:
+            before_event = BeforeToolCallEvent(
+                step_number=step_number,
+                tool_call=tool_call,
+                messages=messages,
+            )
+            before_result = before_tool_call(before_event)
+            if inspect.isawaitable(before_result):
+                before_result = await before_result
+
+        tool_def = tools.get(tool_call.name) if tools else None
+        if before_result and before_result.block:
+            ordered_results.append(
+                ToolResult(
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    result=f"Error: {before_result.reason or 'Tool execution was blocked'}",
+                    is_error=True,
+                )
+            )
+        elif tool_def is None:
+            ordered_results.append(
+                ToolResult(
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    result=f"Error: Unknown tool '{tool_call.name}'",
+                    is_error=True,
+                )
+            )
+        else:
+            ordered_results.append(None)
+            runnable_tools.append((len(ordered_results) - 1, tool_call, tool_def))
+
+    if runnable_tools:
+        tool_results = await asyncio.gather(
+            *(
+                _run_tool_call(tool_call, tool_def, signal)
+                for _, tool_call, tool_def in runnable_tools
+            )
+        )
+        for (index, _, _), tool_result in zip(runnable_tools, tool_results):
+            ordered_results[index] = tool_result
+
+    should_terminate_after_step = False
+    final_results: list[ToolResult] = []
+    for tool_call, tool_result in zip(tool_calls, ordered_results):
+        if tool_result is None:
+            raise RuntimeError(f"Tool call '{tool_call.id}' did not produce a result")
+
+        if after_tool_call:
+            after_event = AfterToolCallEvent(
+                step_number=step_number,
+                tool_call=tool_call,
+                tool_result=tool_result,
+                messages=messages,
+            )
+            after_result = after_tool_call(after_event)
+            if inspect.isawaitable(after_result):
+                after_result = await after_result
+            if after_result:
+                if after_result.result is not None:
+                    tool_result.result = after_result.result
+                if after_result.is_error is not None:
+                    tool_result.is_error = after_result.is_error
+                if after_result.terminate:
+                    should_terminate_after_step = True
+
+        final_results.append(tool_result)
+
+    return final_results, should_terminate_after_step
+
+
 def _should_retry(exc: Exception, retry: RetryPolicy | None, attempt: int) -> bool:
     if retry is None or retry.max_attempts <= 1 or attempt >= retry.max_attempts:
         return False
@@ -453,70 +563,15 @@ async def generate_text(
 
             break
 
-        tool_results: list[ToolResult] = []
-        should_terminate_after_step = False
-        for tc in tool_calls:
-            before_result = None
-            if before_tool_call:
-                before_event = BeforeToolCallEvent(
-                    step_number=step_number,
-                    tool_call=tc,
-                    messages=current_messages,
-                )
-                before_result = before_tool_call(before_event)
-                if inspect.isawaitable(before_result):
-                    before_result = await before_result
-
-            tool_def = tools.get(tc.name) if tools else None
-            if before_result and before_result.block:
-                tool_result = ToolResult(
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    result=f"Error: {before_result.reason or 'Tool execution was blocked'}",
-                    is_error=True,
-                )
-            elif tool_def is None:
-                tool_result = ToolResult(
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    result=f"Error: Unknown tool '{tc.name}'",
-                    is_error=True,
-                )
-            else:
-                try:
-                    output = await _await_with_abort(tool_def.run(**tc.arguments), signal)
-                    tool_result = ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        result=output,
-                    )
-                except Exception as e:
-                    tool_result = ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        result=f"Error: {e}",
-                        is_error=True,
-                    )
-
-            if after_tool_call:
-                after_event = AfterToolCallEvent(
-                    step_number=step_number,
-                    tool_call=tc,
-                    tool_result=tool_result,
-                    messages=current_messages,
-                )
-                after_result = after_tool_call(after_event)
-                if inspect.isawaitable(after_result):
-                    after_result = await after_result
-                if after_result:
-                    if after_result.result is not None:
-                        tool_result.result = after_result.result
-                    if after_result.is_error is not None:
-                        tool_result.is_error = after_result.is_error
-                    if after_result.terminate:
-                        should_terminate_after_step = True
-
-            tool_results.append(tool_result)
+        tool_results, should_terminate_after_step = await _execute_tool_calls(
+            step_number=step_number,
+            tool_calls=tool_calls,
+            tools=tools,
+            messages=current_messages,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
+            signal=signal,
+        )
 
         step.tool_results = tool_results
         steps.append(step)
@@ -745,70 +800,15 @@ def stream_text(
                 )
                 break
 
-            tool_results: list[ToolResult] = []
-            should_terminate_after_step = False
-            for tc in step_tool_calls:
-                before_result = None
-                if before_tool_call:
-                    before_event = BeforeToolCallEvent(
-                        step_number=step_number,
-                        tool_call=tc,
-                        messages=current_messages,
-                    )
-                    before_result = before_tool_call(before_event)
-                    if inspect.isawaitable(before_result):
-                        before_result = await before_result
-
-                tool_def = tools.get(tc.name) if tools else None
-                if before_result and before_result.block:
-                    tool_result = ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        result=f"Error: {before_result.reason or 'Tool execution was blocked'}",
-                        is_error=True,
-                    )
-                elif tool_def is None:
-                    tool_result = ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        result=f"Error: Unknown tool '{tc.name}'",
-                        is_error=True,
-                    )
-                else:
-                    try:
-                        output = await _await_with_abort(tool_def.run(**tc.arguments), signal)
-                        tool_result = ToolResult(
-                            tool_call_id=tc.id,
-                            tool_name=tc.name,
-                            result=output,
-                        )
-                    except Exception as e:
-                        tool_result = ToolResult(
-                            tool_call_id=tc.id,
-                            tool_name=tc.name,
-                            result=f"Error: {str(e)}",
-                            is_error=True,
-                        )
-
-                if after_tool_call:
-                    after_event = AfterToolCallEvent(
-                        step_number=step_number,
-                        tool_call=tc,
-                        tool_result=tool_result,
-                        messages=current_messages,
-                    )
-                    after_result = after_tool_call(after_event)
-                    if inspect.isawaitable(after_result):
-                        after_result = await after_result
-                    if after_result:
-                        if after_result.result is not None:
-                            tool_result.result = after_result.result
-                        if after_result.is_error is not None:
-                            tool_result.is_error = after_result.is_error
-                        if after_result.terminate:
-                            should_terminate_after_step = True
-
-                tool_results.append(tool_result)
+            tool_results, should_terminate_after_step = await _execute_tool_calls(
+                step_number=step_number,
+                tool_calls=step_tool_calls,
+                tools=tools,
+                messages=current_messages,
+                before_tool_call=before_tool_call,
+                after_tool_call=after_tool_call,
+                signal=signal,
+            )
 
             step.tool_results = tool_results
             steps.append(step)
