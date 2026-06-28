@@ -109,7 +109,8 @@ Properties:
 <ResponseField name="event_stream" type="AsyncIterator[TextStreamEvent]">
   Async iterator yielding typed events in generation order. Event types are
   `step.started`, `text.delta`, `reasoning.summary`, `reasoning.delta`,
-  `reasoning.signature`, `reasoning.state`, `tool_call.ready`,
+  `reasoning.signature`, `reasoning.state`, `tool_call.started`,
+  `tool_call.delta`, `tool_call.ready`,
   `tool_execution.started`, `tool_execution.finished`, `tool_result`,
   `step.finished`, and `stream.finished`.
 </ResponseField>
@@ -144,6 +145,8 @@ event-specific fields.
 | `step.started` | `StreamStepStartedEvent` | `step_number`, `messages`, `tools` |
 | `text.delta` | `TextDeltaEvent` | `text`, `step_number` |
 | `reasoning.*` | `StreamReasoningEvent` | `event`, `step_number` |
+| `tool_call.started` | `ToolCallStartedEvent` | `step_number`, `index`, `tool_call_id`, `name` |
+| `tool_call.delta` | `ToolCallDeltaEvent` | `step_number`, `index`, `tool_call_id`, `name_delta`, `arguments_delta` |
 | `tool_call.ready` | `ToolCallReadyEvent` | `step_number`, `index`, `tool_call` |
 | `tool_execution.started` | `ToolExecutionStartedEvent` | `step_number`, `index`, `tool_call` |
 | `tool_execution.finished` | `ToolExecutionFinishedEvent` | `step_number`, `index`, `tool_call`, `tool_result`, `duration`, `error`, `aborted` |
@@ -152,8 +155,10 @@ event-specific fields.
 | `stream.finished` | `StreamFinishedEvent` | `text`, `finish_reason`, `usage`, `steps` |
 
 The `reasoning.*` discriminator preserves the underlying `ReasoningEvent.kind`:
-`summary`, `delta`, `signature`, or `state`. Step history fields are snapshots of
-the completed steps at the time that event was emitted.
+`summary`, `delta`, `signature`, or `state`. Treat `reasoning.summary` and
+`reasoning.delta` as streamed reasoning output; they are intentionally separate
+from `text.delta` and are not included in `text_stream`. Step history fields are
+snapshots of the completed steps at the time that event was emitted.
 
 Tool calls receive a stable provider-order `index`. Ready and result events are
 emitted in provider order. Parallel execution finish events are emitted in actual
@@ -163,6 +168,25 @@ the result stored in `StepResult.tool_results`.
 
 Blocked and unknown tools emit `tool_call.ready` and an error `tool_result`, but
 do not emit execution start or finish events because no tool function ran.
+
+Every completed tool call emits `tool_call.started`, at least one
+`tool_call.delta`, then `tool_call.ready`. Concatenate `name_delta` and
+`arguments_delta` by `(step_number, index)`; IDs may be unavailable on the first
+fragment and appear on a later delta. `tool_call.ready` is the normalization
+boundary and contains the parsed `ToolCall`.
+
+Provider coverage:
+
+| Provider family | Fragment source | Notes |
+|-----------------|-----------------|-------|
+| OpenAI-compatible | upstream fragments | Streams OpenAI-style `delta.tool_calls` fragments as they arrive. |
+| Anthropic | upstream fragments | Streams `tool_use` block starts and `input_json_delta` fragments. |
+| Bedrock | upstream fragments | Streams `toolUse` block starts and input deltas. |
+| Google Gemini | normalized from completed calls | Gemini generally returns completed `functionCall` parts, so ai-query synthesizes start/delta immediately before `tool_call.ready`. |
+
+Always handle `tool_call.ready` as the authoritative parsed call. Treat
+start/delta events as progressive updates when the provider exposes fragments,
+or as normalized one-shot call previews when it does not.
 
 ## Raises
 
@@ -191,7 +215,7 @@ async for event in result.event_stream:
     if event.type == "text.delta":
         print(event.text, end="", flush=True)
     elif event.type.startswith("reasoning.") and event.event.text:
-        print(f"thinking: {event.event.text}")
+        print(f"{event.event.kind}: {event.event.text}")
     elif event.type == "step.finished":
         record_step(event.step)
 ```

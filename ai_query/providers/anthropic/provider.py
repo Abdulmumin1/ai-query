@@ -19,6 +19,7 @@ from ai_query.types import (
     ToolCall,
     ToolCallPart,
     ToolResultPart,
+    ToolCallStreamEvent,
     TextPart,
     ImagePart,
     FilePart,
@@ -572,12 +573,23 @@ class AnthropicProvider(BaseProvider):
                     if not isinstance(content_block, dict):
                         continue
                     if content_block.get("type") == "tool_use":
+                        stream_index = index if isinstance(index, int) else len(tool_calls)
                         current_tool_call = {
-                            "index": index,
+                            "index": stream_index,
                             "id": content_block.get("id"),
                             "name": content_block.get("name"),
                             "arguments_json": "",
                         }
+                        yield StreamChunk(
+                            tool_call_events=[
+                                ToolCallStreamEvent(
+                                    kind="start",
+                                    index=stream_index,
+                                    tool_call_id=content_block.get("id"),
+                                    name=content_block.get("name"),
+                                )
+                            ]
+                        )
 
                 # content_block_delta contains the text chunks or json fragments
                 elif event_type == "content_block_delta":
@@ -618,13 +630,28 @@ class AnthropicProvider(BaseProvider):
                             )
 
                     elif delta.get("type") == "input_json_delta":
+                        stream_index = (
+                            index
+                            if isinstance(index, int)
+                            else current_tool_call["index"] if current_tool_call else None
+                        )
                         if (
                             current_tool_call
-                            and current_tool_call["index"] == index
+                            and current_tool_call["index"] == stream_index
                         ):
-                            current_tool_call["arguments_json"] += delta.get(
-                                "partial_json", ""
-                            )
+                            arguments_delta = delta.get("partial_json", "")
+                            current_tool_call["arguments_json"] += arguments_delta
+                            if arguments_delta:
+                                yield StreamChunk(
+                                    tool_call_events=[
+                                        ToolCallStreamEvent(
+                                            kind="delta",
+                                            index=stream_index,
+                                            tool_call_id=current_tool_call["id"],
+                                            arguments_delta=arguments_delta,
+                                        )
+                                    ]
+                                )
 
                 # content_block_stop: end of a block
                 elif event_type == "content_block_stop":

@@ -20,6 +20,7 @@ from ai_query.types import (
     ToolCall,
     ToolCallPart,
     ToolResultPart,
+    ToolCallStreamEvent,
     EmbedResult,
     EmbedManyResult,
     EmbeddingUsage,
@@ -974,29 +975,46 @@ class OpenAIProvider(BaseProvider):
                                 continue
 
                             idx = tc.get("index")
-                            if idx is None:
+                            if not isinstance(idx, int):
                                 continue
 
-                            if idx not in current_tool_calls:
+                            is_new_call = idx not in current_tool_calls
+                            if is_new_call:
                                 current_tool_calls[idx] = {
                                     "id": "",
                                     "name": "",
                                     "arguments": "",
                                 }
 
-                            if tc.get("id"):
-                                current_tool_calls[idx]["id"] += tc["id"]
+                            id_delta = tc.get("id") or ""
+                            fn = tc.get("function") or {}
+                            if not isinstance(fn, dict):
+                                fn = {}
+                            name_delta = fn.get("name") or ""
+                            arguments_delta = fn.get("arguments") or ""
 
-                            if "function" in tc:
-                                fn = tc["function"] or {}
-                                if not isinstance(fn, dict):
-                                    continue
-                                if fn.get("name"):
-                                    current_tool_calls[idx]["name"] += fn["name"]
-                                if fn.get("arguments"):
-                                    current_tool_calls[idx]["arguments"] += fn[
-                                        "arguments"
-                                    ]
+                            current_tool_calls[idx]["id"] += id_delta
+                            current_tool_calls[idx]["name"] += name_delta
+                            current_tool_calls[idx]["arguments"] += arguments_delta
+
+                            tool_call_events = []
+                            if is_new_call:
+                                tool_call_events.append(ToolCallStreamEvent(
+                                    kind="start",
+                                    index=idx,
+                                    tool_call_id=id_delta or None,
+                                    name=name_delta or None,
+                                ))
+                            if arguments_delta or (not is_new_call and (id_delta or name_delta)):
+                                tool_call_events.append(ToolCallStreamEvent(
+                                    kind="delta",
+                                    index=idx,
+                                    tool_call_id=current_tool_calls[idx]["id"] or None,
+                                    name_delta=name_delta or None,
+                                    arguments_delta=arguments_delta or None,
+                                ))
+                            if tool_call_events:
+                                yield StreamChunk(tool_call_events=tool_call_events)
 
         # Process accumulated tool calls
         final_tool_calls = []

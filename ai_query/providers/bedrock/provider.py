@@ -27,6 +27,7 @@ from ai_query.types import (
     ToolCall,
     ToolCallPart,
     ToolResultPart,
+    ToolCallStreamEvent,
 )
 from ai_query.model import LanguageModel
 
@@ -468,7 +469,19 @@ class BedrockProvider(BaseProvider):
                     # Tool use delta (partial input)
                     tool_use = delta["toolUse"]
                     if current_tool_use is not None and isinstance(tool_use, dict):
-                        current_tool_use["input_json"] += tool_use.get("input", "")
+                        arguments_delta = tool_use.get("input", "")
+                        current_tool_use["input_json"] += arguments_delta
+                        if arguments_delta:
+                            yield StreamChunk(
+                                tool_call_events=[
+                                    ToolCallStreamEvent(
+                                        kind="delta",
+                                        index=current_tool_use["index"],
+                                        tool_call_id=current_tool_use["id"],
+                                        arguments_delta=arguments_delta,
+                                    )
+                                ]
+                            )
 
             elif "contentBlockStart" in event:
                 content_block_start = event["contentBlockStart"]
@@ -481,11 +494,25 @@ class BedrockProvider(BaseProvider):
                     tu = start["toolUse"]
                     if not isinstance(tu, dict):
                         continue
+                    index = content_block_start.get("contentBlockIndex")
+                    if not isinstance(index, int):
+                        index = len(tool_calls)
                     current_tool_use = {
+                        "index": index,
                         "id": tu["toolUseId"],
                         "name": tu["name"],
                         "input_json": "",
                     }
+                    yield StreamChunk(
+                        tool_call_events=[
+                            ToolCallStreamEvent(
+                                kind="start",
+                                index=index,
+                                tool_call_id=tu["toolUseId"],
+                                name=tu["name"],
+                            )
+                        ]
+                    )
 
             elif "contentBlockStop" in event:
                 if current_tool_use is not None:

@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Stream provider tool-call start and argument delta events."
+}

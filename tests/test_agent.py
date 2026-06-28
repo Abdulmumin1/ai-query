@@ -22,6 +22,7 @@ from ai_query.types import (
     RetryPolicy,
     StreamChunk,
     ToolCall,
+    ToolCallStreamEvent,
     ToolCallPart,
     ToolResultPart,
     AbortError,
@@ -589,6 +590,52 @@ class TestAgentTurn:
         await agent.stop()
 
     @pytest.mark.asyncio
+    async def test_turn_forwards_reasoning_summary_and_delta_events(self):
+        """AgentTurn should expose reasoning summaries and deltas in order."""
+        provider = MockProvider(
+            stream_chunks=[
+                [
+                    StreamChunk(
+                        reasoning_events=[
+                            ReasoningEvent(
+                                kind="summary",
+                                provider="mock",
+                                text="summary",
+                            ),
+                            ReasoningEvent(
+                                kind="delta",
+                                provider="mock",
+                                text="thinking",
+                            ),
+                        ]
+                    ),
+                    StreamChunk(text="Answer"),
+                    StreamChunk(is_final=True, finish_reason="stop"),
+                ]
+            ]
+        )
+        model = LanguageModel(provider=provider, model_id="test-model")
+        agent = Agent("test", storage=MemoryStorage(), model=model)
+        await agent.start()
+
+        events = [event async for event in agent.turn("Hello").events()]
+
+        assert [event.type for event in events] == [
+            "turn.started",
+            "step.started",
+            "reasoning.delta",
+            "reasoning.delta",
+            "text.delta",
+            "step.finished",
+            "turn.finished",
+        ]
+        reasoning_events = [event.event for event in events if event.type == "reasoning.delta"]
+        assert [event.kind for event in reasoning_events] == ["summary", "delta"]
+        assert [event.text for event in reasoning_events] == ["summary", "thinking"]
+        assert events[4].text == "Answer"
+        await agent.stop()
+
+    @pytest.mark.asyncio
     async def test_turn_forwards_tool_lifecycle_events(self):
         """AgentTurn should expose tool events from the typed stream."""
         @tool(description="Echo")
@@ -598,6 +645,22 @@ class TestAgentTurn:
 
         provider = MockProvider(stream_chunks=[
             [
+                StreamChunk(tool_call_events=[
+                    ToolCallStreamEvent(
+                        kind="start",
+                        index=0,
+                        tool_call_id="call_1",
+                        name="echo",
+                    )
+                ]),
+                StreamChunk(tool_call_events=[
+                    ToolCallStreamEvent(
+                        kind="delta",
+                        index=0,
+                        tool_call_id="call_1",
+                        arguments_delta='{"value":"ok"}',
+                    )
+                ]),
                 StreamChunk(
                     is_final=True,
                     finish_reason="tool_use",
@@ -626,6 +689,8 @@ class TestAgentTurn:
         assert [event.type for event in events] == [
             "turn.started",
             "step.started",
+            "tool_call.started",
+            "tool_call.delta",
             "tool_call.ready",
             "tool_execution.started",
             "tool_execution.finished",
@@ -637,7 +702,9 @@ class TestAgentTurn:
             "turn.finished",
         ]
         tool_events = [event for event in events if event.type.startswith("tool_")]
-        assert [event.tool_call.id for event in tool_events] == ["call_1"] * 4
+        assert [event.index for event in tool_events] == [0] * 6
+        assert tool_events[0].tool_call_id == "call_1"
+        assert tool_events[1].arguments_delta == '{"value":"ok"}'
         assert tool_events[-1].tool_result.result == "ok"
         await agent.stop()
 
@@ -857,6 +924,8 @@ class TestAgentTurn:
         assert [event.type for event in events] == [
             "turn.started",
             "step.started",
+            "tool_call.started",
+            "tool_call.delta",
             "tool_call.ready",
             "tool_execution.started",
             "tool_execution.finished",

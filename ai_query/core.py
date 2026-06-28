@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import contextlib
+import json
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import inspect
@@ -25,7 +26,9 @@ from ai_query.types import (
     TextPart,
     TextDeltaEvent,
     TextStreamEvent,
+    ToolCallDeltaEvent,
     ToolCallReadyEvent,
+    ToolCallStartedEvent,
     ToolExecutionFinishedEvent,
     ToolExecutionStartedEvent,
     ToolResultEvent,
@@ -803,6 +806,8 @@ def stream_text(
             step_reasoning_parts: list[ReasoningPart] = []
             step_finish_reason = None
             step_usage: Usage | None = None
+            tool_call_started_indexes: set[int] = set()
+            tool_call_argument_delta_indexes: set[int] = set()
 
             attempt = 1
             while True:
@@ -835,6 +840,29 @@ def stream_text(
                                     step_number=step_number,
                                 )
 
+                        if chunk.tool_call_events:
+                            for event in chunk.tool_call_events:
+                                if event.kind == "start":
+                                    tool_call_started_indexes.add(event.index)
+                                    yield ToolCallStartedEvent(
+                                        type="tool_call.started",
+                                        step_number=step_number,
+                                        index=event.index,
+                                        tool_call_id=event.tool_call_id,
+                                        name=event.name,
+                                    )
+                                else:
+                                    if event.arguments_delta:
+                                        tool_call_argument_delta_indexes.add(event.index)
+                                    yield ToolCallDeltaEvent(
+                                        type="tool_call.delta",
+                                        step_number=step_number,
+                                        index=event.index,
+                                        tool_call_id=event.tool_call_id,
+                                        name_delta=event.name_delta,
+                                        arguments_delta=event.arguments_delta,
+                                    )
+
                         if chunk.is_final:
                             if chunk.usage:
                                 step_usage = _copy_usage(chunk.usage)
@@ -842,6 +870,28 @@ def stream_text(
                             step_finish_reason = chunk.finish_reason
                             if chunk.tool_calls:
                                 step_tool_calls = chunk.tool_calls
+                                for index, tool_call in enumerate(step_tool_calls):
+                                    if index not in tool_call_started_indexes:
+                                        tool_call_started_indexes.add(index)
+                                        yield ToolCallStartedEvent(
+                                            type="tool_call.started",
+                                            step_number=step_number,
+                                            index=index,
+                                            tool_call_id=tool_call.id,
+                                            name=tool_call.name,
+                                        )
+                                    if index not in tool_call_argument_delta_indexes:
+                                        tool_call_argument_delta_indexes.add(index)
+                                        yield ToolCallDeltaEvent(
+                                            type="tool_call.delta",
+                                            step_number=step_number,
+                                            index=index,
+                                            tool_call_id=tool_call.id,
+                                            arguments_delta=json.dumps(
+                                                tool_call.arguments,
+                                                separators=(",", ":"),
+                                            ),
+                                        )
                         else:
                             if chunk.text:
                                 if signal and signal.aborted:

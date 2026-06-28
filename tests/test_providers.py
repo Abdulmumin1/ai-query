@@ -1024,6 +1024,115 @@ class TestAnthropicProvider:
         assert reasoning_events[1].data == {"signature": "sig"}
         assert chunks[-1].is_final is True
 
+    @pytest.mark.asyncio
+    async def test_anthropic_stream_emits_tool_call_fragments(self):
+        """Anthropic should expose tool block start and input JSON deltas."""
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        class FakeTransport:
+            async def stream(self, url, json, headers=None):
+                chunks = [
+                    b'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_1","name":"search","input":{}}}\n',
+                    b'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":"}}\n',
+                    b'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\\"docs\\"}"}}\n',
+                    b'data: {"type":"content_block_stop","index":1}\n',
+                    b'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}\n',
+                ]
+                for chunk in chunks:
+                    yield chunk
+
+        provider = AnthropicProvider(api_key="test", transport=FakeTransport())
+        chunks = [
+            chunk
+            async for chunk in provider.stream(
+                model="claude-sonnet-4-20250514",
+                messages=[Message(role="user", content="Search")],
+            )
+        ]
+        events = [
+            event
+            for chunk in chunks
+            for event in (chunk.tool_call_events or [])
+        ]
+
+        assert [event.kind for event in events] == ["start", "delta", "delta"]
+        assert events[0].index == 1
+        assert events[0].tool_call_id == "call_1"
+        assert events[0].name == "search"
+        assert [event.arguments_delta for event in events[1:]] == [
+            '{"query":',
+            '"docs"}',
+        ]
+        assert chunks[-1].tool_calls[0].arguments == {"query": "docs"}
+
+
+class TestBedrockProvider:
+    @pytest.mark.asyncio
+    async def test_bedrock_stream_emits_tool_call_fragments(self):
+        """Bedrock should expose toolUse start and input deltas."""
+        from ai_query.providers.bedrock.provider import BedrockProvider
+
+        class FakeClient:
+            def converse_stream(self, **kwargs):
+                return {
+                    "stream": [
+                        {
+                            "contentBlockStart": {
+                                "contentBlockIndex": 2,
+                                "start": {
+                                    "toolUse": {
+                                        "toolUseId": "call_1",
+                                        "name": "search",
+                                    }
+                                },
+                            }
+                        },
+                        {
+                            "contentBlockDelta": {
+                                "contentBlockIndex": 2,
+                                "delta": {"toolUse": {"input": '{"query":'}},
+                            }
+                        },
+                        {
+                            "contentBlockDelta": {
+                                "contentBlockIndex": 2,
+                                "delta": {"toolUse": {"input": '"docs"}'}},
+                            }
+                        },
+                        {"contentBlockStop": {"contentBlockIndex": 2}},
+                        {"messageStop": {"stopReason": "tool_use"}},
+                    ]
+                }
+
+        with patch(
+            "ai_query.providers.bedrock.provider.BOTO3_AVAILABLE",
+            True,
+        ):
+            provider = BedrockProvider()
+        provider._client = FakeClient()
+        chunks = [
+            chunk
+            async for chunk in provider.stream(
+                model="test-model",
+                messages=[Message(role="user", content="Search")],
+            )
+        ]
+        events = [
+            event
+            for chunk in chunks
+            for event in (chunk.tool_call_events or [])
+        ]
+
+        assert [event.kind for event in events] == ["start", "delta", "delta"]
+        assert events[0].index == 2
+        assert events[0].tool_call_id == "call_1"
+        assert events[0].name == "search"
+        assert [event.arguments_delta for event in events[1:]] == [
+            '{"query":',
+            '"docs"}',
+        ]
+        assert chunks[-1].tool_calls[0].arguments == {"query": "docs"}
+
 
 # =============================================================================
 # Workers AI Provider Tests
@@ -1220,6 +1329,19 @@ class TestWorkersAIProvider:
         assert chunks[-1].tool_calls[0].id == "call_1"
         assert chunks[-1].tool_calls[0].name == "add"
         assert chunks[-1].tool_calls[0].arguments == {"a": 1, "b": 2}
+        events = [
+            event
+            for chunk in chunks
+            for event in (chunk.tool_call_events or [])
+        ]
+        assert [event.kind for event in events] == ["start", "delta", "delta"]
+        assert events[0].tool_call_id is None
+        assert events[1].tool_call_id == "call_1"
+        assert events[1].name_delta == "add"
+        assert [event.arguments_delta for event in events[1:]] == [
+            '{"a":1',
+            ',"b":2}',
+        ]
 
     @pytest.mark.asyncio
     async def test_workers_ai_stream_ignores_null_delta_and_function(self):
