@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Stream correlated tool call readiness, execution, and normalized result events."
+}

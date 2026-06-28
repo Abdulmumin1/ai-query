@@ -28,6 +28,11 @@ from ai_query.types import (
     StepStartEvent,
     StopCondition,
     ToolSet,
+    TextDeltaEvent,
+    ToolCallReadyEvent,
+    ToolExecutionFinishedEvent,
+    ToolExecutionStartedEvent,
+    ToolResultEvent,
     Usage,
 )
 
@@ -118,7 +123,20 @@ class TurnFailed:
     error: str
 
 
-TurnEvent = TurnStarted | TextDelta | ReasoningDelta | StepStarted | StepRetrying | StepFinished | TurnFinished | TurnFailed
+TurnEvent = (
+    TurnStarted
+    | TextDelta
+    | ReasoningDelta
+    | StepStarted
+    | StepRetrying
+    | ToolCallReadyEvent
+    | ToolExecutionStartedEvent
+    | ToolExecutionFinishedEvent
+    | ToolResultEvent
+    | StepFinished
+    | TurnFinished
+    | TurnFailed
+)
 
 
 class AgentTurn:
@@ -302,9 +320,23 @@ class AgentTurn:
                 after_tool_call=after_tool_call,
             )
 
-            async for chunk in result.text_stream:
-                full_response += chunk
-                await self._put_event(TextDelta(type="text.delta", text=chunk))
+            async for stream_event in result.event_stream:
+                if isinstance(stream_event, TextDeltaEvent):
+                    full_response += stream_event.text
+                    await self._put_event(TextDelta(
+                        type="text.delta",
+                        text=stream_event.text,
+                    ))
+                elif isinstance(
+                    stream_event,
+                    (
+                        ToolCallReadyEvent,
+                        ToolExecutionStartedEvent,
+                        ToolExecutionFinishedEvent,
+                        ToolResultEvent,
+                    ),
+                ):
+                    await self._put_event(stream_event)
 
             steps = await self.agent._get_result_steps(result) or []
 

@@ -56,6 +56,10 @@ Current turn events:
 | `reasoning.delta` | Provider reasoning/thinking event |
 | `step.started` | A model step is about to begin |
 | `step.retrying` | A provider call failed and the runtime is waiting before another attempt |
+| `tool_call.ready` | A complete provider tool call is ready for execution |
+| `tool_execution.started` | A local tool function started |
+| `tool_execution.finished` | A local tool function finished or was aborted |
+| `tool_result` | The normalized post-hook result is ready for the next model step |
 | `step.finished` | A model step finished |
 | `turn.finished` | The final `TurnResult` is available |
 | `turn.failed` | The turn failed or was aborted |

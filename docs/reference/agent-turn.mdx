@@ -254,6 +254,10 @@ TurnEvent = (
     | ReasoningDelta
     | StepStarted
     | StepRetrying
+    | ToolCallReadyEvent
+    | ToolExecutionStartedEvent
+    | ToolExecutionFinishedEvent
+    | ToolResultEvent
     | StepFinished
     | TurnFinished
     | TurnFailed
@@ -324,6 +328,14 @@ class StepRetrying:
     delay: float
     error: str
 ```
+
+### Tool lifecycle events
+
+`AgentTurn` forwards the same `ToolCallReadyEvent`,
+`ToolExecutionStartedEvent`, `ToolExecutionFinishedEvent`, and `ToolResultEvent`
+objects exposed by `stream_text().event_stream`. This preserves tool call IDs,
+provider indexes, execution completion order, and normalized results across core
+and agent APIs.
 
 ### TurnFinished
 
