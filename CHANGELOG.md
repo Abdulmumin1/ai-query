@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.54
+
+- patch: Stream provider tool-call start and argument delta events.
+
 ## 1.7.53
 
 - patch: Stream correlated tool call readiness, execution, and normalized result events.
