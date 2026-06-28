@@ -16,7 +16,13 @@ from ai_query.types import (
     ProviderOptions,
     ReasoningEvent,
     ReasoningPart,
+    StreamFinishedEvent,
+    StreamReasoningEvent,
+    StreamStepFinishedEvent,
+    StreamStepStartedEvent,
     TextPart,
+    TextDeltaEvent,
+    TextStreamEvent,
     ToolCallPart,
     ToolResultPart,
     Usage,
@@ -666,7 +672,7 @@ def stream_text(
 
     shared_steps: list[StepResult] = []
 
-    async def _stream_generator() -> AsyncIterator[StreamChunk]:
+    async def _stream_generator() -> AsyncIterator[TextStreamEvent]:
         nonlocal shared_steps
         steps: list[StepResult] = shared_steps
         current_messages = list(final_messages)
@@ -683,6 +689,7 @@ def stream_text(
             if signal and signal.aborted:
                 raise AbortError(signal.reason)
 
+            stop_before_step = False
             if on_step_start:
                 start_event = StepStartEvent(
                     step_number=step_number,
@@ -698,12 +705,24 @@ def stream_text(
                             _normalize_injected_messages(callback_result.inject_messages)
                         )
                     if callback_result.stop:
-                        yield StreamChunk(
-                            is_final=True,
-                            usage=_copy_usage(latest_usage) if latest_usage else None,
-                            finish_reason="stop",
-                        )
-                        break
+                        stop_before_step = True
+
+            yield StreamStepStartedEvent(
+                type="step.started",
+                step_number=step_number,
+                messages=list(current_messages),
+                tools=tools,
+            )
+
+            if stop_before_step:
+                yield StreamFinishedEvent(
+                    type="stream.finished",
+                    text=accumulated_text,
+                    usage=_copy_usage(latest_usage) if latest_usage else None,
+                    finish_reason="stop",
+                    steps=list(steps),
+                )
+                break
 
             step_text = ""
             step_tool_calls: list[ToolCall] = []
@@ -732,11 +751,15 @@ def stream_text(
                         if chunk.reasoning_events:
                             for event in chunk.reasoning_events:
                                 _append_reasoning_event(step_reasoning_parts, event)
-                                if not on_reasoning_event:
-                                    continue
-                                callback_result = on_reasoning_event(event)
-                                if inspect.isawaitable(callback_result):
-                                    await callback_result
+                                if on_reasoning_event:
+                                    callback_result = on_reasoning_event(event)
+                                    if inspect.isawaitable(callback_result):
+                                        await callback_result
+                                yield StreamReasoningEvent(
+                                    type=f"reasoning.{event.kind}",
+                                    event=event,
+                                    step_number=step_number,
+                                )
 
                         if chunk.is_final:
                             if chunk.usage:
@@ -751,7 +774,11 @@ def stream_text(
                                     raise AbortError(signal.reason)
                                 step_text += chunk.text
                                 accumulated_text += chunk.text
-                                yield StreamChunk(text=chunk.text)
+                                yield TextDeltaEvent(
+                                    type="text.delta",
+                                    text=chunk.text,
+                                    step_number=step_number,
+                                )
                     break
                 except Exception as exc:
                     if saw_provider_output or not _should_retry(exc, retry, attempt):
@@ -795,10 +822,20 @@ def stream_text(
                     if inspect.isawaitable(callback_result):
                         await callback_result
 
-                yield StreamChunk(
-                    is_final=True,
+                yield StreamStepFinishedEvent(
+                    type="step.finished",
+                    step_number=step_number,
+                    step=step,
+                    text=accumulated_text,
+                    usage=_copy_usage(step_usage) if step_usage else None,
+                    steps=list(steps),
+                )
+                yield StreamFinishedEvent(
+                    type="stream.finished",
+                    text=accumulated_text,
                     usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason=step_finish_reason,
+                    steps=list(steps),
                 )
                 break
 
@@ -827,6 +864,15 @@ def stream_text(
                 if inspect.isawaitable(callback_result):
                     await callback_result
 
+            yield StreamStepFinishedEvent(
+                type="step.finished",
+                step_number=step_number,
+                step=step,
+                text=accumulated_text,
+                usage=_copy_usage(step_usage) if step_usage else None,
+                steps=list(steps),
+            )
+
             should_stop = should_terminate_after_step
             for condition in stop_conditions:
                 cond_result = condition(steps)
@@ -837,10 +883,12 @@ def stream_text(
                     break
 
             if should_stop:
-                yield StreamChunk(
-                    is_final=True,
+                yield StreamFinishedEvent(
+                    type="stream.finished",
+                    text=accumulated_text,
                     usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason=step_finish_reason,
+                    steps=list(steps),
                 )
                 break
 

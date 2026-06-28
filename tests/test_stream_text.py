@@ -7,7 +7,17 @@ import pytest
 import time
 from unittest.mock import AsyncMock
 
-from ai_query import stream_text, tool, Field, step_count_is
+from ai_query import (
+    StreamFinishedEvent,
+    StreamReasoningEvent,
+    StreamStepFinishedEvent,
+    StreamStepStartedEvent,
+    TextDeltaEvent,
+    stream_text,
+    tool,
+    Field,
+    step_count_is,
+)
 from ai_query.types import (
     Message,
     AbortController,
@@ -381,6 +391,117 @@ class TestStreamTextBasic:
         assert reasoning_events[0].text == "thinking"
 
     @pytest.mark.asyncio
+    async def test_event_stream_exposes_ordered_typed_events(self):
+        """event_stream should expose one ordered stream for all model output."""
+        reasoning_events = [
+            ReasoningEvent(kind="summary", provider="mock", text="summary"),
+            ReasoningEvent(kind="delta", provider="mock", text="thinking"),
+            ReasoningEvent(kind="signature", provider="mock", data={"signature": "sig"}),
+            ReasoningEvent(kind="state", provider="mock", data={"state": "done"}),
+        ]
+        usage = Usage(input_tokens=2, output_tokens=3, total_tokens=5)
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(reasoning_events=reasoning_events),
+            StreamChunk(text="Answer"),
+            StreamChunk(is_final=True, finish_reason="stop", usage=usage),
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+
+        result = stream_text(model=model, prompt="Test typed events")
+        events = [event async for event in result.event_stream]
+
+        assert [event.type for event in events] == [
+            "step.started",
+            "reasoning.summary",
+            "reasoning.delta",
+            "reasoning.signature",
+            "reasoning.state",
+            "text.delta",
+            "step.finished",
+            "stream.finished",
+        ]
+        assert isinstance(events[0], StreamStepStartedEvent)
+        assert all(isinstance(event, StreamReasoningEvent) for event in events[1:5])
+        assert isinstance(events[5], TextDeltaEvent)
+        assert isinstance(events[6], StreamStepFinishedEvent)
+        assert isinstance(events[7], StreamFinishedEvent)
+        assert [event.step_number for event in events[:-1]] == [1] * 7
+        assert events[5].text == "Answer"
+        assert events[6].step.text == "Answer"
+        assert events[7].text == "Answer"
+        assert events[7].usage == usage
+
+    @pytest.mark.asyncio
+    async def test_event_and_text_streams_are_replayable_projections(self):
+        """Either stream view should remain available after the other is consumed."""
+        chunks = [
+            StreamChunk(text="One "),
+            StreamChunk(text="two"),
+            StreamChunk(is_final=True, finish_reason="stop"),
+        ]
+        provider = MockProvider(stream_chunks=[chunks])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        result = stream_text(model=model, prompt="Test replay")
+
+        first_events = [event async for event in result.event_stream]
+        replayed_text = [text async for text in result.text_stream]
+        replayed_events = [event async for event in result.event_stream]
+
+        assert replayed_text == ["One ", "two"]
+        assert replayed_events == first_events
+        assert provider.stream_call_count == 1
+
+        second_provider = MockProvider(stream_chunks=[chunks])
+        second_model = LanguageModel(provider=second_provider, model_id="test-model")
+        second_result = stream_text(model=second_model, prompt="Test reverse replay")
+
+        initial_text = [text async for text in second_result.text_stream]
+        later_events = [event async for event in second_result.event_stream]
+
+        assert initial_text == ["One ", "two"]
+        assert [event.type for event in later_events] == [
+            "step.started",
+            "text.delta",
+            "text.delta",
+            "step.finished",
+            "stream.finished",
+        ]
+        assert second_provider.stream_call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_event_and_text_streams_can_be_consumed_concurrently(self):
+        """Concurrent projections should share one provider stream without losing events."""
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(
+                reasoning_events=[
+                    ReasoningEvent(kind="delta", provider="mock", text="thinking")
+                ]
+            ),
+            StreamChunk(text="Shared"),
+            StreamChunk(is_final=True, finish_reason="stop"),
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        result = stream_text(model=model, prompt="Test concurrent views")
+
+        async def collect_events():
+            return [event async for event in result.event_stream]
+
+        async def collect_text():
+            return [text async for text in result.text_stream]
+
+        events, text_chunks = await asyncio.gather(collect_events(), collect_text())
+
+        assert text_chunks == ["Shared"]
+        assert [event.type for event in events] == [
+            "step.started",
+            "reasoning.delta",
+            "text.delta",
+            "step.finished",
+            "stream.finished",
+        ]
+        assert provider.stream_call_count == 1
+
+    @pytest.mark.asyncio
     async def test_reasoning_event_callback_can_be_async(self):
         """stream_text should await async reasoning event callbacks."""
         provider = MockProvider(stream_chunks=[
@@ -591,6 +712,51 @@ class TestStreamTextWithTools:
         assert len(chunks) > 0
         full_text = "".join(chunks)
         assert "calculate" in full_text.lower() or "5" in full_text
+
+    @pytest.mark.asyncio
+    async def test_event_stream_tracks_each_tool_step(self):
+        """Lifecycle events should delimit every provider step in a tool loop."""
+        @tool(description="Echo a value")
+        def echo(value: str) -> str:
+            return value
+
+        provider = MockProvider(stream_chunks=[
+            [
+                StreamChunk(
+                    is_final=True,
+                    finish_reason="tool_use",
+                    tool_calls=[make_tool_call("echo", {"value": "ok"})],
+                )
+            ],
+            [
+                StreamChunk(text="Done"),
+                StreamChunk(is_final=True, finish_reason="stop"),
+            ],
+        ])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        result = stream_text(
+            model=model,
+            prompt="Echo and answer",
+            tools={"echo": echo},
+            stop_when=step_count_is(2),
+        )
+
+        events = [event async for event in result.event_stream]
+
+        assert [event.type for event in events] == [
+            "step.started",
+            "step.finished",
+            "step.started",
+            "text.delta",
+            "step.finished",
+            "stream.finished",
+        ]
+        assert [events[0].step_number, events[1].step_number] == [1, 1]
+        assert [events[2].step_number, events[3].step_number, events[4].step_number] == [2, 2, 2]
+        assert len(events[1].steps) == 1
+        assert len(events[4].steps) == 2
+        assert len(events[5].steps) == 2
+        assert events[1].step.tool_results[0].result == "ok"
 
     @pytest.mark.asyncio
     async def test_multiple_async_tool_calls_run_in_parallel(self):

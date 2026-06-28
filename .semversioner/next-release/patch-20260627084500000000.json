@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Expose a replayable typed event stream for text, reasoning, and generation lifecycle events."
+}
