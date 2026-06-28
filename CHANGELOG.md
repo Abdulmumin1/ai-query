@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.53
+
+- patch: Stream correlated tool call readiness, execution, and normalized result events.
+
 ## 1.7.52
 
 - patch: Expose a replayable typed event stream for text, reasoning, and generation lifecycle events.

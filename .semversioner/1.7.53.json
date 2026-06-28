@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Stream correlated tool call readiness, execution, and normalized result events.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-06-28T16:03:15+00:00",
+  "version": "1.7.53"
+}
