@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Expose a replayable typed event stream for text, reasoning, and generation lifecycle events.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-06-28T16:01:48+00:00",
+  "version": "1.7.52"
+}
