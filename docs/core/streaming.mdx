@@ -121,6 +121,11 @@ The stream emits `step.started` and `step.finished` around each model step, then
 one `stream.finished` event. Both stream views are replayable and share one
 provider request, including when consumed concurrently.
 
+When a completed tool call is available, the same stream emits
+`tool_call.ready`, `tool_execution.started`, `tool_execution.finished`, and
+`tool_result`. Parallel finish events arrive as tools complete; normalized result
+events remain in provider order.
+
 ## Thinking Events
 
 Reasoning is emitted as `reasoning.summary`, `reasoning.delta`,

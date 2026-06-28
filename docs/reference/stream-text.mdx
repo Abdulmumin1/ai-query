@@ -109,7 +109,9 @@ Properties:
 <ResponseField name="event_stream" type="AsyncIterator[TextStreamEvent]">
   Async iterator yielding typed events in generation order. Event types are
   `step.started`, `text.delta`, `reasoning.summary`, `reasoning.delta`,
-  `reasoning.signature`, `reasoning.state`, `step.finished`, and `stream.finished`.
+  `reasoning.signature`, `reasoning.state`, `tool_call.ready`,
+  `tool_execution.started`, `tool_execution.finished`, `tool_result`,
+  `step.finished`, and `stream.finished`.
 </ResponseField>
 
 <ResponseField name="text_stream" type="AsyncIterator[str]">
@@ -142,12 +144,25 @@ event-specific fields.
 | `step.started` | `StreamStepStartedEvent` | `step_number`, `messages`, `tools` |
 | `text.delta` | `TextDeltaEvent` | `text`, `step_number` |
 | `reasoning.*` | `StreamReasoningEvent` | `event`, `step_number` |
+| `tool_call.ready` | `ToolCallReadyEvent` | `step_number`, `index`, `tool_call` |
+| `tool_execution.started` | `ToolExecutionStartedEvent` | `step_number`, `index`, `tool_call` |
+| `tool_execution.finished` | `ToolExecutionFinishedEvent` | `step_number`, `index`, `tool_call`, `tool_result`, `duration`, `error`, `aborted` |
+| `tool_result` | `ToolResultEvent` | `step_number`, `index`, `tool_call`, `tool_result` |
 | `step.finished` | `StreamStepFinishedEvent` | `step_number`, `step`, `text`, `usage`, `steps` |
 | `stream.finished` | `StreamFinishedEvent` | `text`, `finish_reason`, `usage`, `steps` |
 
 The `reasoning.*` discriminator preserves the underlying `ReasoningEvent.kind`:
 `summary`, `delta`, `signature`, or `state`. Step history fields are snapshots of
 the completed steps at the time that event was emitted.
+
+Tool calls receive a stable provider-order `index`. Ready and result events are
+emitted in provider order. Parallel execution finish events are emitted in actual
+completion order. `tool_execution.finished` captures the direct execution result;
+`tool_result` contains the final result after `after_tool_call` hooks and matches
+the result stored in `StepResult.tool_results`.
+
+Blocked and unknown tools emit `tool_call.ready` and an error `tool_result`, but
+do not emit execution start or finish events because no tool function ran.
 
 ## Raises
 
