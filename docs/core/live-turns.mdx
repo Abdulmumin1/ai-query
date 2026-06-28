@@ -56,6 +56,8 @@ Current turn events:
 | `reasoning.delta` | Provider reasoning/thinking event |
 | `step.started` | A model step is about to begin |
 | `step.retrying` | A provider call failed and the runtime is waiting before another attempt |
+| `tool_call.started` | A provider started streaming a tool call |
+| `tool_call.delta` | A function-name or JSON-argument fragment arrived |
 | `tool_call.ready` | A complete provider tool call is ready for execution |
 | `tool_execution.started` | A local tool function started |
 | `tool_execution.finished` | A local tool function finished or was aborted |
@@ -99,6 +101,24 @@ async def handle_stream(agent: Agent, message: str):
     async for event in turn.events():
         if event.type == "text.delta":
             yield f"event: chunk\ndata: {json.dumps(event.text)}\n\n"
+        elif event.type.startswith("reasoning."):
+            payload = {
+                "kind": event.event.kind,
+                "provider": event.event.provider,
+                "text": event.event.text,
+                "data": event.event.data,
+            }
+            yield f"event: reasoning\ndata: {json.dumps(payload)}\n\n"
+        elif event.type in {
+            "tool_call.started",
+            "tool_call.delta",
+            "tool_call.ready",
+            "tool_execution.started",
+            "tool_execution.finished",
+            "tool_result",
+        }:
+            payload = {"type": event.type, "step": event.step_number, "index": event.index}
+            yield f"event: tool\ndata: {json.dumps(payload)}\n\n"
         elif event.type == "step.started":
             payload = {"step": event.step_number}
             yield f"event: status\ndata: {json.dumps(payload)}\n\n"
@@ -118,6 +138,18 @@ class CodingAgent(Agent[dict[str, Any]]):
             async for event in turn.events():
                 if event.type == "text.delta":
                     print(event.text, end="", flush=True)
+                elif event.type.startswith("reasoning."):
+                    await self.emit("reasoning", {
+                        "kind": event.event.kind,
+                        "text": event.event.text,
+                        "data": event.event.data,
+                    })
+                elif event.type.startswith("tool_"):
+                    await self.emit("tool", {
+                        "type": event.type,
+                        "step": event.step_number,
+                        "index": event.index,
+                    })
                 elif event.type == "step.started":
                     await self.emit("status", {"step": event.step_number})
 

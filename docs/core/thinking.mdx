@@ -98,6 +98,10 @@ Typical meanings:
 | `signature` | Continuity or verification metadata |
 | `state` | Opaque provider reasoning state |
 
+`summary` and `delta` are both delivered through the same typed stream. They
+remain reasoning events, not assistant text, so `text_stream`, `Agent.stream()`,
+and `Agent.chat()` do not mix them into the user-visible answer.
+
 ## Provider Differences
 
 Thinking output is not portable in the same way as assistant text.
@@ -112,6 +116,7 @@ Thinking output is not portable in the same way as assistant text.
   - `delta.thinking`
   - `delta.thought`
   - `delta.reasoning_summary`
+- Responses-style reasoning summaries are emitted as `reasoning.summary`
 
 If a provider only streams final assistant text, `on_reasoning_event` will not fire.
 
@@ -131,12 +136,14 @@ provider_options={
 }
 ```
 
-- ai-query emits reasoning events for Gemini thought parts and thought signatures
+- ai-query emits `reasoning.delta` for Gemini thought text and
+  `reasoning.signature` for thought signatures
 
 ### Anthropic
 
 - normalized control: `reasoning.effort` and `reasoning.budget`
-- ai-query emits reasoning events for streaming thinking deltas and signatures when Claude returns them
+- ai-query emits `reasoning.delta` for streaming thinking text and
+  `reasoning.signature` for signatures when Claude returns them
 
 ## Agents
 
@@ -174,6 +181,8 @@ That means thinking output can flow through local callbacks and agent transports
 
 - Do not assume every reasoning-capable model exposes visible thinking output.
 - Do not mix reasoning events into user-facing assistant text by default.
+- Render `summary` and `delta` through the same reasoning UI channel unless your
+  product intentionally separates summaries from raw thinking text.
 - Treat `signature` and `state` events as provider metadata, not natural-language output.
 - Prefer summaries or explicit UI affordances if you choose to display thinking.
 
