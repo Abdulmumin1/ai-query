@@ -21,6 +21,10 @@ from ai_query.types import (
     ReasoningPart,
     RetryPolicy,
     StreamChunk,
+    StreamFinishedEvent,
+    TextDeltaEvent,
+    TextStreamResult,
+    StepResult,
     ToolCall,
     ToolCallStreamEvent,
     ToolCallPart,
@@ -587,6 +591,56 @@ class TestAgentTurn:
             "step.finished",
             "turn.finished",
         ]
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_reconciles_completed_steps_not_checkpointed_by_callback(
+        self, monkeypatch
+    ):
+        """Completed result steps remain durable if a finish callback is skipped."""
+        final_step = StepResult(
+            text="Recovered final answer",
+            tool_calls=[],
+            tool_results=[],
+            finish_reason="stop",
+        )
+
+        async def event_stream():
+            yield TextDeltaEvent(
+                type="text.delta",
+                text="Recovered final answer",
+                step_number=1,
+            )
+            yield StreamFinishedEvent(
+                type="stream.finished",
+                text="Recovered final answer",
+                usage=None,
+                finish_reason="stop",
+                steps=[final_step],
+            )
+
+        def stream_without_finish_callback(**kwargs):
+            return TextStreamResult(event_stream(), steps=[final_step])
+
+        monkeypatch.setattr("ai_query.stream_text", stream_without_finish_callback)
+        storage = MemoryStorage()
+        model = LanguageModel(
+            provider=MockProvider(stream_chunks=[]),
+            model_id="test-model",
+        )
+        agent = Agent("test", storage=storage, model=model)
+        await agent.start()
+
+        result = await agent.turn("Hello").result()
+
+        assert result.text == "Recovered final answer"
+        assert [message.role for message in agent.messages] == ["user", "assistant"]
+        assert agent.messages[-1].content == "Recovered final answer"
+        stored = await storage.get("test:messages")
+        assert stored[-1] == {
+            "role": "assistant",
+            "content": "Recovered final answer",
+        }
         await agent.stop()
 
     @pytest.mark.asyncio

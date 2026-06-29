@@ -228,6 +228,7 @@ class AgentTurn:
         self._started = True
         self._started_at = time.time()
         full_response = ""
+        persisted_step_count = 0
         external_signal = self.options.signal
         signal = self._controller.signal
 
@@ -271,8 +272,10 @@ class AgentTurn:
             )
 
         async def on_step_finish(event: StepFinishEvent) -> None:
+            nonlocal persisted_step_count
             self.agent._append_step_message(event.step)
             await self.agent._persist_messages()
+            persisted_step_count += 1
             await self._put_event(StepFinished(
                 type="step.finished",
                 step_number=event.step_number,
@@ -345,6 +348,11 @@ class AgentTurn:
                     await self._put_event(stream_event)
 
             steps = await self.agent._get_result_steps(result) or []
+            if persisted_step_count < len(steps):
+                for step in steps[persisted_step_count:]:
+                    self.agent._append_step_message(step)
+                await self.agent._persist_messages()
+                persisted_step_count = len(steps)
 
             output_message = self.agent.messages[-1] if self.agent.messages else Message(role="assistant", content=full_response)
             turn_result = TurnResult(
