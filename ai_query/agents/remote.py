@@ -10,6 +10,7 @@ from ai_query.types import AbortSignal
 
 if TYPE_CHECKING:
     from ai_query.agents.agent import Agent
+    from ai_query.agents.turn import TurnEvent
 
 T = TypeVar("T", bound="Agent")
 
@@ -49,6 +50,18 @@ class RemoteAgent:
             self._agent_id, message, signal=signal
         ):
             yield chunk
+
+    async def events(
+        self,
+        message: str,
+        *,
+        signal: Union[AbortSignal, None] = None,
+    ) -> AsyncIterator["TurnEvent"]:
+        """Stream typed lifecycle events for a remote agent turn."""
+        async for event in self._transport.stream_events(
+            self._agent_id, message, signal=signal
+        ):
+            yield event
 
     def call(self, *, agent_cls: Union[type[T], None] = None) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to the remote agent."""

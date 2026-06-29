@@ -20,6 +20,8 @@ __all__ = [
     "TurnEvent",
     "TurnOptions",
     "TurnResult",
+    "turn_event_from_dict",
+    "turn_event_to_dict",
     "RetryPolicy",
     # Storage
     "Storage",
@@ -49,6 +51,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "TurnEvent": ("ai_query.agents.turn", "TurnEvent"),
     "TurnOptions": ("ai_query.agents.turn", "TurnOptions"),
     "TurnResult": ("ai_query.agents.turn", "TurnResult"),
+    "turn_event_from_dict": ("ai_query.agents.turn_codec", "turn_event_from_dict"),
+    "turn_event_to_dict": ("ai_query.agents.turn_codec", "turn_event_to_dict"),
     "RetryPolicy": ("ai_query.types", "RetryPolicy"),
     "Storage": ("ai_query.agents.storage", "Storage"),
     "MemoryStorage": ("ai_query.agents.storage", "MemoryStorage"),

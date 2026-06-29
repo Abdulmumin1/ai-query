@@ -186,6 +186,9 @@ class AgentDO(DurableObject):
                 url = js.URL.new(request.url)
                 path = url.pathname
                 parts = path.strip("/").split("/")
+                stream_mode = url.searchParams.get("stream")
+                if stream_mode:
+                    data["stream"] = stream_mode
 
                 # Path format: /agent/<agent_id>/<action>
                 # If action is in the path but not in body, inject it
