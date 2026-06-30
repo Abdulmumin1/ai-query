@@ -372,12 +372,30 @@ class TurnFinished:
 class TurnFailed:
     type: Literal["turn.failed"]
     error: str
+    error_type: str | None = None
+    aborted: bool = False
     termination: TurnTermination | None = None
 ```
 
 `TurnResult.termination` and `TurnFailed.termination` expose the same structured
 diagnostic used by core generation and streaming. Aborted and failed turns also
 attach it to the exception raised by `result()`.
+
+## Wire Codec
+
+```python
+from ai_query import turn_event_from_dict, turn_event_to_dict
+```
+
+`turn_event_to_dict(event)` converts every public `TurnEvent`, including nested
+messages, steps, reasoning, tools, results, usage, and final `TurnResult`, to a
+stable JSON-compatible object. `turn_event_from_dict(payload)` reconstructs the
+matching event dataclass.
+
+The stock AgentServer uses this codec for `POST /agent/{id}/chat?stream=events`.
+Byte content is represented with an ai-query wire marker and restored as
+`bytes`. Other tool result values must be JSON-compatible. Structured
+termination diagnostics round-trip on both `turn.finished` and `turn.failed`.
 
 ## Example
 

@@ -1064,7 +1064,11 @@ class Agent(Generic[StateT]):
     async def handle_request_stream(
         self, request: Dict[str, Any]
     ) -> AsyncIterator[str]:
-        """Serverless streaming request handler."""
+        """Serverless streaming request handler.
+
+        ``stream="events"`` emits the public ``AgentTurn`` event vocabulary.
+        Other values preserve the legacy text ``start/chunk/end`` protocol.
+        """
         # Ensure agent is started
         if self._state is None:
             await self.start()
@@ -1073,6 +1077,30 @@ class Agent(Generic[StateT]):
 
         if action == "chat":
             message = request.get("message", "")
+
+            if request.get("stream") == "events":
+                from ai_query.agents.turn_codec import turn_event_to_sse
+
+                turn = self.turn(message)
+                try:
+                    async for event in turn.events():
+                        yield turn_event_to_sse(event)
+
+                    # Retrieve a failed task after its typed turn.failed event was sent.
+                    try:
+                        await turn.result()
+                    except Exception:
+                        pass
+                finally:
+                    if not turn.done:
+                        turn.abort("Turn event stream disconnected")
+                        if turn._task is not None:
+                            turn._task.add_done_callback(
+                                lambda task: None
+                                if task.cancelled()
+                                else task.exception()
+                            )
+                return
 
             try:
                 # Start event

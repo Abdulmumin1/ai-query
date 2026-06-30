@@ -92,38 +92,43 @@ Aborting signals the active turn. Providers and tools must honor abort signals t
 
 ## SSE Example
 
+The stock `AgentServer` exposes the complete turn stream:
+
+```bash
+curl -N -X POST \
+  "http://localhost:8080/agent/coder/chat?stream=events" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Fix the failing test"}'
+```
+
+Each SSE frame contains one public `TurnEvent`. The SSE event name and JSON
+`type` match:
+
+```text
+event: tool_execution.started
+data: {"type":"tool_execution.started","step_number":1,"index":0,"tool_call":{"id":"call_1","name":"read_file","arguments":{"path":"app.py"},"metadata":{}}}
+```
+
+Use `?stream=true` when a client only needs the legacy `start`, `chunk`, and
+`end` text stream. Use `?stream=events` for reasoning, retries, steps, tools,
+usage, structured completion, and typed failures.
+
+The `/events` endpoint is different: it replays durable application events
+created with `Agent.emit()`. Chat turn events are transient and belong to the
+single POST response that started the turn.
+
+Python clients reconstruct the wire payloads into the same event dataclasses:
+
 ```python
-async def handle_stream(agent: Agent, message: str):
-    turn = agent.turn(message)
+from ai_query import connect
 
-    yield "event: start\ndata: \n\n"
+agent = connect("http://localhost:8080/agent/coder")
 
-    async for event in turn.events():
-        if event.type == "text.delta":
-            yield f"event: chunk\ndata: {json.dumps(event.text)}\n\n"
-        elif event.type.startswith("reasoning."):
-            payload = {
-                "kind": event.event.kind,
-                "provider": event.event.provider,
-                "text": event.event.text,
-                "data": event.event.data,
-            }
-            yield f"event: reasoning\ndata: {json.dumps(payload)}\n\n"
-        elif event.type in {
-            "tool_call.started",
-            "tool_call.delta",
-            "tool_call.ready",
-            "tool_execution.started",
-            "tool_execution.finished",
-            "tool_result",
-        }:
-            payload = {"type": event.type, "step": event.step_number, "index": event.index}
-            yield f"event: tool\ndata: {json.dumps(payload)}\n\n"
-        elif event.type == "step.started":
-            payload = {"step": event.step_number}
-            yield f"event: status\ndata: {json.dumps(payload)}\n\n"
-        elif event.type == "turn.finished":
-            yield f"event: end\ndata: {json.dumps(event.result.text)}\n\n"
+async for event in agent.events("Fix the failing test"):
+    if event.type == "text.delta":
+        print(event.text, end="", flush=True)
+    elif event.type == "tool_execution.finished":
+        print(event.tool_call.name, event.duration)
 ```
 
 ## CLI Example

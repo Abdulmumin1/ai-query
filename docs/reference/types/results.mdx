@@ -223,6 +223,9 @@ class TurnTermination:
 | `aborted` | An abort signal stopped the operation. |
 | `failed` | A provider, hook, tool-loop, or runtime exception escaped. |
 
+`final_step_number` is the last attempted model step. It is `0` when the
+operation stops before the first provider call.
+
 Successful operations expose this object on `GenerateTextResult`,
 `StreamFinishedEvent`, `TextStreamResult.termination`, and `TurnResult`.
 `AbortError` and ordinary exceptions expose a `termination` attribute when the

@@ -25,6 +25,13 @@ class _ErrorAgent:
         yield "unreachable"
 
 
+class _EventModeAgent:
+    id = "fastapi-events"
+
+    async def handle_request_stream(self, request):
+        yield f"event: request\ndata: {json.dumps(request)}\n\n"
+
+
 @pytest.mark.asyncio
 async def test_fastapi_stream_generator_sends_keepalive_while_idle(monkeypatch):
     """FastAPI streaming chat should keep SSE connections alive while idle."""
@@ -56,3 +63,27 @@ async def test_fastapi_stream_generator_sends_json_error_and_logs_traceback(capl
     )
     assert "Streaming chat failed for agent fastapi-error" in caplog.text
     assert "Traceback" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_fastapi_stream_generator_passes_typed_event_mode_and_request_data():
+    router = object.__new__(fastapi_adapter.AgentRouter)
+    expected_request = {
+        "message": "Hi",
+        "metadata": {"source": "test"},
+        "action": "chat",
+        "stream": "events",
+    }
+
+    stream = router._stream_generator(
+        _EventModeAgent(),
+        "Hi",
+        stream_mode="events",
+        request_data={"message": "Hi", "metadata": {"source": "test"}},
+    )
+
+    assert await anext(stream) == (
+        "event: request\ndata: "
+        f"{json.dumps(expected_request)}"
+        "\n\n"
+    )
