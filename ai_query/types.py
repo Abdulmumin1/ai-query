@@ -503,12 +503,96 @@ class StepResult:
     usage: Union["Usage", None] = None
 
 
-StopCondition = Callable[[list[StepResult]], Union[bool, Awaitable[bool]]]
+TurnTerminationKind = Literal[
+    "completed",
+    "stop_condition",
+    "step_limit",
+    "hook_stop",
+    "tool_terminated",
+    "aborted",
+    "failed",
+]
+
+
+@dataclass(frozen=True)
+class TurnTermination:
+    kind: TurnTerminationKind
+    provider_finish_reason: Union[str, None] = None
+    reason: Union[str, None] = None
+    stop_condition: Union[str, None] = None
+    tool_name: Union[str, None] = None
+    final_step_number: int = 0
+    has_text: bool = False
+    has_tool_calls: bool = False
+    last_tool_error: Union[str, None] = None
+    error_type: Union[str, None] = None
+    message: Union[str, None] = None
+
+
+def build_turn_termination(
+    kind: TurnTerminationKind,
+    *,
+    steps: list[StepResult],
+    text: str = "",
+    provider_finish_reason: Union[str, None] = None,
+    reason: Union[str, None] = None,
+    stop_condition: Union[str, None] = None,
+    tool_name: Union[str, None] = None,
+    final_step_number: Union[int, None] = None,
+    has_tool_calls: Union[bool, None] = None,
+    error_type: Union[str, None] = None,
+    message: Union[str, None] = None,
+) -> TurnTermination:
+    last_tool_error = None
+    for step in reversed(steps):
+        for result in reversed(step.tool_results):
+            if result.is_error:
+                last_tool_error = str(result.result)
+                break
+        if last_tool_error is not None:
+            break
+
+    return TurnTermination(
+        kind=kind,
+        provider_finish_reason=provider_finish_reason,
+        reason=reason,
+        stop_condition=stop_condition,
+        tool_name=tool_name,
+        final_step_number=(
+            len(steps) if final_step_number is None else final_step_number
+        ),
+        has_text=bool(text.strip()),
+        has_tool_calls=(
+            any(step.tool_calls for step in steps)
+            if has_tool_calls is None
+            else has_tool_calls
+        ),
+        last_tool_error=last_tool_error,
+        error_type=error_type,
+        message=message,
+    )
+
+
+@dataclass(frozen=True)
+class StopDecision:
+    stop: bool = True
+    name: Union[str, None] = None
+    reason: Union[str, None] = None
+
+
+StopConditionResult = Union[bool, StopDecision]
+StopCondition = Callable[
+    [list[StepResult]],
+    Union[StopConditionResult, Awaitable[StopConditionResult]],
+]
 
 
 def step_count_is(count: int) -> StopCondition:
     def condition(steps: list[StepResult]) -> bool:
         return len(steps) >= count
+    condition._ai_query_termination_kind = "step_limit"  # type: ignore[attr-defined]
+    condition._ai_query_stop_name = f"step_count_is({count})"  # type: ignore[attr-defined]
+    condition._ai_query_stop_reason = f"Reached the step limit of {count}"  # type: ignore[attr-defined]
     return condition
 
 
@@ -518,6 +602,9 @@ def has_tool_call(tool_name: str) -> StopCondition:
             return False
         last_step = steps[-1]
         return any(tc.name == tool_name for tc in last_step.tool_calls)
+    condition._ai_query_termination_kind = "stop_condition"  # type: ignore[attr-defined]
+    condition._ai_query_stop_name = f"has_tool_call({tool_name!r})"  # type: ignore[attr-defined]
+    condition._ai_query_stop_reason = f"Matched tool call {tool_name!r}"  # type: ignore[attr-defined]
     return condition
 
 
@@ -537,6 +624,7 @@ class StepStartEvent:
 class StepControl:
     inject_messages: list["Message"] = field(default_factory=list)
     stop: bool = False
+    stop_reason: Union[str, None] = None
 
 
 @dataclass
@@ -599,6 +687,7 @@ class AfterToolCallResult:
     result: Any | None = None
     is_error: bool | None = None
     terminate: bool | None = None
+    terminate_reason: str | None = None
 
 
 OnBeforeToolCall = Callable[
@@ -799,6 +888,7 @@ class GenerateTextResult:
     usage: Union[Usage, None] = None
     response: dict[str, Any] = field(default_factory=dict)
     provider_metadata: dict[str, Any] = field(default_factory=dict)
+    termination: Union[TurnTermination, None] = None
 
     @property
     def tool_calls(self) -> list[ToolCall]:
@@ -969,6 +1059,7 @@ class StreamFinishedEvent:
     finish_reason: Union[str, None]
     usage: Union[Usage, None]
     steps: list[StepResult]
+    termination: Union[TurnTermination, None] = None
 
 
 TextStreamEvent = Union[
@@ -997,6 +1088,7 @@ class TextStreamResult:
         self._chunks: list[str] = []
         self._usage: Union[Usage, None] = None
         self._finish_reason: Union[str, None] = None
+        self._termination: Union[TurnTermination, None] = None
         self._steps: list[StepResult] = steps if steps is not None else []
         self._done = False
         self._error: BaseException | None = None
@@ -1009,6 +1101,7 @@ class TextStreamResult:
         elif isinstance(event, StreamFinishedEvent):
             self._usage = event.usage
             self._finish_reason = event.finish_reason
+            self._termination = event.termination
 
     async def _iterate_events(self) -> AsyncIterator[TextStreamEvent]:
         index = 0
@@ -1071,6 +1164,11 @@ class TextStreamResult:
         return self._finish_reason
 
     @property
+    async def termination(self) -> Union[TurnTermination, None]:
+        await self._wait_for_completion()
+        return self._termination
+
+    @property
     async def steps(self) -> list[StepResult]:
         await self._wait_for_completion()
         return self._steps
@@ -1122,6 +1220,7 @@ class EmbedManyResult:
 class AbortError(Exception):
     def __init__(self, reason: Union[str, None] = None):
         self.reason = reason
+        self.termination: Union[TurnTermination, None] = None
         super().__init__(reason or "Operation aborted")
 
 

@@ -131,6 +131,10 @@ Properties:
   Finish reason after the stream completes.
 </ResponseField>
 
+<ResponseField name="termination" type="Awaitable[TurnTermination | None]">
+  Framework-level reason the model/tool loop ended.
+</ResponseField>
+
 <ResponseField name="steps" type="Awaitable[list[StepResult]]">
   Step history after the stream completes.
 </ResponseField>
@@ -152,7 +156,7 @@ event-specific fields.
 | `tool_execution.finished` | `ToolExecutionFinishedEvent` | `step_number`, `index`, `tool_call`, `tool_result`, `duration`, `error`, `aborted` |
 | `tool_result` | `ToolResultEvent` | `step_number`, `index`, `tool_call`, `tool_result` |
 | `step.finished` | `StreamStepFinishedEvent` | `step_number`, `step`, `text`, `usage`, `steps` |
-| `stream.finished` | `StreamFinishedEvent` | `text`, `finish_reason`, `usage`, `steps` |
+| `stream.finished` | `StreamFinishedEvent` | `text`, `finish_reason`, `usage`, `steps`, `termination` |
 
 The `reasoning.*` discriminator preserves the underlying `ReasoningEvent.kind`:
 `summary`, `delta`, `signature`, or `state`. Treat `reasoning.summary` and

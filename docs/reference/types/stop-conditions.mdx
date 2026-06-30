@@ -8,10 +8,25 @@ Stop conditions determine when the agent's tool execution loop should stop. Use 
 ## StopCondition Type
 
 ```python
-StopCondition = Callable[[StepResult], bool]
+StopCondition = Callable[
+    [list[StepResult]],
+    bool | StopDecision | Awaitable[bool | StopDecision],
+]
 ```
 
-A stop condition is a function that receives the current step result and returns `True` to stop the loop, or `False` to continue.
+A stop condition receives all completed steps and returns `True` to stop,
+`False` to continue, or a named `StopDecision`.
+
+```python
+@dataclass(frozen=True)
+class StopDecision:
+    stop: bool = True
+    name: str | None = None
+    reason: str | None = None
+```
+
+Returning booleans remains fully supported. Return `StopDecision` when product
+code needs a stable condition name and reason in `result.termination`.
 
 ## Built-in Stop Conditions
 
@@ -94,16 +109,22 @@ result = await generate_text(
 You can create custom stop conditions by defining a function that matches the `StopCondition` signature:
 
 ```python
-from ai_query import generate_text
+from ai_query import StopDecision, generate_text
 from ai_query.providers import google
 from ai_query.types import StepResult
 
-def stop_on_error(step: StepResult) -> bool:
+def stop_on_error(steps: list[StepResult]) -> StopDecision:
     """Stop if any tool result contains an error."""
-    for result in step.tool_results:
-        if "error" in result.result.lower():
-            return True
-    return False
+    has_error = any(
+        result.is_error
+        for step in steps
+        for result in step.tool_results
+    )
+    return StopDecision(
+        stop=has_error,
+        name="tool_error",
+        reason="A tool returned an error",
+    )
 
 result = await generate_text(
     model=google("gemini-2.0-flash"),
@@ -120,18 +141,14 @@ Create compound stop conditions:
 ```python
 def stop_on_finish_or_max_steps(max_steps: int, finish_tool: str):
     """Stop on finish tool OR after max steps."""
-    step_counter = [0]  # Use list for mutable closure
-
-    def condition(step: StepResult) -> bool:
-        step_counter[0] += 1
-
+    def condition(steps: list[StepResult]) -> bool:
         # Check if finish tool was called
-        for call in step.tool_calls:
+        for call in steps[-1].tool_calls:
             if call.name == finish_tool:
                 return True
 
         # Check step count
-        return step_counter[0] >= max_steps
+        return len(steps) >= max_steps
 
     return condition
 

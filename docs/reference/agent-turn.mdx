@@ -258,6 +258,7 @@ class TurnResult:
     started_at: float
     ended_at: float
     output_message: Message
+    termination: TurnTermination | None = None
 ```
 
 ## TurnEvent
@@ -371,7 +372,12 @@ class TurnFinished:
 class TurnFailed:
     type: Literal["turn.failed"]
     error: str
+    termination: TurnTermination | None = None
 ```
+
+`TurnResult.termination` and `TurnFailed.termination` expose the same structured
+diagnostic used by core generation and streaming. Aborted and failed turns also
+attach it to the exception raised by `result()`.
 
 ## Example
 

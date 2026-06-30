@@ -125,6 +125,11 @@ Fields:
   Additional provider metadata.
 </ResponseField>
 
+<ResponseField name="termination" type="TurnTermination | None">
+  Structured framework-level reason the loop ended. Inspect this instead of
+  inferring step limits, hook stops, or tool termination from empty text.
+</ResponseField>
+
 Computed properties:
 
 <ResponseField name="tool_calls" type="list[ToolCall]">
@@ -142,7 +147,8 @@ Computed properties:
 </ResponseField>
 
 <ResponseField name="AbortError" type="Exception">
-  Raised when `signal` is aborted.
+  Raised when `signal` is aborted. The exception carries `termination` when the
+  runtime can attach structured diagnostics.
 </ResponseField>
 
 <ResponseField name="RuntimeError" type="Exception">
