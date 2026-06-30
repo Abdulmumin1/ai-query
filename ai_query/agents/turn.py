@@ -123,6 +123,8 @@ class TurnFinished:
 class TurnFailed:
     type: Literal["turn.failed"]
     error: str
+    error_type: str | None = None
+    aborted: bool = False
 
 
 TurnEvent = (
@@ -369,11 +371,20 @@ class AgentTurn:
             self._result = turn_result
             await self._put_event(TurnFinished(type="turn.finished", result=turn_result))
             return turn_result
-        except AbortError:
-            await self._put_event(TurnFailed(type="turn.failed", error=signal.reason or "Operation aborted"))
+        except AbortError as exc:
+            await self._put_event(TurnFailed(
+                type="turn.failed",
+                error=signal.reason or "Operation aborted",
+                error_type=type(exc).__name__,
+                aborted=True,
+            ))
             raise
         except Exception as exc:
-            await self._put_event(TurnFailed(type="turn.failed", error=str(exc)))
+            await self._put_event(TurnFailed(
+                type="turn.failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            ))
             raise
         finally:
             self._done = True

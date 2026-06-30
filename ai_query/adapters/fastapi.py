@@ -114,9 +114,15 @@ class AgentRouter(APIRouter):
             raise HTTPException(status_code=400, detail="Missing 'message'")
             
         # Check for streaming
-        if request.query_params.get("stream", "").lower() == "true":
+        stream_mode = request.query_params.get("stream", "").lower()
+        if stream_mode in {"true", "events"}:
             return StreamingResponse(
-                self._stream_generator(agent, message),
+                self._stream_generator(
+                    agent,
+                    message,
+                    stream_mode=stream_mode,
+                    request_data=body,
+                ),
                 media_type="text/event-stream"
             )
             
@@ -126,8 +132,21 @@ class AgentRouter(APIRouter):
         })
         return JSONResponse(result)
 
-    async def _stream_generator(self, agent: "Agent", message: str) -> Any:
-        stream_req = {"action": "chat", "message": message}
+    async def _stream_generator(
+        self,
+        agent: "Agent",
+        message: str,
+        *,
+        stream_mode: str = "true",
+        request_data: dict[str, Any] | None = None,
+    ) -> Any:
+        stream_req = {
+            **(request_data or {}),
+            "action": "chat",
+            "message": message,
+        }
+        if stream_mode == "events":
+            stream_req["stream"] = "events"
         iterator = agent.handle_request_stream(stream_req).__aiter__()
         next_chunk = asyncio.create_task(iterator.__anext__())
 

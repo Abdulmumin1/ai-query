@@ -312,7 +312,8 @@ class ServerHandlers:
             raise web.HTTPBadRequest(text="Missing 'message'")
 
         # Streaming check
-        if request.query.get("stream", "").lower() == "true":
+        stream_mode = request.query.get("stream", "").lower()
+        if stream_mode in {"true", "events"}:
             response = web.StreamResponse(headers={
                 "Content-Type": "text/event-stream",
                 "Cache-Control": "no-cache",
@@ -327,6 +328,8 @@ class ServerHandlers:
                 "message": message,
                 "payload": body.get("payload", {}),
             }
+            if stream_mode == "events":
+                stream_req["stream"] = "events"
             try:
                 await self._write_sse_stream_with_keepalives(
                     response,

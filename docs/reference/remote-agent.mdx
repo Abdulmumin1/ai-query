@@ -124,7 +124,7 @@ Send a chat message to the remote agent.
 </ParamField>
 
 <ParamField path="signal" type="AbortSignal | None" default="None">
-  Optional abort signal to cancel the request (not yet implemented).
+  Optional abort signal to cancel the request.
 </ParamField>
 
 #### Returns
@@ -167,7 +167,7 @@ Stream a response from the remote agent, yielding chunks as they're generated.
 </ParamField>
 
 <ParamField path="signal" type="AbortSignal | None" default="None">
-  Optional abort signal (not yet implemented).
+  Optional abort signal.
 </ParamField>
 
 #### Returns
@@ -193,6 +193,37 @@ async for chunk in agent.stream("Summarize quantum computing"):
     full_response += chunk
 print(f"Full response: {full_response}")
 ```
+
+---
+
+### events
+
+```python
+async def events(
+    self,
+    message: str,
+    *,
+    signal: AbortSignal | None = None
+) -> AsyncIterator[TurnEvent]
+```
+
+Start a remote turn using the server's `?stream=events` mode and reconstruct
+each JSON payload into its public Python event dataclass.
+
+```python
+agent = connect("https://api.myapp.com/agent/researcher")
+
+async for event in agent.events("Research prompt caching"):
+    if event.type == "reasoning.delta":
+        print(event.event.kind, event.event.text)
+    elif event.type == "tool_call.delta":
+        print(event.arguments_delta, end="")
+    elif event.type == "turn.finished":
+        print(event.result.usage)
+```
+
+`turn.failed` is yielded as a typed terminal event. HTTP failures, malformed
+wire payloads, and `event: error` frames raise an exception from the iterator.
 
 ---
 

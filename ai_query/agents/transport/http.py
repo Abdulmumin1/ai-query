@@ -13,6 +13,7 @@ from ai_query.transport.tls import certifi_ca_bundle
 from .base import AgentTransport
 
 if TYPE_CHECKING:
+    from ai_query.agents.turn import TurnEvent
     from ai_query.types import AbortSignal
 
 
@@ -66,6 +67,47 @@ class HTTPTransport(AgentTransport):
         if agent_id.startswith("http"):
             return agent_id
         raise ValueError("No base_url provided and agent_id is not a URL")
+
+    def _get_chat_stream_url(self, agent_id: str, mode: str) -> str:
+        return f"{self._get_url(agent_id)}/chat?stream={mode}"
+
+    @staticmethod
+    async def _iter_sse(response: httpx.Response) -> AsyncIterator[tuple[str | None, str]]:
+        event_name: str | None = None
+        data_lines: list[str] = []
+
+        async for line in response.aiter_lines():
+            if not line:
+                if event_name is not None or data_lines:
+                    yield event_name, "\n".join(data_lines)
+                event_name = None
+                data_lines = []
+                continue
+
+            if line.startswith(":"):
+                continue
+            if line.startswith("event:"):
+                event_name = line[6:].lstrip()
+            elif line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+
+        if event_name is not None or data_lines:
+            yield event_name, "\n".join(data_lines)
+
+    @staticmethod
+    def _stream_error(data: str) -> RuntimeError:
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            return RuntimeError(f"Stream error: {data}")
+
+        if isinstance(payload, dict):
+            message = payload.get("error", payload)
+            error_type = payload.get("type")
+            if error_type:
+                return RuntimeError(f"Stream error ({error_type}): {message}")
+            return RuntimeError(f"Stream error: {message}")
+        return RuntimeError(f"Stream error: {payload}")
 
     async def invoke(
         self,
@@ -171,10 +213,10 @@ class HTTPTransport(AgentTransport):
     ) -> AsyncIterator[str]:
         """Stream a chat response from a remote agent via SSE (POST)."""
         client = await self._get_client()
-        url = self._get_url(agent_id)
+        url = self._get_chat_stream_url(agent_id, "true")
 
         # Wire Protocol: Streaming Request via POST
-        request_body = {"action": "chat", "message": message, "stream": True}
+        request_body = {"action": "chat", "message": message}
 
         try:
             async with client.stream(
@@ -190,36 +232,73 @@ class HTTPTransport(AgentTransport):
                 if signal:
                     signal.add_listener(lambda: asyncio.create_task(response.aclose()))
 
-                current_event = None
-                async for line in response.aiter_lines():
+                async for current_event, data_str in self._iter_sse(response):
                     if signal:
                         signal.throw_if_aborted()
 
-                    if not line.strip():
-                        # Empty line marks end of SSE event
-                        current_event = None
+                    # Only yield chunks, not start/end events.
+                    if current_event == "chunk" and data_str:
+                        try:
+                            chunk = json.loads(data_str)
+                            if isinstance(chunk, str):
+                                yield chunk
+                        except json.JSONDecodeError:
+                            yield data_str
+                    elif current_event == "error":
+                        raise self._stream_error(data_str)
+        except asyncio.CancelledError:
+            if signal and signal.aborted:
+                raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")
+            raise
+
+    async def stream_events(
+        self,
+        agent_id: str,
+        message: str,
+        timeout: float = 30.0,
+        signal: Union["AbortSignal", None] = None,
+    ) -> AsyncIterator["TurnEvent"]:
+        """Stream and reconstruct typed AgentTurn events over SSE."""
+        from ai_query.agents.turn_codec import turn_event_from_dict
+
+        client = await self._get_client()
+        url = self._get_chat_stream_url(agent_id, "events")
+        request_body = {"action": "chat", "message": message}
+
+        try:
+            async with client.stream(
+                "POST",
+                url,
+                json=request_body,
+                headers={"Accept": "text/event-stream"},
+                timeout=timeout,
+            ) as response:
+                response.raise_for_status()
+
+                if signal:
+                    signal.add_listener(lambda: asyncio.create_task(response.aclose()))
+
+                async for event_name, data_str in self._iter_sse(response):
+                    if signal:
+                        signal.throw_if_aborted()
+                    if event_name == "error":
+                        raise self._stream_error(data_str)
+                    if not data_str:
                         continue
 
-                    if line.startswith("event: "):
-                        current_event = line[7:].strip()
-                    elif line.startswith("data: "):
-                        data_str = line[6:]
-                        # Only yield chunks, not start/end/error events
-                        if current_event == "chunk" and data_str:
-                            try:
-                                # Decode JSON data
-                                chunk = json.loads(data_str)
-                                if isinstance(chunk, str):
-                                    yield chunk
-                            except json.JSONDecodeError:
-                                # Fallback: yield raw data if not valid JSON
-                                yield data_str
-                        elif current_event == "error":
-                            try:
-                                error_msg = json.loads(data_str)
-                                raise Exception(f"Stream error: {error_msg}")
-                            except json.JSONDecodeError:
-                                raise Exception(f"Stream error: {data_str}")
+                    try:
+                        payload = json.loads(data_str)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"Invalid JSON for remote turn event {event_name!r}"
+                        ) from exc
+                    event = turn_event_from_dict(payload)
+                    if event_name is not None and event_name != event.type:
+                        raise ValueError(
+                            "SSE event name does not match turn event payload: "
+                            f"{event_name!r} != {event.type!r}"
+                        )
+                    yield event
         except asyncio.CancelledError:
             if signal and signal.aborted:
                 raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")

@@ -236,7 +236,7 @@ These are enabled when `enable_rest_api=True` (the default):
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `{base_path}/{id}` | Generic request handler |
-| POST | `{base_path}/{id}/chat` | Chat with the agent (supports `?stream=true`) |
+| POST | `{base_path}/{id}/chat` | Chat with the agent (supports `?stream=true` and `?stream=events`) |
 | POST | `{base_path}/{id}/invoke` | Invoke agent task |
 | GET | `{base_path}/{id}/state` | Get agent state |
 | PUT | `{base_path}/{id}/state` | Update agent state |
@@ -298,6 +298,38 @@ data: , in a land far away...
 event: end
 data: "Once upon a time, in a land far away..."
 ```
+
+**Typed Turn Events (`?stream=events`)**
+
+Use typed mode when the client needs the complete `AgentTurn.events()` stream:
+
+```bash
+curl -N -X POST "http://localhost:8080/agent/user-1/chat?stream=events" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Check the deployment"}'
+```
+
+The server emits one JSON object per SSE frame. `event:` always matches the
+payload's `type`:
+
+```text
+event: turn.started
+data: {"type":"turn.started","turn_id":"...","agent_id":"user-1","message":{"role":"user","content":"Check the deployment"},"created_at":...}
+
+event: text.delta
+data: {"type":"text.delta","text":"I found "}
+
+event: turn.finished
+data: {"type":"turn.finished","result":{"turn_id":"...","agent_id":"user-1","text":"I found ...","finish_reason":"stop","usage":{...},"steps":[...],"started_at":...,"ended_at":...,"output_message":{...}}}
+```
+
+The stream can also contain reasoning, retry, step, tool-call, tool-execution,
+and tool-result events. Failures terminate with `turn.failed`, including
+`error`, `error_type`, and `aborted`. Transport or serialization failures use a
+separate `event: error` frame.
+
+SSE comment frames such as `: keepalive` may appear while the turn is idle.
+Clients should ignore comment frames.
 
 **POST `{base_path}/{id}/invoke`**
 
