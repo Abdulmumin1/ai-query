@@ -23,8 +23,10 @@ from ai_query.types import (
     TextPart,
     ImagePart,
     FilePart,
+    ToolOutput,
 )
 from ai_query.model import LanguageModel
+from ai_query.providers.tool_output import anthropic_tool_result_content
 
 
 # Cached provider instance
@@ -212,7 +214,7 @@ class AnthropicProvider(BaseProvider):
                                     image_data,
                                     media_type,
                                 ) = await self._fetch_resource_as_base64(
-                                    image_data, session
+                                    image_data
                                 )
                             elif isinstance(image_data, bytes):
                                 import base64
@@ -241,7 +243,7 @@ class AnthropicProvider(BaseProvider):
                                     file_data,
                                     fetched_type,
                                 ) = await self._fetch_resource_as_base64(
-                                    file_data, session
+                                    file_data
                                 )
                                 if not media_type:
                                     media_type = fetched_type
@@ -274,11 +276,18 @@ class AnthropicProvider(BaseProvider):
                         elif part.get("type") == "tool_result":
                             tr = part.get("tool_result")
                             if tr:
+                                tool_content = (
+                                    await anthropic_tool_result_content(
+                                        tr.result, self._fetch_resource_as_base64
+                                    )
+                                    if isinstance(tr.result, ToolOutput)
+                                    else str(tr.result)
+                                )
                                 content_parts.append(
                                     {
                                         "type": "tool_result",
                                         "tool_use_id": tr.tool_call_id,
-                                        "content": str(tr.result),
+                                        "content": tool_content,
                                         "is_error": tr.is_error,
                                     }
                                 )
@@ -370,11 +379,18 @@ class AnthropicProvider(BaseProvider):
                     elif isinstance(part, ToolResultPart):
                         tr = part.tool_result
                         if tr:
+                            tool_content = (
+                                await anthropic_tool_result_content(
+                                    tr.result, self._fetch_resource_as_base64
+                                )
+                                if isinstance(tr.result, ToolOutput)
+                                else str(tr.result)
+                            )
                             content_parts.append(
                                 {
                                     "type": "tool_result",
                                     "tool_use_id": tr.tool_call_id,
-                                    "content": str(tr.result),
+                                    "content": tool_content,
                                     "is_error": tr.is_error,
                                 }
                             )

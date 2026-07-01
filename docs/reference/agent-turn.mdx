@@ -394,7 +394,8 @@ matching event dataclass.
 
 The stock AgentServer uses this codec for `POST /agent/{id}/chat?stream=events`.
 Byte content is represented with an ai-query wire marker and restored as
-`bytes`. Other tool result values must be JSON-compatible. Structured
+`bytes`. `ToolOutput` image and file bytes use the same JSON-safe round trip.
+Other tool result values must be JSON-compatible. Structured
 termination diagnostics round-trip on both `turn.finished` and `turn.failed`.
 
 ## Example

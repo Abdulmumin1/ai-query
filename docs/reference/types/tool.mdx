@@ -195,8 +195,26 @@ Result from tool execution:
 @dataclass
 class ToolResult:
     tool_call_id: str  # Matches ToolCall.id
-    result: str        # The result string
+    tool_name: str
+    result: Any
+    is_error: bool = False
 ```
+
+For multimodal results, set `result` to `ToolOutput`:
+
+```python
+from ai_query import FilePart, ImagePart, TextPart, ToolOutput
+
+ToolOutput(content=[
+    TextPart(text="Inspection complete"),
+    ImagePart(image=image_bytes, media_type="image/png"),
+    FilePart(data=pdf_bytes, media_type="application/pdf", filename="report.pdf"),
+])
+```
+
+`ToolOutput.content` accepts only `TextPart`, `ImagePart`, and `FilePart`.
+Provider adapters normalize these parts to supported upstream formats and raise
+`UnsupportedToolOutputError` when lossless conversion is unavailable.
 
 ## Accessing Tool Calls
 

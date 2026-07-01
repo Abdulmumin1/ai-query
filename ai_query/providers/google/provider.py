@@ -17,16 +17,20 @@ from ai_query.types import (
     StreamChunk,
     ToolSet,
     ToolCall,
-    ToolCallPart,
-    ToolResultPart,
     EmbedResult,
     EmbedManyResult,
     EmbeddingUsage,
     TextPart,
     ImagePart,
     FilePart,
+    ToolOutput,
 )
 from ai_query.model import LanguageModel, EmbeddingModel
+from ai_query.providers.tool_output import (
+    google_function_response,
+    google_supports_multimodal_tool_output,
+    unsupported,
+)
 
 
 # Cached provider instance
@@ -172,7 +176,7 @@ class GoogleProvider(BaseProvider):
         return updated
 
     async def _convert_messages(
-        self, messages: list[Message]
+        self, messages: list[Message], *, model: str | None = None
     ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Message objects to Google format.
 
@@ -284,13 +288,26 @@ class GoogleProvider(BaseProvider):
                         # ToolResultPart - convert to functionResponse
                         tr = part.tool_result
                         if tr:
+                            if isinstance(tr.result, ToolOutput):
+                                if (
+                                    model is None
+                                    or not google_supports_multimodal_tool_output(model)
+                                ):
+                                    raise unsupported(self.name, model or "unknown model")
+                                function_result = await google_function_response(
+                                    tr.result, self._fetch_resource_as_base64
+                                )
+                            else:
+                                function_result = {
+                                    "response": tr.result
+                                    if isinstance(tr.result, dict)
+                                    else {"result": tr.result}
+                                }
                             parts.append(
                                 {
                                     "functionResponse": {
                                         "name": tr.tool_name,
-                                        "response": tr.result
-                                        if isinstance(tr.result, dict)
-                                        else {"result": tr.result},
+                                        **function_result,
                                     }
                                 }
                             )
@@ -490,7 +507,9 @@ class GoogleProvider(BaseProvider):
         google_options = self.get_provider_options(provider_options)
 
         # Convert messages
-        system_instruction, contents = await self._convert_messages(messages)
+        system_instruction, contents = await self._convert_messages(
+            messages, model=model
+        )
 
         # Build request body
         request_body = self._build_request_body(
@@ -599,7 +618,9 @@ class GoogleProvider(BaseProvider):
         google_options = self.get_provider_options(provider_options)
 
         # Convert messages
-        system_instruction, contents = await self._convert_messages(messages)
+        system_instruction, contents = await self._convert_messages(
+            messages, model=model
+        )
 
         # Build request body
         request_body = self._build_request_body(
