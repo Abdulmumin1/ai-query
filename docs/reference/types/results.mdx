@@ -400,6 +400,10 @@ class ToolResult:
     is_error: bool = False
 ```
 
+`result` remains `Any` for backward compatibility. Tools returning rich text,
+image, or file content use `ToolOutput`; scalar and JSON-compatible results keep
+their existing behavior.
+
 ## See Also
 
 - [generate_text](/reference/generate-text)
