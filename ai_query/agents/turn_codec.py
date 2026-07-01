@@ -31,6 +31,7 @@ from ai_query.types import (
     ToolExecutionStartedEvent,
     ToolResult,
     ToolResultEvent,
+    TurnTermination,
     Usage,
 )
 
@@ -89,6 +90,46 @@ def _usage_from_dict(data: Any) -> Usage | None:
         output_tokens=data.get("output_tokens", 0),
         cached_tokens=data.get("cached_tokens", 0),
         total_tokens=data.get("total_tokens", 0),
+    )
+
+
+def _termination_to_dict(
+    termination: TurnTermination | None,
+) -> dict[str, Any] | None:
+    if termination is None:
+        return None
+    return {
+        "kind": termination.kind,
+        "provider_finish_reason": termination.provider_finish_reason,
+        "reason": termination.reason,
+        "stop_condition": termination.stop_condition,
+        "tool_name": termination.tool_name,
+        "final_step_number": termination.final_step_number,
+        "has_text": termination.has_text,
+        "has_tool_calls": termination.has_tool_calls,
+        "last_tool_error": termination.last_tool_error,
+        "error_type": termination.error_type,
+        "message": termination.message,
+    }
+
+
+def _termination_from_dict(data: Any) -> TurnTermination | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError("Turn termination must be an object or null")
+    return TurnTermination(
+        kind=data["kind"],
+        provider_finish_reason=data.get("provider_finish_reason"),
+        reason=data.get("reason"),
+        stop_condition=data.get("stop_condition"),
+        tool_name=data.get("tool_name"),
+        final_step_number=data.get("final_step_number", 0),
+        has_text=data.get("has_text", False),
+        has_tool_calls=data.get("has_tool_calls", False),
+        last_tool_error=data.get("last_tool_error"),
+        error_type=data.get("error_type"),
+        message=data.get("message"),
     )
 
 
@@ -221,6 +262,7 @@ def _turn_result_to_dict(result: TurnResult) -> dict[str, Any]:
         "started_at": result.started_at,
         "ended_at": result.ended_at,
         "output_message": _message_to_dict(result.output_message),
+        "termination": _termination_to_dict(result.termination),
     }
 
 
@@ -237,6 +279,7 @@ def _turn_result_from_dict(data: Any) -> TurnResult:
         started_at=data["started_at"],
         ended_at=data["ended_at"],
         output_message=_message_from_dict(data["output_message"]),
+        termination=_termination_from_dict(data.get("termination")),
     )
 
 
@@ -330,6 +373,7 @@ def turn_event_to_dict(event: TurnEvent) -> dict[str, Any]:
             "error": event.error,
             "error_type": event.error_type,
             "aborted": event.aborted,
+            "termination": _termination_to_dict(event.termination),
         }
     raise TypeError(f"Unsupported turn event type: {type(event).__name__}")
 
@@ -436,6 +480,7 @@ def turn_event_from_dict(data: dict[str, Any]) -> TurnEvent:
             error=data.get("error", "Remote turn failed"),
             error_type=data.get("error_type"),
             aborted=data.get("aborted", False),
+            termination=_termination_from_dict(data.get("termination")),
         )
     raise ValueError(f"Unknown turn event type: {event_type!r}")
 

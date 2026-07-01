@@ -28,6 +28,7 @@ from ai_query.types import (
     ToolExecutionStartedEvent,
     ToolResult,
     ToolResultEvent,
+    TurnTermination,
     Usage,
 )
 
@@ -61,6 +62,13 @@ def _sample_events():
     call = step.tool_calls[0]
     result = step.tool_results[0]
     usage = step.usage
+    completed_termination = TurnTermination(
+        kind="completed",
+        provider_finish_reason="stop",
+        final_step_number=1,
+        has_text=True,
+        has_tool_calls=True,
+    )
     turn_result = TurnResult(
         turn_id="turn_1",
         agent_id="agent_1",
@@ -74,6 +82,7 @@ def _sample_events():
             role="assistant",
             content=[ImagePart(image=b"image", media_type="image/png")],
         ),
+        termination=completed_termination,
     )
     return [
         TurnStarted(
@@ -144,6 +153,12 @@ def _sample_events():
             error="aborted",
             error_type="AbortError",
             aborted=True,
+            termination=TurnTermination(
+                kind="aborted",
+                reason="aborted",
+                error_type="AbortError",
+                message="aborted",
+            ),
         ),
     ]
 

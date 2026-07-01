@@ -35,7 +35,9 @@ from ai_query.types import (
     ToolExecutionFinishedEvent,
     ToolExecutionStartedEvent,
     ToolResultEvent,
+    TurnTermination,
     Usage,
+    build_turn_termination,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +68,7 @@ class TurnResult:
     started_at: float
     ended_at: float
     output_message: Message
+    termination: TurnTermination | None = None
 
 
 @dataclass
@@ -125,6 +128,7 @@ class TurnFailed:
     error: str
     error_type: str | None = None
     aborted: bool = False
+    termination: TurnTermination | None = None
 
 
 TurnEvent = (
@@ -231,6 +235,7 @@ class AgentTurn:
         self._started_at = time.time()
         full_response = ""
         persisted_step_count = 0
+        observed_steps: list[StepResult] = []
         external_signal = self.options.signal
         signal = self._controller.signal
 
@@ -271,10 +276,12 @@ class AgentTurn:
             return StepControl(
                 inject_messages=(hook_control.inject_messages if hook_control else []) + injected,
                 stop=bool(hook_control.stop) if hook_control else False,
+                stop_reason=hook_control.stop_reason if hook_control else None,
             )
 
         async def on_step_finish(event: StepFinishEvent) -> None:
             nonlocal persisted_step_count
+            observed_steps.append(event.step)
             self.agent._append_step_message(event.step)
             await self.agent._persist_messages()
             persisted_step_count += 1
@@ -367,23 +374,49 @@ class AgentTurn:
                 started_at=self._started_at,
                 ended_at=time.time(),
                 output_message=output_message,
+                termination=await result.termination,
             )
             self._result = turn_result
             await self._put_event(TurnFinished(type="turn.finished", result=turn_result))
             return turn_result
         except AbortError as exc:
+            abort_reason = exc.reason or signal.reason
+            termination = exc.termination or build_turn_termination(
+                "aborted",
+                steps=observed_steps,
+                text=full_response,
+                reason=abort_reason,
+                final_step_number=persisted_step_count,
+                error_type=type(exc).__name__,
+                message=abort_reason or "Operation aborted",
+            )
+            exc.termination = termination
             await self._put_event(TurnFailed(
                 type="turn.failed",
-                error=signal.reason or "Operation aborted",
+                error=abort_reason or "Operation aborted",
                 error_type=type(exc).__name__,
                 aborted=True,
+                termination=termination,
             ))
             raise
         except Exception as exc:
+            termination = getattr(exc, "termination", None) or build_turn_termination(
+                "failed",
+                steps=observed_steps,
+                text=full_response,
+                final_step_number=persisted_step_count,
+                error_type=type(exc).__name__,
+                message=str(exc) or type(exc).__name__,
+            )
+            try:
+                setattr(exc, "termination", termination)
+            except Exception:
+                pass
             await self._put_event(TurnFailed(
                 type="turn.failed",
                 error=str(exc),
                 error_type=type(exc).__name__,
+                termination=termination,
             ))
             raise
         finally:

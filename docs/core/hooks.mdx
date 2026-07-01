@@ -89,6 +89,11 @@ from ai_query.types import Message
 
 
 async def before_step(ctx):
+    if maintenance_mode:
+        return StepControl(
+            stop=True,
+            stop_reason="Agent is in maintenance mode",
+        )
     if ctx.step_number == 2:
         return StepControl(
             inject_messages=[
@@ -149,6 +154,11 @@ from ai_query.agents import AfterToolCallResult
 async def after_tool_call(ctx):
     if ctx.event.tool_call.name == "search_docs":
         return AfterToolCallResult(result="sanitized result")
+    if ctx.event.tool_call.name == "finish":
+        return AfterToolCallResult(
+            terminate=True,
+            terminate_reason="Finish tool completed the workflow",
+        )
     return None
 ```
 

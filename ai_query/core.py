@@ -42,6 +42,10 @@ from ai_query.types import (
     ToolResult,
     StepResult,
     StopCondition,
+    StopDecision,
+    TurnTermination,
+    TurnTerminationKind,
+    build_turn_termination,
     step_count_is,
     BeforeToolCallEvent,
     AfterToolCallEvent,
@@ -67,6 +71,97 @@ from ai_query.model import LanguageModel, EmbeddingModel
 
 
 _RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+async def _match_stop_condition(
+    stop_conditions: list[StopCondition],
+    steps: list[StepResult],
+) -> tuple[TurnTerminationKind, str | None, str | None] | None:
+    for condition in stop_conditions:
+        raw_result = condition(steps)
+        if inspect.isawaitable(raw_result):
+            raw_result = await raw_result
+
+        if isinstance(raw_result, StopDecision):
+            if not raw_result.stop:
+                continue
+            name = raw_result.name
+            reason = raw_result.reason
+        elif raw_result:
+            name = None
+            reason = None
+        else:
+            continue
+
+        return (
+            getattr(condition, "_ai_query_termination_kind", "stop_condition"),
+            name
+            or getattr(condition, "_ai_query_stop_name", None)
+            or getattr(condition, "__name__", type(condition).__name__),
+            reason or getattr(condition, "_ai_query_stop_reason", None),
+        )
+    return None
+
+
+def _termination_for_exception(
+    exc: BaseException,
+    *,
+    steps: list[StepResult],
+    text: str,
+    final_step_number: int,
+    has_tool_calls: bool | None = None,
+) -> TurnTermination:
+    is_abort = isinstance(exc, AbortError)
+    reason = exc.reason if is_abort else None
+    termination = build_turn_termination(
+        "aborted" if is_abort else "failed",
+        steps=steps,
+        text=text,
+        provider_finish_reason=steps[-1].finish_reason if steps else None,
+        reason=reason,
+        final_step_number=final_step_number,
+        has_tool_calls=has_tool_calls,
+        error_type=type(exc).__name__,
+        message=str(exc) or type(exc).__name__,
+    )
+    try:
+        setattr(exc, "termination", termination)
+    except Exception:
+        pass
+    return termination
+
+
+def _termination_from_stop(
+    *,
+    tool_termination: StopDecision | None,
+    stop_match: tuple[TurnTerminationKind, str | None, str | None] | None,
+    steps: list[StepResult],
+    text: str,
+    provider_finish_reason: str | None,
+) -> TurnTermination | None:
+    if tool_termination is not None:
+        return build_turn_termination(
+            "tool_terminated",
+            steps=steps,
+            text=text,
+            provider_finish_reason=provider_finish_reason,
+            reason=tool_termination.reason,
+            tool_name=tool_termination.name,
+            message=tool_termination.reason,
+        )
+    if stop_match is None:
+        return None
+
+    kind, condition_name, reason = stop_match
+    return build_turn_termination(
+        kind,
+        steps=steps,
+        text=text,
+        provider_finish_reason=provider_finish_reason,
+        reason=reason,
+        stop_condition=condition_name,
+        message=reason,
+    )
 
 
 def _copy_usage(usage: Usage) -> Usage:
@@ -288,7 +383,7 @@ async def _execute_tool_calls(
     after_tool_call: OnAfterToolCall | None,
     signal: AbortSignal | None,
     publish_tool_event: Callable[[TextStreamEvent], Awaitable[None]] | None = None,
-) -> tuple[list[ToolResult], bool]:
+) -> tuple[list[ToolResult], StopDecision | None]:
     ordered_results: list[ToolResult | None] = []
     runnable_tools: list[tuple[int, ToolCall, Any]] = []
 
@@ -344,7 +439,7 @@ async def _execute_tool_calls(
         for (index, _, _), tool_result in zip(runnable_tools, tool_results):
             ordered_results[index] = tool_result
 
-    should_terminate_after_step = False
+    termination_decision = None
     final_results: list[ToolResult] = []
     for index, (tool_call, tool_result) in enumerate(zip(tool_calls, ordered_results)):
         if tool_result is None:
@@ -365,8 +460,11 @@ async def _execute_tool_calls(
                     tool_result.result = after_result.result
                 if after_result.is_error is not None:
                     tool_result.is_error = after_result.is_error
-                if after_result.terminate:
-                    should_terminate_after_step = True
+                if after_result.terminate and termination_decision is None:
+                    termination_decision = StopDecision(
+                        name=tool_call.name,
+                        reason=after_result.terminate_reason,
+                    )
 
         if publish_tool_event:
             await publish_tool_event(ToolResultEvent(
@@ -379,7 +477,7 @@ async def _execute_tool_calls(
 
         final_results.append(tool_result)
 
-    return final_results, should_terminate_after_step
+    return final_results, termination_decision
 
 
 def _should_retry(exc: Exception, retry: RetryPolicy | None, attempt: int) -> bool:
@@ -545,16 +643,33 @@ async def generate_text(
     latest_usage: Usage | None = None
     accumulated_text = ""
     final_result: GenerateTextResult | None = None
+    termination: TurnTermination | None = None
     step_number = 0
 
     if signal:
-        signal.throw_if_aborted()
+        try:
+            signal.throw_if_aborted()
+        except AbortError as exc:
+            _termination_for_exception(
+                exc,
+                steps=steps,
+                text=accumulated_text,
+                final_step_number=0,
+            )
+            raise
 
     while True:
         step_number += 1
 
         if signal and signal.aborted:
-            raise AbortError(signal.reason)
+            exc = AbortError(signal.reason)
+            _termination_for_exception(
+                exc,
+                steps=steps,
+                text=accumulated_text,
+                final_step_number=len(steps),
+            )
+            raise exc
 
         if on_step_start:
             start_event = StepStartEvent(
@@ -571,14 +686,26 @@ async def generate_text(
                         _normalize_injected_messages(callback_result.inject_messages)
                     )
                 if callback_result.stop:
-                    if steps:
-                        final_result = GenerateTextResult(
-                            text=accumulated_text,
-                            steps=steps,
-                            finish_reason="stop",
-                            usage=_copy_usage(latest_usage) if latest_usage else None,
-                        )
-                        break
+                    final_result = GenerateTextResult(
+                        text=accumulated_text,
+                        steps=steps,
+                        finish_reason="stop",
+                        usage=_copy_usage(latest_usage) if latest_usage else None,
+                    )
+                    termination = build_turn_termination(
+                        "hook_stop",
+                        steps=steps,
+                        text=accumulated_text,
+                        provider_finish_reason=(
+                            steps[-1].finish_reason if steps else None
+                        ),
+                        reason=callback_result.stop_reason,
+                        message=callback_result.stop_reason,
+                    )
+                    break
+
+        if final_result is not None:
+            break
 
         attempt = 1
         while True:
@@ -596,6 +723,12 @@ async def generate_text(
                 break
             except Exception as exc:
                 if not _should_retry(exc, retry, attempt):
+                    _termination_for_exception(
+                        exc,
+                        steps=steps,
+                        text=accumulated_text,
+                        final_step_number=step_number,
+                    )
                     raise
                 delay = _retry_delay(retry, attempt, exc)
                 await _notify_retry(
@@ -633,6 +766,12 @@ async def generate_text(
             final_result = result
             final_result.usage = _copy_usage(latest_usage) if latest_usage else None
             steps.append(step)
+            termination = build_turn_termination(
+                "completed",
+                steps=steps,
+                text=accumulated_text,
+                provider_finish_reason=result.finish_reason,
+            )
 
             if on_step_finish:
                 finish_event = StepFinishEvent(
@@ -648,15 +787,25 @@ async def generate_text(
 
             break
 
-        tool_results, should_terminate_after_step = await _execute_tool_calls(
-            step_number=step_number,
-            tool_calls=tool_calls,
-            tools=tools,
-            messages=current_messages,
-            before_tool_call=before_tool_call,
-            after_tool_call=after_tool_call,
-            signal=signal,
-        )
+        try:
+            tool_results, tool_termination = await _execute_tool_calls(
+                step_number=step_number,
+                tool_calls=tool_calls,
+                tools=tools,
+                messages=current_messages,
+                before_tool_call=before_tool_call,
+                after_tool_call=after_tool_call,
+                signal=signal,
+            )
+        except Exception as exc:
+            _termination_for_exception(
+                exc,
+                steps=steps,
+                text=accumulated_text,
+                final_step_number=step_number,
+                has_tool_calls=True,
+            )
+            raise
 
         step.tool_results = tool_results
         steps.append(step)
@@ -673,16 +822,25 @@ async def generate_text(
             if inspect.isawaitable(callback_result):
                 await callback_result
 
-        should_stop = should_terminate_after_step
-        for condition in stop_conditions:
-            cond_result = condition(steps)
-            if inspect.isawaitable(cond_result):
-                cond_result = await cond_result
-            if cond_result:
-                should_stop = True
-                break
+        try:
+            stop_match = await _match_stop_condition(stop_conditions, steps)
+        except Exception as exc:
+            _termination_for_exception(
+                exc,
+                steps=steps,
+                text=accumulated_text,
+                final_step_number=step_number,
+            )
+            raise
 
-        if should_stop:
+        termination = _termination_from_stop(
+            tool_termination=tool_termination,
+            stop_match=stop_match,
+            steps=steps,
+            text=accumulated_text,
+            provider_finish_reason=result.finish_reason,
+        )
+        if termination is not None:
             final_result = result
             final_result.usage = _copy_usage(latest_usage) if latest_usage else None
             break
@@ -702,6 +860,7 @@ async def generate_text(
 
     if final_result:
         final_result.steps = steps
+        final_result.termination = termination
         return final_result
 
     raise RuntimeError("Generation loop ended without a result")
@@ -758,13 +917,29 @@ def stream_text(
         step_number = 0
 
         if signal:
-            signal.throw_if_aborted()
+            try:
+                signal.throw_if_aborted()
+            except AbortError as exc:
+                _termination_for_exception(
+                    exc,
+                    steps=steps,
+                    text=accumulated_text,
+                    final_step_number=0,
+                )
+                raise
 
         while True:
             step_number += 1
 
             if signal and signal.aborted:
-                raise AbortError(signal.reason)
+                exc = AbortError(signal.reason)
+                _termination_for_exception(
+                    exc,
+                    steps=steps,
+                    text=accumulated_text,
+                    final_step_number=len(steps),
+                )
+                raise exc
 
             stop_before_step = False
             if on_step_start:
@@ -798,6 +973,20 @@ def stream_text(
                     usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason="stop",
                     steps=list(steps),
+                    termination=build_turn_termination(
+                        "hook_stop",
+                        steps=steps,
+                        text=accumulated_text,
+                        provider_finish_reason=(
+                            steps[-1].finish_reason if steps else None
+                        ),
+                        reason=(
+                            callback_result.stop_reason if callback_result else None
+                        ),
+                        message=(
+                            callback_result.stop_reason if callback_result else None
+                        ),
+                    ),
                 )
                 break
 
@@ -906,6 +1095,13 @@ def stream_text(
                     break
                 except Exception as exc:
                     if saw_provider_output or not _should_retry(exc, retry, attempt):
+                        _termination_for_exception(
+                            exc,
+                            steps=steps,
+                            text=accumulated_text,
+                            final_step_number=step_number,
+                            has_tool_calls=bool(step_tool_calls),
+                        )
                         raise
                     delay = _retry_delay(retry, attempt, exc)
                     await _notify_retry(
@@ -960,6 +1156,12 @@ def stream_text(
                     usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason=step_finish_reason,
                     steps=list(steps),
+                    termination=build_turn_termination(
+                        "completed",
+                        steps=steps,
+                        text=accumulated_text,
+                        provider_finish_reason=step_finish_reason,
+                    ),
                 )
                 break
 
@@ -998,7 +1200,16 @@ def stream_text(
                     if tool_event is None:
                         break
                     yield tool_event
-                tool_results, should_terminate_after_step = await execution_task
+                tool_results, tool_termination = await execution_task
+            except Exception as exc:
+                _termination_for_exception(
+                    exc,
+                    steps=steps,
+                    text=accumulated_text,
+                    final_step_number=step_number,
+                    has_tool_calls=True,
+                )
+                raise
             finally:
                 if not execution_task.done():
                     execution_task.cancel()
@@ -1029,22 +1240,32 @@ def stream_text(
                 steps=list(steps),
             )
 
-            should_stop = should_terminate_after_step
-            for condition in stop_conditions:
-                cond_result = condition(steps)
-                if inspect.isawaitable(cond_result):
-                    cond_result = await cond_result
-                if cond_result:
-                    should_stop = True
-                    break
+            try:
+                stop_match = await _match_stop_condition(stop_conditions, steps)
+            except Exception as exc:
+                _termination_for_exception(
+                    exc,
+                    steps=steps,
+                    text=accumulated_text,
+                    final_step_number=step_number,
+                )
+                raise
 
-            if should_stop:
+            termination = _termination_from_stop(
+                tool_termination=tool_termination,
+                stop_match=stop_match,
+                steps=steps,
+                text=accumulated_text,
+                provider_finish_reason=step_finish_reason,
+            )
+            if termination is not None:
                 yield StreamFinishedEvent(
                     type="stream.finished",
                     text=accumulated_text,
                     usage=_copy_usage(latest_usage) if latest_usage else None,
                     finish_reason=step_finish_reason,
                     steps=list(steps),
+                    termination=termination,
                 )
                 break
 

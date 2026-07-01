@@ -18,6 +18,7 @@ class GenerateTextResult:
     usage: Usage | None = None
     response: dict[str, Any] = field(default_factory=dict)
     provider_metadata: dict[str, Any] = field(default_factory=dict)
+    termination: TurnTermination | None = None
 
     @property
     def tool_calls(self) -> list[ToolCall]: ...
@@ -50,6 +51,11 @@ class GenerateTextResult:
   Additional provider metadata.
 </ResponseField>
 
+<ResponseField name="termination" type="TurnTermination | None">
+  Framework-level reason the model/tool loop ended. This is distinct from the
+  provider's `finish_reason`.
+</ResponseField>
+
 <ResponseField name="tool_calls" type="list[ToolCall]">
   Flattened tool calls from all steps.
 </ResponseField>
@@ -80,6 +86,9 @@ class TextStreamResult:
     async def finish_reason(self) -> str | None: ...
 
     @property
+    async def termination(self) -> TurnTermination | None: ...
+
+    @property
     async def steps(self) -> list[StepResult]: ...
 
     def __aiter__(self) -> AsyncIterator[str]: ...
@@ -105,6 +114,10 @@ class TextStreamResult:
   Finish reason after stream completion.
 </ResponseField>
 
+<ResponseField name="termination" type="Awaitable[TurnTermination | None]">
+  Framework-level termination diagnostic after stream completion.
+</ResponseField>
+
 <ResponseField name="steps" type="Awaitable[list[StepResult]]">
   Step history after stream completion.
 </ResponseField>
@@ -128,6 +141,7 @@ class TurnResult:
     started_at: float
     ended_at: float
     output_message: Message
+    termination: TurnTermination | None = None
 ```
 
 <ResponseField name="turn_id" type="str">
@@ -165,6 +179,58 @@ class TurnResult:
 <ResponseField name="output_message" type="Message">
   Final assistant message appended to agent history.
 </ResponseField>
+
+<ResponseField name="termination" type="TurnTermination | None">
+  Structured terminal diagnostic for the turn.
+</ResponseField>
+
+## TurnTermination
+
+`finish_reason` belongs to the model provider. `TurnTermination` records why
+ai-query stopped the surrounding loop.
+
+```python
+@dataclass(frozen=True)
+class TurnTermination:
+    kind: Literal[
+        "completed",
+        "stop_condition",
+        "step_limit",
+        "hook_stop",
+        "tool_terminated",
+        "aborted",
+        "failed",
+    ]
+    provider_finish_reason: str | None = None
+    reason: str | None = None
+    stop_condition: str | None = None
+    tool_name: str | None = None
+    final_step_number: int = 0
+    has_text: bool = False
+    has_tool_calls: bool = False
+    last_tool_error: str | None = None
+    error_type: str | None = None
+    message: str | None = None
+```
+
+| Kind | Meaning |
+| --- | --- |
+| `completed` | The provider returned a step without tool calls. |
+| `stop_condition` | A custom condition or `has_tool_call()` matched. |
+| `step_limit` | `step_count_is()` matched, including the default one-step bound. |
+| `hook_stop` | A before-step hook returned `StepControl(stop=True)`. |
+| `tool_terminated` | An after-tool hook returned `AfterToolCallResult(terminate=True)`. |
+| `aborted` | An abort signal stopped the operation. |
+| `failed` | A provider, hook, tool-loop, or runtime exception escaped. |
+
+`final_step_number` is the last attempted model step. It is `0` when the
+operation stops before the first provider call.
+
+Successful operations expose this object on `GenerateTextResult`,
+`StreamFinishedEvent`, `TextStreamResult.termination`, and `TurnResult`.
+`AbortError` and ordinary exceptions expose a `termination` attribute when the
+runtime can attach one. `TurnFailed.termination` contains the same diagnostic
+for event consumers.
 
 ## StepResult
 
@@ -237,6 +303,7 @@ Returned from `on_step_start` to control the next step.
 class StepControl:
     inject_messages: list[Message] = field(default_factory=list)
     stop: bool = False
+    stop_reason: str | None = None
 ```
 
 <ResponseField name="inject_messages" type="list[Message]">
@@ -245,6 +312,10 @@ class StepControl:
 
 <ResponseField name="stop" type="bool">
   If true, stops at the step boundary.
+</ResponseField>
+
+<ResponseField name="stop_reason" type="str | None">
+  Optional reason copied into the `hook_stop` termination diagnostic.
 </ResponseField>
 
 ## RetryPolicy

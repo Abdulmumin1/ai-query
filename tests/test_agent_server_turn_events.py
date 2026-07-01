@@ -197,6 +197,8 @@ async def test_agent_server_streams_real_typed_turn_with_parallel_tools(aiohttp_
         "total_tokens": 24,
     }
     assert len(final["steps"]) == 2
+    assert final["termination"]["kind"] == "completed"
+    assert final["termination"]["provider_finish_reason"] == "stop"
 
     first_start = min(starts.values())
     assert max(starts.values()) - first_start < 0.02
@@ -244,6 +246,19 @@ async def test_agent_server_streams_typed_turn_failure(aiohttp_client):
         "error": "provider failed",
         "error_type": "RuntimeError",
         "aborted": False,
+        "termination": {
+            "kind": "failed",
+            "provider_finish_reason": None,
+            "reason": None,
+            "stop_condition": None,
+            "tool_name": None,
+            "final_step_number": 1,
+            "has_text": False,
+            "has_tool_calls": False,
+            "last_tool_error": None,
+            "error_type": "RuntimeError",
+            "message": "provider failed",
+        },
     }
 
 
@@ -273,9 +288,7 @@ async def test_remote_agent_round_trips_events_from_live_agent_server(aiohttp_se
     test_server = await aiohttp_server(server.create_app())
     base_url = str(test_server.make_url("/agent")).rstrip("/")
     http_client = httpx.AsyncClient()
-    remote = RemoteAgent(
-        HTTPTransport(base_url=base_url, client=http_client), "remote"
-    )
+    remote = RemoteAgent(HTTPTransport(base_url=base_url, client=http_client), "remote")
 
     try:
         events = [event async for event in remote.events("Say hello")]
@@ -297,6 +310,8 @@ async def test_remote_agent_round_trips_events_from_live_agent_server(aiohttp_se
     assert events[-1].result.usage == Usage(
         input_tokens=3, output_tokens=2, total_tokens=5
     )
+    assert events[-1].result.termination is not None
+    assert events[-1].result.termination.kind == "completed"
 
 
 @pytest.mark.asyncio

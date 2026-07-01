@@ -469,6 +469,8 @@ class Agent(Generic[StateT]):
             seen = True
             merged.inject_messages.extend(result.inject_messages)
             merged.stop = merged.stop or result.stop
+            if result.stop_reason is not None:
+                merged.stop_reason = result.stop_reason
         return merged if seen else None
 
     @staticmethod
@@ -505,6 +507,8 @@ class Agent(Generic[StateT]):
                 merged.is_error = result.is_error
             if result.terminate is not None:
                 merged.terminate = result.terminate
+            if result.terminate_reason is not None:
+                merged.terminate_reason = result.terminate_reason
         return merged if seen else None
 
     async def before_step(self, ctx: BeforeStepContext) -> StepControl | None:
