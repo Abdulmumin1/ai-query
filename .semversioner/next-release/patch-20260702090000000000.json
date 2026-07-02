@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Add injected tool execution context with abort, metadata, identity, and typed progress events."
+}

@@ -84,6 +84,7 @@ Common event types:
 | `tool_call.started` / `tool_call.delta` | Provider tool-call fragments, when available. |
 | `tool_call.ready` | A normalized `ToolCall` is ready for execution or error handling. |
 | `tool_execution.started` / `tool_execution.finished` | Local tool function execution lifecycle. |
+| `tool_execution.progress` | Correlated progress emitted by `ToolExecutionContext`. |
 | `tool_result` | Final tool result after hooks, in provider order. |
 | `step.finished` | The model step was persisted. |
 | `turn.finished` / `turn.failed` | Terminal turn outcome. |
@@ -274,6 +275,7 @@ TurnEvent = (
     | ToolCallDeltaEvent
     | ToolCallReadyEvent
     | ToolExecutionStartedEvent
+    | ToolExecutionProgressEvent
     | ToolExecutionFinishedEvent
     | ToolResultEvent
     | StepFinished
@@ -351,7 +353,8 @@ class StepRetrying:
 
 `AgentTurn` forwards the same `ToolCallStartedEvent`, `ToolCallDeltaEvent`,
 `ToolCallReadyEvent`,
-`ToolExecutionStartedEvent`, `ToolExecutionFinishedEvent`, and `ToolResultEvent`
+`ToolExecutionStartedEvent`, `ToolExecutionProgressEvent`,
+`ToolExecutionFinishedEvent`, and `ToolResultEvent`
 objects exposed by `stream_text().event_stream`. This preserves tool call IDs,
 provider indexes, execution completion order, and normalized results across core
 and agent APIs.

@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import copy
 import contextlib
+import contextvars
 import json
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import inspect
 import random
 import time
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping
 
 from ai_query.types import (
     GenerateTextResult,
@@ -30,7 +31,9 @@ from ai_query.types import (
     ToolCallReadyEvent,
     ToolCallStartedEvent,
     ToolExecutionFinishedEvent,
+    ToolExecutionProgressEvent,
     ToolExecutionStartedEvent,
+    ToolExecutionContext,
     ToolResultEvent,
     ToolCallPart,
     ToolResultPart,
@@ -71,6 +74,18 @@ from ai_query.model import LanguageModel, EmbeddingModel
 
 
 _RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+_TOOL_EXECUTION_SCOPE: contextvars.ContextVar[
+    tuple[str | None, str | None]
+] = contextvars.ContextVar("ai_query_tool_execution_scope", default=(None, None))
+
+
+@contextlib.contextmanager
+def _tool_execution_scope(*, turn_id: str, agent_id: str):
+    token = _TOOL_EXECUTION_SCOPE.set((turn_id, agent_id))
+    try:
+        yield
+    finally:
+        _TOOL_EXECUTION_SCOPE.reset(token)
 
 
 async def _match_stop_condition(
@@ -320,6 +335,9 @@ async def _run_tool_call(
     tool_def: Any,
     signal: AbortSignal | None,
     publish_tool_event: Callable[[TextStreamEvent], Awaitable[None]] | None,
+    metadata: Mapping[str, Any] | None,
+    turn_id: str | None,
+    agent_id: str | None,
 ) -> ToolResult:
     started_at = time.perf_counter()
     execution_error: str | None = None
@@ -331,8 +349,34 @@ async def _run_tool_call(
             tool_call=tool_call,
         ))
 
+    async def emit_progress(message: str, data: dict[str, Any]) -> None:
+        if publish_tool_event:
+            await publish_tool_event(
+                ToolExecutionProgressEvent(
+                    type="tool_execution.progress",
+                    step_number=step_number,
+                    index=index,
+                    tool_call=tool_call,
+                    message=message,
+                    data=data,
+                )
+            )
+
+    execution_context = ToolExecutionContext(
+        tool_call_id=tool_call.id,
+        tool_name=tool_call.name,
+        step_number=step_number,
+        signal=signal or AbortSignal(),
+        turn_id=turn_id,
+        agent_id=agent_id,
+        metadata=metadata or {},
+        _emit_progress=emit_progress,
+    )
+
     try:
-        output = await _await_with_abort(tool_def.run(**tool_call.arguments), signal)
+        output = await _await_with_abort(
+            tool_def.invoke(tool_call.arguments, execution_context), signal
+        )
         tool_result = ToolResult(
             tool_call_id=tool_call.id,
             tool_name=tool_call.name,
@@ -383,6 +427,9 @@ async def _execute_tool_calls(
     after_tool_call: OnAfterToolCall | None,
     signal: AbortSignal | None,
     publish_tool_event: Callable[[TextStreamEvent], Awaitable[None]] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    turn_id: str | None = None,
+    agent_id: str | None = None,
 ) -> tuple[list[ToolResult], StopDecision | None]:
     ordered_results: list[ToolResult | None] = []
     runnable_tools: list[tuple[int, ToolCall, Any]] = []
@@ -432,6 +479,9 @@ async def _execute_tool_calls(
                     tool_def=tool_def,
                     signal=signal,
                     publish_tool_event=publish_tool_event,
+                    metadata=metadata,
+                    turn_id=turn_id,
+                    agent_id=agent_id,
                 )
                 for index, tool_call, tool_def in runnable_tools
             )
@@ -616,6 +666,7 @@ async def generate_text(
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
+    metadata: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> GenerateTextResult:
     """Generate text using an AI model."""
@@ -645,6 +696,7 @@ async def generate_text(
     final_result: GenerateTextResult | None = None
     termination: TurnTermination | None = None
     step_number = 0
+    turn_id, agent_id = _TOOL_EXECUTION_SCOPE.get()
 
     if signal:
         try:
@@ -796,6 +848,9 @@ async def generate_text(
                 before_tool_call=before_tool_call,
                 after_tool_call=after_tool_call,
                 signal=signal,
+                metadata=metadata,
+                turn_id=turn_id,
+                agent_id=agent_id,
             )
         except Exception as exc:
             _termination_for_exception(
@@ -884,6 +939,7 @@ def stream_text(
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
+    metadata: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> TextStreamResult:
     """Stream text from an AI model."""
@@ -907,6 +963,7 @@ def stream_text(
         stop_conditions = [step_count_is(1)]
 
     shared_steps: list[StepResult] = []
+    turn_id, agent_id = _TOOL_EXECUTION_SCOPE.get()
 
     async def _stream_generator() -> AsyncIterator[TextStreamEvent]:
         nonlocal shared_steps
@@ -1189,6 +1246,9 @@ def stream_text(
                         after_tool_call=after_tool_call,
                         signal=signal,
                         publish_tool_event=publish_tool_event,
+                        metadata=metadata,
+                        turn_id=turn_id,
+                        agent_id=agent_id,
                     )
                 finally:
                     await tool_event_queue.put(None)

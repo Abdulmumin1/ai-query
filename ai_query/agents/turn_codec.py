@@ -28,6 +28,7 @@ from ai_query.types import (
     ToolCallReadyEvent,
     ToolCallStartedEvent,
     ToolExecutionFinishedEvent,
+    ToolExecutionProgressEvent,
     ToolExecutionStartedEvent,
     ToolResult,
     ToolResultEvent,
@@ -339,6 +340,15 @@ def turn_event_to_dict(event: TurnEvent) -> dict[str, Any]:
             "index": event.index,
             "tool_call": _tool_call_to_dict(event.tool_call),
         }
+    if isinstance(event, ToolExecutionProgressEvent):
+        return {
+            "type": event.type,
+            "step_number": event.step_number,
+            "index": event.index,
+            "tool_call": _tool_call_to_dict(event.tool_call),
+            "message": event.message,
+            "data": _to_wire_value(event.data),
+        }
     if isinstance(event, ToolExecutionFinishedEvent):
         return {
             "type": event.type,
@@ -439,6 +449,15 @@ def turn_event_from_dict(data: dict[str, Any]) -> TurnEvent:
             step_number=data["step_number"],
             index=data["index"],
             tool_call=_tool_call_from_dict(data["tool_call"]),
+        )
+    if event_type == "tool_execution.progress":
+        return ToolExecutionProgressEvent(
+            type=event_type,
+            step_number=data["step_number"],
+            index=data["index"],
+            tool_call=_tool_call_from_dict(data["tool_call"]),
+            message=data["message"],
+            data=_from_wire_value(data.get("data", {})),
         )
     if event_type == "tool_execution.finished":
         return ToolExecutionFinishedEvent(

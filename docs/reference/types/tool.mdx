@@ -160,6 +160,23 @@ custom_tool = tool(
 )
 ```
 
+### Injected Execution Context
+
+```python
+from ai_query import ToolExecutionContext, tool
+
+@tool
+async def work(value: str, ctx: ToolExecutionContext) -> str:
+    ctx.signal.throw_if_aborted()
+    await ctx.emit_progress("working", data={"value": value})
+    return value
+```
+
+The annotated parameter is framework-owned and omitted from the generated JSON
+Schema. Exactly one `ToolExecutionContext` parameter is allowed. It exposes the
+tool call identity, step, abort signal, optional agent/turn identity, immutable
+metadata, and correlated progress emission.
+
 ### Using Tools
 
 ```python

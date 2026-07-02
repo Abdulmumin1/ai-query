@@ -12,10 +12,6 @@ from ai_query.types import (
     AbortError,
     AbortSignal,
     AfterToolCallEvent,
-    OnAfterToolCall,
-    OnBeforeToolCall,
-    OnStepFinish,
-    OnStepStart,
     BeforeToolCallEvent,
     Message,
     ReasoningConfig,
@@ -33,6 +29,7 @@ from ai_query.types import (
     ToolCallReadyEvent,
     ToolCallStartedEvent,
     ToolExecutionFinishedEvent,
+    ToolExecutionProgressEvent,
     ToolExecutionStartedEvent,
     ToolResultEvent,
     TurnTermination,
@@ -141,6 +138,7 @@ TurnEvent = (
     | ToolCallDeltaEvent
     | ToolCallReadyEvent
     | ToolExecutionStartedEvent
+    | ToolExecutionProgressEvent
     | ToolExecutionFinishedEvent
     | ToolResultEvent
     | StepFinished
@@ -230,6 +228,7 @@ class AgentTurn:
 
     async def _run(self) -> TurnResult:
         from ai_query import stream_text
+        from ai_query.core import _tool_execution_scope
 
         self._started = True
         self._started_at = time.time()
@@ -318,23 +317,25 @@ class AgentTurn:
                 external_signal.throw_if_aborted()
                 external_signal.add_listener(lambda: self.abort(external_signal.reason))
 
-            result = stream_text(
-                model=self.agent.model,
-                system=self.agent.system,
-                messages=self.agent.messages,
-                tools=self.options.tools if self.options.tools is not None else (self.agent.tools if self.agent.tools else None),
-                stop_when=self.options.stop_when if self.options.stop_when is not None else self.agent.stop_when,
-                provider_options=self.options.provider_options if self.options.provider_options is not None else self.agent.provider_options,
-                reasoning=self.options.reasoning if self.options.reasoning is not None else self.agent.reasoning,
-                retry=self.options.retry if self.options.retry is not None else self.agent.retry,
-                on_retry=on_retry,
-                signal=signal,
-                on_reasoning_event=on_reasoning_event,
-                on_step_start=on_step_start,
-                on_step_finish=on_step_finish,
-                before_tool_call=before_tool_call,
-                after_tool_call=after_tool_call,
-            )
+            with _tool_execution_scope(turn_id=self.id, agent_id=self.agent_id):
+                result = stream_text(
+                    model=self.agent.model,
+                    system=self.agent.system,
+                    messages=self.agent.messages,
+                    tools=self.options.tools if self.options.tools is not None else (self.agent.tools if self.agent.tools else None),
+                    stop_when=self.options.stop_when if self.options.stop_when is not None else self.agent.stop_when,
+                    provider_options=self.options.provider_options if self.options.provider_options is not None else self.agent.provider_options,
+                    reasoning=self.options.reasoning if self.options.reasoning is not None else self.agent.reasoning,
+                    retry=self.options.retry if self.options.retry is not None else self.agent.retry,
+                    on_retry=on_retry,
+                    signal=signal,
+                    metadata=self.options.metadata,
+                    on_reasoning_event=on_reasoning_event,
+                    on_step_start=on_step_start,
+                    on_step_finish=on_step_finish,
+                    before_tool_call=before_tool_call,
+                    after_tool_call=after_tool_call,
+                )
 
             async for stream_event in result.event_stream:
                 if isinstance(stream_event, TextDeltaEvent):
@@ -350,6 +351,7 @@ class AgentTurn:
                         ToolCallDeltaEvent,
                         ToolCallReadyEvent,
                         ToolExecutionStartedEvent,
+                        ToolExecutionProgressEvent,
                         ToolExecutionFinishedEvent,
                         ToolResultEvent,
                     ),
