@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Add first-class multimodal tool-result content with provider mappings and persistence support."
+}

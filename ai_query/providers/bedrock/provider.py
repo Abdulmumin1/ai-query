@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import json
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator
 import asyncio
 
 try:
@@ -25,11 +25,15 @@ from ai_query.types import (
     StreamChunk,
     ToolSet,
     ToolCall,
-    ToolCallPart,
-    ToolResultPart,
     ToolCallStreamEvent,
+    ToolOutput,
+    ImagePart,
 )
 from ai_query.model import LanguageModel
+from ai_query.providers.tool_output import (
+    bedrock_tool_result_content,
+    unsupported,
+)
 
 
 # Cached provider instance
@@ -140,7 +144,9 @@ class BedrockProvider(BaseProvider):
 
         return self._client
 
-    def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
+    def _convert_messages(
+        self, messages: list[Message], *, model: str | None = None
+    ) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Message objects to Bedrock Converse format.
 
         Returns:
@@ -198,10 +204,29 @@ class BedrockProvider(BaseProvider):
                         elif part.type == "tool_result":
                             tr = part.tool_result
                             if tr:
+                                if (
+                                    isinstance(tr.result, ToolOutput)
+                                    and any(
+                                        isinstance(item, ImagePart)
+                                        for item in tr.result.content
+                                    )
+                                    and model is not None
+                                    and not (
+                                        "amazon.nova" in model
+                                        or "anthropic.claude-3" in model
+                                        or "anthropic.claude-4" in model
+                                    )
+                                ):
+                                    raise unsupported(self.name, model)
+                                tool_content = (
+                                    bedrock_tool_result_content(tr.result)
+                                    if isinstance(tr.result, ToolOutput)
+                                    else [{"text": str(tr.result)}]
+                                )
                                 content_blocks.append({
                                     "toolResult": {
                                         "toolUseId": tr.tool_call_id,
-                                        "content": [{"text": str(tr.result)}],
+                                        "content": tool_content,
                                         "status": "error" if tr.is_error else "success",
                                     }
                                 })
@@ -250,7 +275,9 @@ class BedrockProvider(BaseProvider):
         bedrock_options = self.get_provider_options(provider_options)
 
         # Convert messages
-        system_prompt, bedrock_messages = self._convert_messages(messages)
+        system_prompt, bedrock_messages = self._convert_messages(
+            messages, model=model
+        )
 
         # Build inference config from kwargs and bedrock_options
         inference_config: dict[str, Any] = {}
@@ -381,7 +408,9 @@ class BedrockProvider(BaseProvider):
         bedrock_options = self.get_provider_options(provider_options)
 
         # Convert messages
-        system_prompt, bedrock_messages = self._convert_messages(messages)
+        system_prompt, bedrock_messages = self._convert_messages(
+            messages, model=model
+        )
 
         # Build inference config
         inference_config: dict[str, Any] = {}
