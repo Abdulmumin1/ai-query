@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.7.55
+
+- patch: Add first-class multimodal tool-result content with provider mappings and persistence support.
+
 ## 1.7.54
 
 - patch: Stream provider tool-call start and argument delta events.

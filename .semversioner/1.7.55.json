@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Add first-class multimodal tool-result content with provider mappings and persistence support.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-07-03T20:51:58+00:00",
+  "version": "1.7.55"
+}
