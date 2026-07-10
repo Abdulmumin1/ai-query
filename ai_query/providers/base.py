@@ -282,6 +282,8 @@ class BaseProvider(ABC):
         total.input_tokens += delta.input_tokens
         total.output_tokens += delta.output_tokens
         total.cached_tokens += delta.cached_tokens
+        total.cache_write_tokens += delta.cache_write_tokens
+        total.cache_miss_tokens += delta.cache_miss_tokens
         total.total_tokens += delta.total_tokens
 
     async def embed(

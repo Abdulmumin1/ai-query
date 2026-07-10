@@ -994,6 +994,8 @@ class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_miss_tokens: int = 0
     total_tokens: int = 0
 
 

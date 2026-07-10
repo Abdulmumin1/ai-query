@@ -662,6 +662,7 @@ class OpenAIProvider(BaseProvider):
                 input_tokens=usage_data.get("input_tokens", 0),
                 output_tokens=usage_data.get("output_tokens", 0),
                 cached_tokens=input_details.get("cached_tokens", 0),
+                cache_write_tokens=input_details.get("cache_write_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
@@ -800,7 +801,12 @@ class OpenAIProvider(BaseProvider):
             usage = Usage(
                 input_tokens=usage_data.get("prompt_tokens", 0),
                 output_tokens=usage_data.get("completion_tokens", 0),
-                cached_tokens=prompt_details.get("cached_tokens", 0),
+                cached_tokens=usage_data.get(
+                    "prompt_cache_hit_tokens",
+                    prompt_details.get("cached_tokens", 0),
+                ),
+                cache_write_tokens=prompt_details.get("cache_write_tokens", 0),
+                cache_miss_tokens=usage_data.get("prompt_cache_miss_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
@@ -933,7 +939,16 @@ class OpenAIProvider(BaseProvider):
                     usage = Usage(
                         input_tokens=usage_data.get("prompt_tokens", 0),
                         output_tokens=usage_data.get("completion_tokens", 0),
-                        cached_tokens=prompt_details.get("cached_tokens", 0),
+                        cached_tokens=usage_data.get(
+                            "prompt_cache_hit_tokens",
+                            prompt_details.get("cached_tokens", 0),
+                        ),
+                        cache_write_tokens=prompt_details.get(
+                            "cache_write_tokens", 0
+                        ),
+                        cache_miss_tokens=usage_data.get(
+                            "prompt_cache_miss_tokens", 0
+                        ),
                         total_tokens=usage_data.get("total_tokens", 0),
                     )
 
