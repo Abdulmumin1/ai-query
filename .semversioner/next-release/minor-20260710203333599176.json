@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "Add automatic prompt caching telemetry for OpenAI, Anthropic, DeepSeek, and Google providers."
-}

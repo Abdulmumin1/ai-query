@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.8.0
+
+- minor: Add automatic prompt caching telemetry for OpenAI, Anthropic, DeepSeek, and Google providers.
+
 ## 1.7.55
 
 - patch: Add first-class multimodal tool-result content with provider mappings and persistence support.
