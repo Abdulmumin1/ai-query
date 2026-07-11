@@ -444,6 +444,7 @@ class AnthropicProvider(BaseProvider):
             "model": model,
             "messages": converted_messages,
             "max_tokens": kwargs.pop("max_tokens", 4096),
+            "cache_control": {"type": "ephemeral"},
             **kwargs,
             **anthropic_options,
         }
@@ -494,6 +495,7 @@ class AnthropicProvider(BaseProvider):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
+            cache_write_tokens=usage_data.get("cache_creation_input_tokens", 0),
             total_tokens=input_tokens + output_tokens,
         )
 
@@ -545,6 +547,7 @@ class AnthropicProvider(BaseProvider):
             "messages": converted_messages,
             "max_tokens": kwargs.pop("max_tokens", 4096),
             "stream": True,
+            "cache_control": {"type": "ephemeral"},
             **kwargs,
             **anthropic_options,
         }
@@ -722,6 +725,9 @@ class AnthropicProvider(BaseProvider):
                             output_tokens=0,
                             cached_tokens=usage_data.get(
                                 "cache_read_input_tokens", 0
+                            ),
+                            cache_write_tokens=usage_data.get(
+                                "cache_creation_input_tokens", 0
                             ),
                             total_tokens=usage_data.get("input_tokens", 0),
                         )

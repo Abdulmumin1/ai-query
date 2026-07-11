@@ -5,6 +5,26 @@ description: "Connect to AI models from any provider"
 
 ai-query supports multiple AI providers through a unified interface. Each provider has its own factory function that creates a `LanguageModel` instance.
 
+## Prompt caching
+
+Prompt caching is automatic. There is no ai-query cache configuration and no
+application-level response cache: every request still runs the model and produces a
+new response.
+
+- OpenAI, DeepSeek, and supported Gemini models use their provider defaults.
+- Anthropic requests opt into its automatic ephemeral prompt cache.
+- Other providers retain their existing behavior.
+
+Keep repeated content at the beginning of the prompt to improve the chance of a
+provider cache hit. Stable system instructions, tool definitions, and earlier
+conversation turns should come before request-specific content. Avoid timestamps,
+request IDs, or frequently changing tool schemas in the shared prefix.
+
+Inspect `result.usage.cached_tokens`, `cache_write_tokens`, and
+`cache_miss_tokens` to see the cache information reported by the provider. A zero
+means absent or unreported; ai-query does not infer cache activity that the provider
+does not expose.
+
 ## Supported Providers
 
 <CardGroup cols={2}>

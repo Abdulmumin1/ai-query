@@ -604,6 +604,8 @@ class TestUsage:
         assert usage.input_tokens == 0
         assert usage.output_tokens == 0
         assert usage.cached_tokens == 0
+        assert usage.cache_write_tokens == 0
+        assert usage.cache_miss_tokens == 0
         assert usage.total_tokens == 0
 
     def test_usage_values(self):
@@ -612,11 +614,15 @@ class TestUsage:
             input_tokens=100,
             output_tokens=50,
             cached_tokens=20,
+            cache_write_tokens=10,
+            cache_miss_tokens=80,
             total_tokens=150,
         )
         assert usage.input_tokens == 100
         assert usage.output_tokens == 50
         assert usage.cached_tokens == 20
+        assert usage.cache_write_tokens == 10
+        assert usage.cache_miss_tokens == 80
         assert usage.total_tokens == 150
 
 
