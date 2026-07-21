@@ -31,6 +31,7 @@ async def generate_text(
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
+    metadata: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> GenerateTextResult
 ```
@@ -87,6 +88,11 @@ async def generate_text(
 
 <ParamField path="signal" type="AbortSignal | None">
   Abort signal used to cancel the generation loop, including in-flight provider calls, retry sleeps, embeddings, and async tool calls.
+</ParamField>
+
+<ParamField path="metadata" type="Mapping[str, Any] | None">
+  Application metadata exposed as an immutable mapping on injected
+  `ToolExecutionContext` values. It is not sent to the provider.
 </ParamField>
 
 <ParamField path="**kwargs" type="Any">
