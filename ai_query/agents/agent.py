@@ -243,6 +243,9 @@ class Agent(Generic[StateT]):
         # Event log for durability & replay
         self._event_log: List[Dict[str, Any]] = []
         self._event_counter: int = 0
+        # Serializes event persistence/delivery with SSE replay registration so
+        # a live event cannot overtake an older replayed event on the wire.
+        self._event_delivery_lock = asyncio.Lock()
 
         # Communication
         self._transport = transport
@@ -301,28 +304,31 @@ class Agent(Generic[StateT]):
         replay: bool = True,
     ) -> int:
         """Emit an event. Returns the event ID."""
-        # Assign ID
-        self._event_counter += 1
-        event_id = self._event_counter
+        async with self._event_delivery_lock:
+            # Assign ID
+            self._event_counter += 1
+            event_id = self._event_counter
 
-        if replay:
-            # Log replayable event only
-            event_record = {"id": event_id, "type": event, "data": data}
-            self._event_log.append(event_record)
+            if replay:
+                # Log replayable event only
+                event_record = {"id": event_id, "type": event, "data": data}
+                self._event_log.append(event_record)
 
-        # Persist if enabled and replayable
-        if replay and self.enable_event_log:
-            await self._storage.set(f"{self._id}:event_log", self._event_log)
+            # Persist if enabled and replayable
+            if replay and self.enable_event_log:
+                await self._storage.set(f"{self._id}:event_log", self._event_log)
 
-        # Deliver via handler (set by transport layer)
-        if self._emit_handler:
-            await self._emit_handler(event, data, event_id)
+            # Deliver via handler (set by transport layer)
+            if self._emit_handler:
+                await self._emit_handler(event, data, event_id)
 
-        return event_id
+            return event_id
 
     async def replay_events(self, after_id: int = 0) -> AsyncIterator[Event]:
         """Yield events after the given ID for replay."""
-        for event_record in self._event_log:
+        # Freeze the replay boundary. Events appended after this snapshot are
+        # delivered live, rather than unexpectedly extending this iterator.
+        for event_record in list(self._event_log):
             if event_record["id"] > after_id:
                 yield Event(
                     id=event_record["id"],

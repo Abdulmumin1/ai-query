@@ -157,6 +157,56 @@ class TestSSEReplay:
             assert "event: status\n" in text
             assert "open_document" not in text
 
+    @pytest.mark.asyncio
+    async def test_live_event_cannot_overtake_replayed_events(
+        self, aiohttp_client, event_agent_class
+    ):
+        """Registration and replay should form one ordered delivery boundary."""
+        server = AgentServer(event_agent_class)
+        agent = server.get_or_create("test-replay-order")
+        await agent.start()
+
+        await agent.emit("message", {"seq": 1})
+        await agent.emit("message", {"seq": 2})
+
+        original_replay_events = agent.replay_events
+        replay_paused = asyncio.Event()
+        resume_replay = asyncio.Event()
+
+        async def paused_replay(after_id: int = 0):
+            async for event in original_replay_events(after_id):
+                yield event
+                if event.id == 1:
+                    replay_paused.set()
+                    await resume_replay.wait()
+
+        agent.replay_events = paused_replay
+
+        server._config = AgentServerConfig()
+        client = await aiohttp_client(server.create_app())
+
+        async with client.get(
+            "/agent/test-replay-order/events?last_event_id=0"
+        ) as resp:
+            first = await resp.content.readuntil(b"\n\n")
+            await replay_paused.wait()
+
+            live_emit = asyncio.create_task(agent.emit("message", {"seq": 3}))
+            await asyncio.sleep(0)
+            assert not live_emit.done()
+
+            resume_replay.set()
+            second = await resp.content.readuntil(b"\n\n")
+            third = await resp.content.readuntil(b"\n\n")
+            await live_emit
+
+        delivered = [first.decode(), second.decode(), third.decode()]
+        assert [message.split("\n", 1)[0] for message in delivered] == [
+            "id: 1",
+            "id: 2",
+            "id: 3",
+        ]
+
 
 class TestSSEEventFormatting:
     """Tests for SSE event formatting via emit handler."""

@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Keep SSE replay and live delivery strictly ordered across reconnects."
+}
