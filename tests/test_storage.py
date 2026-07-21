@@ -216,6 +216,67 @@ class TestSQLiteStorage:
         storage2.close()
 
     @pytest.mark.asyncio
+    async def test_event_log_appends_incrementally_and_prunes(self, storage):
+        await storage.append_event(
+            "agent:event_log",
+            {"id": 1, "type": "status", "data": {"n": 1}},
+            limit=2,
+        )
+        await storage.append_event(
+            "agent:event_log",
+            {"id": 2, "type": "status", "data": {"n": 2}},
+            limit=2,
+        )
+        await storage.append_event(
+            "agent:event_log",
+            {"id": 3, "type": "status", "data": {"n": 3}},
+            limit=2,
+        )
+
+        events, counter = await storage.load_events("agent:event_log", limit=2)
+
+        assert [event["id"] for event in events] == [2, 3]
+        assert counter == 3
+        assert await storage.get("agent:event_log") is None
+
+    @pytest.mark.asyncio
+    async def test_event_log_preserves_non_replayable_counter_gaps(self, storage):
+        await storage.append_event(
+            "agent:event_log",
+            {"id": 1, "type": "status", "data": {}},
+        )
+        await storage.set_event_counter("agent:event_log", 5)
+
+        events, counter = await storage.load_events("agent:event_log")
+
+        assert [event["id"] for event in events] == [1]
+        assert counter == 5
+
+    @pytest.mark.asyncio
+    async def test_event_log_migrates_legacy_blob_with_retention(self, storage):
+        await storage.set(
+            "agent:event_log",
+            [
+                {"id": event_id, "type": "status", "data": {"n": event_id}}
+                for event_id in range(1, 6)
+            ],
+        )
+
+        events, counter = await storage.load_events("agent:event_log", limit=2)
+
+        assert [event["id"] for event in events] == [4, 5]
+        assert counter == 5
+        assert await storage.get("agent:event_log") is None
+
+    @pytest.mark.asyncio
+    async def test_delete_events_removes_incremental_and_legacy_data(self, storage):
+        await storage.set("agent:event_log", [{"id": 1}])
+        await storage.load_events("agent:event_log")
+        await storage.delete_events("agent:event_log")
+
+        assert await storage.load_events("agent:event_log") == ([], 0)
+
+    @pytest.mark.asyncio
     async def test_creates_parent_directories(self, tmp_path):
         """SQLiteStorage should create parent directories if needed."""
         db_path = str(tmp_path / "nested" / "dir" / "test.db")

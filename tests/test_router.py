@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from aiohttp import web
 import ai_query.agents.server.handlers as server_handlers
-from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig
+from ai_query.agents import Agent, MemoryStorage, AgentServer, AgentServerConfig, action
 from ai_query.types import Message, ToolCall, ToolCallPart, ToolResult, ToolResultPart
 
 
@@ -340,6 +340,31 @@ class TestAgentServerEndpoints:
             "action": "chat",
             "message": "",
             "payload": {},
+        }
+
+    @pytest.mark.asyncio
+    async def test_action_validation_error_is_structured_json(self, aiohttp_client):
+        class ActionAgent(Agent):
+            def __init__(self, agent_id: str):
+                super().__init__(agent_id, storage=MemoryStorage(), initial_state={})
+
+            @action
+            async def choose_model(self, model: str):
+                raise ValueError(f"unsupported model: {model}")
+
+        server = AgentServer(ActionAgent, config=AgentServerConfig(enable_rest_api=True))
+        client = await aiohttp_client(server.create_app())
+
+        response = await client.post(
+            "/agent/action/action/choose_model",
+            json={"model": "future-model"},
+        )
+
+        assert response.status == 400
+        assert response.content_type == "application/json"
+        assert await response.json() == {
+            "error": "unsupported model: future-model",
+            "type": "ValueError",
         }
 
     @pytest.mark.asyncio

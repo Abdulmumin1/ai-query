@@ -25,6 +25,7 @@ __all__ = [
     "RetryPolicy",
     # Storage
     "Storage",
+    "EventLogStorage",
     "MemoryStorage",
     "SQLiteStorage",
     # Multi-agent server
@@ -55,6 +56,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "turn_event_to_dict": ("ai_query.agents.turn_codec", "turn_event_to_dict"),
     "RetryPolicy": ("ai_query.types", "RetryPolicy"),
     "Storage": ("ai_query.agents.storage", "Storage"),
+    "EventLogStorage": ("ai_query.agents.storage", "EventLogStorage"),
     "MemoryStorage": ("ai_query.agents.storage", "MemoryStorage"),
     "SQLiteStorage": ("ai_query.agents.storage", "SQLiteStorage"),
     "AgentServer": ("ai_query.agents.server", "AgentServer"),
