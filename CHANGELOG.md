@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.8.1
+
+- patch: Add injected tool execution context with abort, metadata, identity, and typed progress events.
+
 ## 1.8.0
 
 - minor: Add automatic prompt caching telemetry for OpenAI, Anthropic, DeepSeek, and Google providers.

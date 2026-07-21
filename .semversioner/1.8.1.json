@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Add injected tool execution context with abort, metadata, identity, and typed progress events.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-07-21T09:28:10+00:00",
+  "version": "1.8.1"
+}
