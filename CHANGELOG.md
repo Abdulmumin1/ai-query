@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.9.1
+
+- patch: Keep SSE replay and live delivery strictly ordered across reconnects.
+
 ## 1.9.0
 
 - minor: Add a public deterministic faux provider for testing generation, streaming, tool loops, and live agents without network calls.
