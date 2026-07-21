@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Wait for every parallel tool cancellation lifecycle event before terminating the stream.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-07-21T11:36:22+00:00",
+  "version": "1.9.2"
+}

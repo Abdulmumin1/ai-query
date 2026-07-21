@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.9.2
+
+- patch: Wait for every parallel tool cancellation lifecycle event before terminating the stream.
+
 ## 1.9.1
 
 - patch: Keep SSE replay and live delivery strictly ordered across reconnects.
