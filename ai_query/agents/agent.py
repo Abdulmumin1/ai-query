@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import inspect
 import json
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ from ai_query.agents.hooks import (
     BeforeToolCallContext,
     merge_hooks,
 )
-from ai_query.agents.storage import MemoryStorage, Storage
+from ai_query.agents.storage import EventLogStorage, MemoryStorage, Storage
 from ai_query.agents.websocket import Connection, ConnectionContext
 from ai_query.model import LanguageModel
 from ai_query.types import (
@@ -168,6 +169,11 @@ class Agent(Generic[StateT]):
 
     # Class-level flag to enable event persistence for replay
     enable_event_log: bool = False
+
+    # Optional retention bound for replayable events. ``None`` preserves the
+    # complete history. Services should set a finite value based on their
+    # reconnect window so durable logs cannot grow without bound.
+    event_log_limit: int | None = None
 
     # Internal blueprint for state (don't set this directly, use 'state = ...')
     _state_blueprint: Any = None
@@ -311,16 +317,24 @@ class Agent(Generic[StateT]):
 
             if replay:
                 # Log replayable event only
-                event_record = {"id": event_id, "type": event, "data": data}
+                event_record = {
+                    "id": event_id,
+                    "type": event,
+                    "data": deepcopy(data),
+                }
                 self._event_log.append(event_record)
+                self._prune_event_log()
 
             # Persist if enabled and replayable
             if replay and self.enable_event_log:
-                await self._storage.set(f"{self._id}:event_log", self._event_log)
+                await self._persist_event(event_record)
+            elif self.enable_event_log:
+                await self._persist_event_counter(event_id)
 
             # Deliver via handler (set by transport layer)
             if self._emit_handler:
-                await self._emit_handler(event, data, event_id)
+                delivered_data = event_record["data"] if replay else data
+                await self._emit_handler(event, delivered_data, event_id)
 
             return event_id
 
@@ -341,7 +355,43 @@ class Agent(Generic[StateT]):
         self._event_log = []
         self._event_counter = 0
         if self.enable_event_log:
-            await self._storage.delete(f"{self._id}:event_log")
+            storage = self._event_log_storage()
+            if storage is not None:
+                await storage.delete_events(f"{self._id}:event_log")
+            else:
+                await self._storage.delete(f"{self._id}:event_log")
+
+    def _event_log_storage(self) -> EventLogStorage | None:
+        if isinstance(self._storage, EventLogStorage):
+            return self._storage
+        return None
+
+    async def _persist_event(self, event: dict[str, Any]) -> None:
+        storage = self._event_log_storage()
+        if storage is not None:
+            await storage.append_event(
+                f"{self._id}:event_log",
+                event,
+                limit=self.event_log_limit,
+            )
+            return
+        await self._storage.set(f"{self._id}:event_log", self._event_log)
+
+    async def _persist_event_counter(self, event_id: int) -> None:
+        storage = self._event_log_storage()
+        if storage is not None:
+            await storage.set_event_counter(f"{self._id}:event_log", event_id)
+
+    def _prune_event_log(self) -> None:
+        limit = self.event_log_limit
+        if limit is None:
+            return
+        if limit <= 0:
+            self._event_log.clear()
+            return
+        overflow = len(self._event_log) - limit
+        if overflow > 0:
+            del self._event_log[:overflow]
 
     # ─── State Management ──────────────────────────────────────────────────
 
@@ -834,12 +884,20 @@ class Agent(Generic[StateT]):
 
             # Load event log if persistence is enabled
             if self.enable_event_log:
-                event_log_data = await self._storage.get(f"{self._id}:event_log")
-                if event_log_data:
-                    self._event_log = event_log_data
-                    self._event_counter = max(
-                        (e.get("id", 0) for e in self._event_log), default=0
+                storage = self._event_log_storage()
+                if storage is not None:
+                    self._event_log, self._event_counter = await storage.load_events(
+                        f"{self._id}:event_log",
+                        limit=self.event_log_limit,
                     )
+                else:
+                    event_log_data = await self._storage.get(f"{self._id}:event_log")
+                    if event_log_data:
+                        self._event_log = event_log_data
+                        self._prune_event_log()
+                        self._event_counter = max(
+                            (e.get("id", 0) for e in event_log_data), default=0
+                        )
 
             # Build action map
             for name in dir(self):

@@ -392,11 +392,25 @@ class ServerHandlers:
         except Exception:
             body = {}
 
-        result = await agent.handle_request({
-            "action": "action",
-            "name": action_name,
-            "params": body
-        })
+        try:
+            result = await agent.handle_request(
+                {
+                    "action": "action",
+                    "name": action_name,
+                    "params": body,
+                }
+            )
+        except (TypeError, ValueError) as exc:
+            return web.json_response(
+                {"error": str(exc), "type": type(exc).__name__},
+                status=400,
+            )
+        except Exception as exc:
+            logger.exception("Action %s failed for agent %s", action_name, agent_id)
+            return web.json_response(
+                {"error": str(exc), "type": type(exc).__name__},
+                status=500,
+            )
         status = 400 if "error" in result else 200
         return web.json_response(result, status=status)
 

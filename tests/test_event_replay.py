@@ -3,7 +3,7 @@
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from ai_query.agents import Agent, MemoryStorage, Connection, Event
+from ai_query.agents import Agent, MemoryStorage, SQLiteStorage, Connection, Event
 
 
 class TestEventLogBuiltin:
@@ -52,6 +52,18 @@ class TestEventLogBuiltin:
         assert agent._event_log[0]["type"] == "message"
         assert agent._event_log[1]["type"] == "status"
 
+        await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_emit_snapshots_mutable_event_payloads(self):
+        agent = Agent("test", storage=MemoryStorage())
+        await agent.start()
+        payload = {"state": {"items": []}}
+
+        await agent.emit("state", payload)
+        payload["state"]["items"].append("later")
+
+        assert agent._event_log[0]["data"] == {"state": {"items": []}}
         await agent.stop()
 
     @pytest.mark.asyncio
@@ -156,6 +168,28 @@ class TestEventLogBuiltin:
         assert event_id == 11
 
         await agent.stop()
+
+    @pytest.mark.asyncio
+    async def test_sqlite_event_log_is_bounded_and_keeps_monotonic_ids(self, tmp_path):
+        class DurableAgent(Agent):
+            enable_event_log = True
+            event_log_limit = 2
+
+        storage = SQLiteStorage(str(tmp_path / "events.db"))
+        agent = DurableAgent("test", storage=storage)
+        await agent.start()
+        assert await agent.emit("status", {"n": 1}) == 1
+        assert await agent.emit("ephemeral", {}, replay=False) == 2
+        assert await agent.emit("status", {"n": 3}) == 3
+        assert await agent.emit("status", {"n": 4}) == 4
+        await agent.stop()
+
+        resumed = DurableAgent("test", storage=storage)
+        await resumed.start()
+
+        assert [event["id"] for event in resumed._event_log] == [3, 4]
+        assert await resumed.emit("status", {"n": 5}) == 5
+        storage.close()
 
     @pytest.mark.asyncio
     async def test_clear_event_log(self):

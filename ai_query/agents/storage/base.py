@@ -45,3 +45,40 @@ class Storage(Protocol):
     async def keys(self, prefix: str = "") -> list[str]:
         """List all keys with optional prefix filter."""
         ...
+
+
+@runtime_checkable
+class EventLogStorage(Protocol):
+    """Optional storage extension for incremental durable event logs.
+
+    Backends that implement this protocol avoid rewriting the complete event
+    history on every emitted event. ``Agent`` continues to support ordinary
+    key-value ``Storage`` implementations as a compatibility fallback.
+    """
+
+    async def append_event(
+        self,
+        key: str,
+        event: dict[str, Any],
+        *,
+        limit: int | None = None,
+    ) -> None:
+        """Append one event and optionally retain only the newest events."""
+        ...
+
+    async def set_event_counter(self, key: str, event_id: int) -> None:
+        """Persist the latest event ID, including non-replayable ID gaps."""
+        ...
+
+    async def load_events(
+        self,
+        key: str,
+        *,
+        limit: int | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Load retained events and the latest assigned event ID."""
+        ...
+
+    async def delete_events(self, key: str) -> None:
+        """Delete retained events and their persisted counter."""
+        ...
