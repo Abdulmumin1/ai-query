@@ -472,7 +472,7 @@ async def _execute_tool_calls(
             runnable_tools.append((index, tool_call, tool_def))
 
     if runnable_tools:
-        tool_results = await asyncio.gather(
+        outcomes = await asyncio.gather(
             *(
                 _run_tool_call(
                     step_number=step_number,
@@ -486,8 +486,15 @@ async def _execute_tool_calls(
                     agent_id=agent_id,
                 )
                 for index, tool_call, tool_def in runnable_tools
-            )
+            ),
+            return_exceptions=True,
         )
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+        tool_results = [
+            outcome for outcome in outcomes if isinstance(outcome, ToolResult)
+        ]
         for (index, _, _), tool_result in zip(runnable_tools, tool_results):
             ordered_results[index] = tool_result
 

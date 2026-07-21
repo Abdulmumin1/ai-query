@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Wait for every parallel tool cancellation lifecycle event before terminating the stream."
+}
