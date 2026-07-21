@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Persist replay events incrementally with bounded retention, preserve event IDs across restarts, and return structured JSON for invalid agent actions."
-}

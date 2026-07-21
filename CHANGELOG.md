@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.9.3
+
+- patch: Persist replay events incrementally with bounded retention, preserve event IDs across restarts, and return structured JSON for invalid agent actions.
+
 ## 1.9.2
 
 - patch: Wait for every parallel tool cancellation lifecycle event before terminating the stream.
