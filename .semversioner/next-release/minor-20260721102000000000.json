@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "Add a public deterministic faux provider for testing generation, streaming, tool loops, and live agents without network calls."
-}
