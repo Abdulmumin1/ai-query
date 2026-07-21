@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import base64
 import inspect
 from dataclasses import (
@@ -13,6 +14,7 @@ from dataclasses import (
     is_dataclass,
 )
 from types import UnionType
+from types import MappingProxyType
 from typing import (
     Any,
     Annotated,
@@ -29,6 +31,7 @@ from typing import (
     is_typeddict,
     overload,
     TypedDict,
+    Mapping,
 )
 
 # Message types
@@ -341,11 +344,100 @@ def _python_type_to_json_schema(
 # =============================================================================
 
 
+def _freeze_tool_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType(
+            {str(key): _freeze_tool_metadata(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_tool_metadata(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_tool_metadata(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_tool_metadata(item) for item in value)
+    return copy.deepcopy(value)
+
+
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    """Framework-owned runtime context injected into an annotated tool parameter."""
+
+    tool_call_id: str
+    tool_name: str
+    step_number: int
+    signal: "AbortSignal"
+    turn_id: Union[str, None] = None
+    agent_id: Union[str, None] = None
+    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    _emit_progress: Union[
+        Callable[[str, dict[str, Any]], Awaitable[None]], None
+    ] = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "metadata",
+            _freeze_tool_metadata(dict(self.metadata)),
+        )
+
+    async def emit_progress(
+        self,
+        message: str,
+        *,
+        data: Union[Mapping[str, Any], None] = None,
+    ) -> None:
+        if not isinstance(message, str) or not message:
+            raise ValueError("Tool progress message must be a non-empty string")
+        payload = copy.deepcopy(dict(data or {}))
+        if self._emit_progress is not None:
+            await self._emit_progress(message, payload)
+
+
+def _tool_context_parameter(
+    fn: Callable[..., Any],
+    *,
+    localns: Union[dict[str, Any], None] = None,
+) -> Union[str, None]:
+    try:
+        hints = get_type_hints(
+            fn,
+            globalns=fn.__globals__,
+            localns=localns,
+            include_extras=True,
+        )
+    except Exception:
+        hints = getattr(fn, "__annotations__", {})
+
+    matches: list[str] = []
+    for name, parameter in inspect.signature(fn).parameters.items():
+        annotation = hints.get(name, parameter.annotation)
+        if get_origin(annotation) is Annotated:
+            annotation = get_args(annotation)[0]
+        is_context = annotation is ToolExecutionContext or annotation in {
+            "ToolExecutionContext",
+            "ai_query.ToolExecutionContext",
+        }
+        if is_context:
+            if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+                raise TypeError(
+                    "ToolExecutionContext parameters cannot be positional-only"
+                )
+            matches.append(name)
+    if len(matches) > 1:
+        raise TypeError("A tool may declare only one ToolExecutionContext parameter")
+    return matches[0] if matches else None
+
+
 @dataclass
 class Tool:
     description: str
     parameters: dict[str, Any]
     execute: Union[Callable[..., Any], Callable[..., Awaitable[Any]]]
+    context_parameter: Union[str, None] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.context_parameter is None:
+            self.context_parameter = _tool_context_parameter(self.execute)
 
     async def run(self, **kwargs: Any) -> Any:
         sig = inspect.signature(self.execute)
@@ -360,6 +452,16 @@ class Tool:
         if inspect.isawaitable(result):
             return await result
         return result
+
+    async def invoke(
+        self,
+        arguments: dict[str, Any],
+        execution_context: ToolExecutionContext,
+    ) -> Any:
+        kwargs = dict(arguments)
+        if self.context_parameter is not None:
+            kwargs[self.context_parameter] = execution_context
+        return await self.run(**kwargs)
 
 
 @overload
@@ -392,7 +494,14 @@ def tool(
         del frame
 
     if execute is not None and parameters is not None and description is not None:
-        return Tool(description=description, parameters=parameters, execute=execute)
+        return Tool(
+            description=description,
+            parameters=parameters,
+            execute=execute,
+            context_parameter=_tool_context_parameter(
+                execute, localns=definition_localns
+            ),
+        )
 
     def _create_tool_from_function(fn: Callable[..., Any]) -> Tool:
         tool_description = description or ""
@@ -406,19 +515,29 @@ def tool(
                 fn,
                 globalns=fn.__globals__,
                 localns=definition_localns,
+                include_extras=True,
             )
         except Exception:
             hints = {}
 
         sig = inspect.signature(fn)
+        context_parameter = _tool_context_parameter(
+            fn, localns=definition_localns
+        )
         properties: dict[str, Any] = {}
         required: list[str] = []
 
         for param_name, param in sig.parameters.items():
             if param_name in ("self", "cls", "return"):
                 continue
+            if param_name == context_parameter:
+                continue
 
             param_type = hints.get(param_name, str)
+            if get_origin(param_type) is Annotated:
+                param_type = get_args(param_type)[0]
+            if param_type is ToolExecutionContext:
+                continue
             prop = _python_type_to_json_schema(
                 param_type,
                 globalns=fn.__globals__,
@@ -443,7 +562,12 @@ def tool(
             properties[param_name] = prop
 
         schema = {"type": "object", "properties": properties, "required": required}
-        return Tool(description=tool_description, parameters=schema, execute=fn)
+        return Tool(
+            description=tool_description,
+            parameters=schema,
+            execute=fn,
+            context_parameter=context_parameter,
+        )
 
     if func is not None:
         return _create_tool_from_function(func)
@@ -1134,6 +1258,16 @@ class ToolExecutionStartedEvent:
 
 
 @dataclass
+class ToolExecutionProgressEvent:
+    type: Literal["tool_execution.progress"]
+    step_number: int
+    index: int
+    tool_call: ToolCall
+    message: str
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ToolExecutionFinishedEvent:
     type: Literal["tool_execution.finished"]
     step_number: int
@@ -1189,6 +1323,7 @@ TextStreamEvent = Union[
     ToolCallDeltaEvent,
     ToolCallReadyEvent,
     ToolExecutionStartedEvent,
+    ToolExecutionProgressEvent,
     ToolExecutionFinishedEvent,
     ToolResultEvent,
     StreamStepStartedEvent,

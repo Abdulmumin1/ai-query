@@ -32,6 +32,7 @@ def stream_text(
     provider_options: ProviderOptions | None = None,
     reasoning: ReasoningConfig | None = None,
     signal: AbortSignal | None = None,
+    metadata: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> TextStreamResult
 ```
@@ -94,6 +95,11 @@ def stream_text(
   Abort signal used to cancel the streaming loop, including in-flight provider stream reads, retry sleeps, and async tool calls.
 </ParamField>
 
+<ParamField path="metadata" type="Mapping[str, Any] | None">
+  Application metadata exposed as an immutable mapping on injected
+  `ToolExecutionContext` values. It is not sent to the provider.
+</ParamField>
+
 <ParamField path="**kwargs" type="Any">
   Additional provider-specific keyword arguments passed to the provider stream call.
 </ParamField>
@@ -111,7 +117,8 @@ Properties:
   `step.started`, `text.delta`, `reasoning.summary`, `reasoning.delta`,
   `reasoning.signature`, `reasoning.state`, `tool_call.started`,
   `tool_call.delta`, `tool_call.ready`,
-  `tool_execution.started`, `tool_execution.finished`, `tool_result`,
+  `tool_execution.started`, `tool_execution.progress`,
+  `tool_execution.finished`, `tool_result`,
   `step.finished`, and `stream.finished`.
 </ResponseField>
 
@@ -153,6 +160,7 @@ event-specific fields.
 | `tool_call.delta` | `ToolCallDeltaEvent` | `step_number`, `index`, `tool_call_id`, `name_delta`, `arguments_delta` |
 | `tool_call.ready` | `ToolCallReadyEvent` | `step_number`, `index`, `tool_call` |
 | `tool_execution.started` | `ToolExecutionStartedEvent` | `step_number`, `index`, `tool_call` |
+| `tool_execution.progress` | `ToolExecutionProgressEvent` | `step_number`, `index`, `tool_call`, `message`, `data` |
 | `tool_execution.finished` | `ToolExecutionFinishedEvent` | `step_number`, `index`, `tool_call`, `tool_result`, `duration`, `error`, `aborted` |
 | `tool_result` | `ToolResultEvent` | `step_number`, `index`, `tool_call`, `tool_result` |
 | `step.finished` | `StreamStepFinishedEvent` | `step_number`, `step`, `text`, `usage`, `steps` |
@@ -169,6 +177,10 @@ emitted in provider order. Parallel execution finish events are emitted in actua
 completion order. `tool_execution.finished` captures the direct execution result;
 `tool_result` contains the final result after `after_tool_call` hooks and matches
 the result stored in `StepResult.tool_results`.
+
+`tool_execution.progress` is emitted when a tool calls
+`await context.emit_progress(...)`. Progress from parallel calls is emitted in
+actual execution order and remains correlated by step, index, and tool call.
 
 Blocked and unknown tools emit `tool_call.ready` and an error `tool_result`, but
 do not emit execution start or finish events because no tool function ran.
