@@ -258,21 +258,25 @@ class ServerHandlers:
         add_cors_headers(self.server, response, request)
         await response.prepare(request)
 
-        agent._sse_connections.add(response)
         meta = self.server._agents[agent_id]
-
-        # Replay
-        last_id = request.query.get("last_event_id")
-        if last_id:
-            try:
-                lid = int(last_id)
-                conn = AioHttpSSEConnection(response, request)
-                async for event in agent.replay_events(lid):
-                    await conn.send_event(event.type, event.data, event.id)
-            except ValueError:
-                pass
+        conn = AioHttpSSEConnection(response, request)
 
         try:
+            # Register and replay under the same ordering boundary used by
+            # emit(). Live events wait until replay completes, so they cannot
+            # overtake older event IDs or create a snapshot-to-stream gap.
+            async with agent._event_delivery_lock:
+                agent._sse_connections.add(response)
+                last_id = request.query.get("last_event_id")
+                if last_id:
+                    try:
+                        lid = int(last_id)
+                    except ValueError:
+                        lid = None
+                    if lid is not None:
+                        async for event in agent.replay_events(lid):
+                            await conn.send_event(event.type, event.data, event.id)
+
             while True:
                 await asyncio.sleep(_SSE_KEEPALIVE_INTERVAL)
                 meta.last_activity = time.time()
