@@ -900,6 +900,91 @@ class TestStreamTextWithTools:
         ]
 
     @pytest.mark.asyncio
+    async def test_parallel_abort_waits_for_every_tool_lifecycle_event(self):
+        """An abort should finish every sibling before ending the stream."""
+        all_started = asyncio.Event()
+        slow_cleanup_started = asyncio.Event()
+        fast_cancelled = asyncio.Event()
+        release_slow_cleanup = asyncio.Event()
+        started_tools: set[str] = set()
+        cancelled_tools: list[str] = []
+
+        @tool(description="Wait until cancelled")
+        async def wait_for_item(item: str) -> str:
+            started_tools.add(item)
+            if len(started_tools) == 2:
+                all_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                if item == "slow":
+                    slow_cleanup_started.set()
+                    await release_slow_cleanup.wait()
+                cancelled_tools.append(item)
+                if item == "fast":
+                    fast_cancelled.set()
+
+        provider = MockProvider(stream_chunks=[[
+            StreamChunk(
+                is_final=True,
+                finish_reason="tool_use",
+                tool_calls=[
+                    ToolCall(
+                        id="call_slow",
+                        name="wait_for_item",
+                        arguments={"item": "slow"},
+                    ),
+                    ToolCall(
+                        id="call_fast",
+                        name="wait_for_item",
+                        arguments={"item": "fast"},
+                    ),
+                ],
+            )
+        ]])
+        model = LanguageModel(provider=provider, model_id="test-model")
+        controller = AbortController()
+        result = stream_text(
+            model=model,
+            prompt="Wait for both items",
+            tools={"wait_for_item": wait_for_item},
+            stop_when=step_count_is(1),
+            signal=controller.signal,
+        )
+        events = []
+
+        async def collect_events():
+            async for event in result.event_stream:
+                events.append(event)
+
+        stream_task = asyncio.create_task(collect_events())
+        await asyncio.wait_for(all_started.wait(), timeout=1)
+        controller.abort("user cancelled")
+        await asyncio.wait_for(fast_cancelled.wait(), timeout=1)
+        await asyncio.wait_for(slow_cleanup_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+
+        assert stream_task.done() is False
+
+        release_slow_cleanup.set()
+        with pytest.raises(AbortError, match="user cancelled"):
+            await asyncio.wait_for(stream_task, timeout=1)
+
+        finished = [
+            event
+            for event in events
+            if isinstance(event, ToolExecutionFinishedEvent)
+        ]
+        assert cancelled_tools == ["fast", "slow"]
+        assert [event.tool_call.id for event in finished] == [
+            "call_fast",
+            "call_slow",
+        ]
+        assert all(event.aborted for event in finished)
+        assert all(event.tool_result is None for event in finished)
+        assert not any(isinstance(event, ToolResultEvent) for event in events)
+
+    @pytest.mark.asyncio
     async def test_tool_call_fragments_are_forwarded_before_ready(self):
         """Provider fragments should become correlated public stream events."""
         @tool(description="Search")
