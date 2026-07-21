@@ -34,6 +34,8 @@ from ai_query.types import (
     ToolResultEvent,
     TurnTermination,
     Usage,
+    _tool_output_value_from_dict,
+    _tool_output_value_to_dict,
 )
 
 
@@ -160,7 +162,7 @@ def _tool_result_to_dict(tool_result: ToolResult | None) -> dict[str, Any] | Non
     return {
         "tool_call_id": tool_result.tool_call_id,
         "tool_name": tool_result.tool_name,
-        "result": _to_wire_value(tool_result.result),
+        "result": _to_wire_value(_tool_output_value_to_dict(tool_result.result)),
         "is_error": tool_result.is_error,
     }
 
@@ -173,7 +175,7 @@ def _tool_result_from_dict(data: Any) -> ToolResult | None:
     return ToolResult(
         tool_call_id=data["tool_call_id"],
         tool_name=data["tool_name"],
-        result=_from_wire_value(data.get("result")),
+        result=_tool_output_value_from_dict(_from_wire_value(data.get("result"))),
         is_error=data.get("is_error", False),
     )
 

@@ -217,6 +217,47 @@ for tr in result.tool_results:
     print(f"Result: {tr.result}")
 ```
 
+## Returning Images and Files
+
+Return `ToolOutput` when a tool needs to send rich content back to the model.
+The same normalized value flows through `ToolResult`, hooks, streaming events,
+and persisted agent history. Provider adapters handle the wire format.
+
+```python
+from ai_query import FilePart, ImagePart, TextPart, ToolOutput, tool
+
+@tool(description="Render the requested report")
+def render_report() -> ToolOutput:
+    return ToolOutput(content=[
+        TextPart(text="The report and preview are attached."),
+        ImagePart(image=preview_png, media_type="image/png"),
+        FilePart(
+            data=report_pdf,
+            media_type="application/pdf",
+            filename="report.pdf",
+        ),
+    ])
+```
+
+Use ordinary strings, numbers, lists, or dictionaries for normal tool results.
+A list is not treated as rich content unless it is wrapped in `ToolOutput`.
+
+Rich tool outputs require upstream support:
+
+- OpenAI uses the Responses API. Set `provider_options={"openai": {"api": "responses"}}`
+  to use it from the first request; ai-query also selects it when rich output is
+  present in a follow-up request.
+- Anthropic Messages supports nested text, image, and document tool-result blocks.
+- Gemini multimodal function responses require a Gemini 3 or newer model.
+- Bedrock image tool results require Amazon Nova or Anthropic Claude 3/4.
+- OpenAI-compatible chat-completions endpoints do not have a lossless rich
+  tool-result representation.
+
+Unsupported endpoint and model combinations raise
+`UnsupportedToolOutputError` before the request is sent. Binary values are
+encoded for persistence and wire transport; `ToolOutput` representations redact
+their payloads.
+
 ## Limiting Execution Steps
 
 Control the maximum number of tool execution loops using [`stop_when`](/reference/types/stop-conditions):

@@ -184,6 +184,8 @@ def _copy_usage(usage: Usage) -> Usage:
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         cached_tokens=usage.cached_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_miss_tokens=usage.cache_miss_tokens,
         total_tokens=usage.total_tokens,
     )
 

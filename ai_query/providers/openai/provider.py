@@ -27,8 +27,14 @@ from ai_query.types import (
     TextPart,
     ImagePart,
     FilePart,
+    ToolOutput,
 )
 from ai_query.model import LanguageModel, EmbeddingModel
+from ai_query.providers.tool_output import (
+    has_tool_output,
+    openai_responses_content,
+    unsupported,
+)
 
 
 # Cached provider instance
@@ -143,6 +149,8 @@ class OpenAIProvider(BaseProvider):
                     if hasattr(part, "type") and part.type == "tool_result":
                         tr = part.tool_result
                         if tr:
+                            if isinstance(tr.result, ToolOutput):
+                                raise unsupported(self.name, "chat/completions")
                             result.append(
                                 {
                                     "role": "tool",
@@ -154,6 +162,8 @@ class OpenAIProvider(BaseProvider):
                         # Handle dict format if passed directly
                         tr = part.get("tool_result")
                         if tr:
+                            if isinstance(tr.result, ToolOutput):
+                                raise unsupported(self.name, "chat/completions")
                             result.append(
                                 {
                                     "role": "tool",
@@ -435,11 +445,18 @@ class OpenAIProvider(BaseProvider):
                         tool_result = part.get("tool_result")
 
                     if tool_result:
+                        output = tool_result.result
+                        if isinstance(output, ToolOutput):
+                            output = await openai_responses_content(
+                                output, self._fetch_resource_as_base64
+                            )
+                        else:
+                            output = str(output)
                         input_items.append(
                             {
                                 "type": "function_call_output",
                                 "call_id": tool_result.tool_call_id,
-                                "output": str(tool_result.result),
+                                "output": output,
                             }
                         )
                 continue
@@ -579,13 +596,28 @@ class OpenAIProvider(BaseProvider):
         *,
         tools: ToolSet | None,
         request_options: dict[str, Any],
+        messages: list[Message],
     ) -> bool:
-        return self.name == "openai" and bool(tools) and "reasoning_effort" in request_options
+        api_mode = request_options.get("api")
+        if api_mode not in {None, "chat", "responses"}:
+            raise ValueError(
+                "provider_options['openai']['api'] must be 'chat' or 'responses'"
+            )
+        if self.name != "openai" or not tools:
+            return False
+        if api_mode == "chat" and has_tool_output(messages):
+            raise unsupported(self.name, "chat/completions")
+        return (
+            api_mode == "responses"
+            or has_tool_output(messages)
+            or (api_mode is None and "reasoning_effort" in request_options)
+        )
 
     def _build_responses_request_options(
         self, request_options: dict[str, Any]
     ) -> dict[str, Any]:
         responses_options = dict(request_options)
+        responses_options.pop("api", None)
 
         reasoning_effort = responses_options.pop("reasoning_effort", None)
         if reasoning_effort is not None:
@@ -630,6 +662,7 @@ class OpenAIProvider(BaseProvider):
                 input_tokens=usage_data.get("input_tokens", 0),
                 output_tokens=usage_data.get("output_tokens", 0),
                 cached_tokens=input_details.get("cached_tokens", 0),
+                cache_write_tokens=input_details.get("cache_write_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
@@ -721,13 +754,11 @@ class OpenAIProvider(BaseProvider):
 
         url = f"{self.base_url}/chat/completions"
 
-        # Convert messages
-        converted_messages = await self._convert_messages(messages)
-
         request_options = self._build_request_options(kwargs, openai_options)
         if tools and self._should_use_responses_api(
             tools=tools,
             request_options=request_options,
+            messages=messages,
         ):
             return await self._generate_with_responses(
                 model=model,
@@ -735,6 +766,9 @@ class OpenAIProvider(BaseProvider):
                 tools=tools,
                 request_options=request_options,
             )
+
+        request_options.pop("api", None)
+        converted_messages = await self._convert_messages(messages)
 
         # Build request parameters
         request_body: dict[str, Any] = {
@@ -767,7 +801,12 @@ class OpenAIProvider(BaseProvider):
             usage = Usage(
                 input_tokens=usage_data.get("prompt_tokens", 0),
                 output_tokens=usage_data.get("completion_tokens", 0),
-                cached_tokens=prompt_details.get("cached_tokens", 0),
+                cached_tokens=usage_data.get(
+                    "prompt_cache_hit_tokens",
+                    prompt_details.get("cached_tokens", 0),
+                ),
+                cache_write_tokens=prompt_details.get("cache_write_tokens", 0),
+                cache_miss_tokens=usage_data.get("prompt_cache_miss_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
@@ -826,13 +865,11 @@ class OpenAIProvider(BaseProvider):
         usage = None
         current_tool_calls: dict[int, dict[str, Any]] = {}
 
-        # Convert messages
-        converted_messages = await self._convert_messages(messages)
-
         request_options = self._build_request_options(kwargs, openai_options)
         if tools and self._should_use_responses_api(
             tools=tools,
             request_options=request_options,
+            messages=messages,
         ):
             result = await self._generate_with_responses(
                 model=model,
@@ -862,6 +899,9 @@ class OpenAIProvider(BaseProvider):
                 tool_calls=result.response.get("tool_calls") or None,
             )
             return
+
+        request_options.pop("api", None)
+        converted_messages = await self._convert_messages(messages)
 
         # Build request parameters with streaming enabled
         request_body: dict[str, Any] = {
@@ -899,7 +939,16 @@ class OpenAIProvider(BaseProvider):
                     usage = Usage(
                         input_tokens=usage_data.get("prompt_tokens", 0),
                         output_tokens=usage_data.get("completion_tokens", 0),
-                        cached_tokens=prompt_details.get("cached_tokens", 0),
+                        cached_tokens=usage_data.get(
+                            "prompt_cache_hit_tokens",
+                            prompt_details.get("cached_tokens", 0),
+                        ),
+                        cache_write_tokens=prompt_details.get(
+                            "cache_write_tokens", 0
+                        ),
+                        cache_miss_tokens=usage_data.get(
+                            "prompt_cache_miss_tokens", 0
+                        ),
                         total_tokens=usage_data.get("total_tokens", 0),
                     )
 

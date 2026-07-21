@@ -117,13 +117,22 @@ class TestBaseProvider:
 
         provider = TestProvider()
 
-        total = Usage(input_tokens=10, output_tokens=5, total_tokens=15)
-        delta = Usage(input_tokens=5, output_tokens=3, total_tokens=8)
+        total = Usage(
+            input_tokens=10, output_tokens=5, cached_tokens=4,
+            cache_write_tokens=3, cache_miss_tokens=6, total_tokens=15,
+        )
+        delta = Usage(
+            input_tokens=5, output_tokens=3, cached_tokens=2,
+            cache_write_tokens=1, cache_miss_tokens=3, total_tokens=8,
+        )
 
         provider._accumulate_usage(total, delta)
 
         assert total.input_tokens == 15
         assert total.output_tokens == 8
+        assert total.cached_tokens == 6
+        assert total.cache_write_tokens == 4
+        assert total.cache_miss_tokens == 9
         assert total.total_tokens == 23
 
     def test_apply_reasoning_unsupported_by_default(self):
@@ -762,6 +771,50 @@ class TestDeepSeekProvider:
     """Tests for DeepSeek provider."""
 
     @pytest.mark.asyncio
+    async def test_deepseek_normalizes_cache_hit_and_miss_usage(self):
+        from ai_query.providers.deepseek import DeepSeekProvider
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                return {
+                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 5,
+                        "prompt_cache_hit_tokens": 80,
+                        "prompt_cache_miss_tokens": 20,
+                        "total_tokens": 105,
+                    },
+                }
+
+            async def stream(self, url, json, headers=None):
+                yield b'data: {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 5, "prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 20, "total_tokens": 105}}\n'
+                yield b'data: [DONE]\n'
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = DeepSeekProvider(api_key="test", transport=FakeTransport())
+        result = await provider.generate(
+            model="deepseek-chat",
+            messages=[Message(role="user", content="Hello")],
+        )
+        chunks = [
+            chunk
+            async for chunk in provider.stream(
+                model="deepseek-chat",
+                messages=[Message(role="user", content="Hello")],
+            )
+        ]
+
+        assert result.usage is not None
+        assert result.usage.cached_tokens == 80
+        assert result.usage.cache_miss_tokens == 20
+        assert chunks[-1].usage is not None
+        assert chunks[-1].usage.cached_tokens == 80
+        assert chunks[-1].usage.cache_miss_tokens == 20
+
+    @pytest.mark.asyncio
     async def test_deepseek_sends_reasoning_content_for_assistant_messages(self):
         """DeepSeek should always send reasoning_content on assistant messages."""
         from ai_query.providers.deepseek import DeepSeekProvider
@@ -816,6 +869,58 @@ class TestDeepSeekProvider:
 
 class TestAnthropicProvider:
     """Tests for Anthropic provider."""
+
+    @pytest.mark.asyncio
+    async def test_anthropic_enables_automatic_cache_and_normalizes_usage(self):
+        from ai_query.providers.anthropic import AnthropicProvider
+
+        class FakeTransport:
+            def __init__(self):
+                self.requests = []
+
+            async def post(self, url, json, headers=None):
+                self.requests.append(json)
+                return {
+                    "content": [{"type": "text", "text": "ok"}],
+                    "stop_reason": "end_turn",
+                    "usage": {
+                        "input_tokens": 20,
+                        "output_tokens": 5,
+                        "cache_read_input_tokens": 80,
+                        "cache_creation_input_tokens": 10,
+                    },
+                }
+
+            async def stream(self, url, json, headers=None):
+                self.requests.append(json)
+                yield b'data: {"type":"message_start","message":{"usage":{"input_tokens":20,"cache_read_input_tokens":80,"cache_creation_input_tokens":10}}}\n'
+                yield b'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}\n'
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        transport = FakeTransport()
+        provider = AnthropicProvider(api_key="test", transport=transport)
+        result = await provider.generate(
+            model="claude-sonnet-4-20250514",
+            messages=[Message(role="user", content="Hello")],
+        )
+        chunks = [
+            chunk
+            async for chunk in provider.stream(
+                model="claude-sonnet-4-20250514",
+                messages=[Message(role="user", content="Hello")],
+            )
+        ]
+
+        assert transport.requests[0]["cache_control"] == {"type": "ephemeral"}
+        assert transport.requests[1]["cache_control"] == {"type": "ephemeral"}
+        assert result.usage is not None
+        assert result.usage.cached_tokens == 80
+        assert result.usage.cache_write_tokens == 10
+        assert chunks[-1].usage is not None
+        assert chunks[-1].usage.cached_tokens == 80
+        assert chunks[-1].usage.cache_write_tokens == 10
 
     def test_anthropic_function_creates_model(self):
         """anthropic() should create a LanguageModel."""

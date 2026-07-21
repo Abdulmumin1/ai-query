@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import base64
 import inspect
 from dataclasses import (
     MISSING as DATACLASS_MISSING,
@@ -849,6 +850,121 @@ class FilePart:
     type: Literal["file"] = "file"
     data: Union[str, bytes] = b""
     media_type: str = ""
+    filename: Union[str, None] = None
+
+
+ToolOutputPart = Union[TextPart, ImagePart, FilePart]
+
+
+class UnsupportedToolOutputError(ValueError):
+    """Raised when a provider endpoint cannot represent a rich tool output."""
+
+
+@dataclass(repr=False)
+class ToolOutput:
+    """Explicit rich content returned by a tool for the model's next turn."""
+
+    content: list[ToolOutputPart]
+
+    def __post_init__(self) -> None:
+        unsupported = [
+            type(part).__name__
+            for part in self.content
+            if not isinstance(part, (TextPart, ImagePart, FilePart))
+        ]
+        if unsupported:
+            raise TypeError(
+                "ToolOutput content only supports TextPart, ImagePart, and "
+                f"FilePart; got {', '.join(unsupported)}"
+            )
+
+    def __repr__(self) -> str:
+        counts = {
+            "text": sum(isinstance(part, TextPart) for part in self.content),
+            "image": sum(isinstance(part, ImagePart) for part in self.content),
+            "file": sum(isinstance(part, FilePart) for part in self.content),
+        }
+        return (
+            "ToolOutput("
+            f"text_parts={counts['text']}, image_parts={counts['image']}, "
+            f"file_parts={counts['file']}, payloads=<redacted>)"
+        )
+
+
+_TOOL_OUTPUT_MARKER = "$ai_query.tool_output"
+_TOOL_OUTPUT_BYTES_MARKER = "$ai_query.bytes"
+
+
+def _tool_output_value_to_dict(value: Any) -> Any:
+    if not isinstance(value, ToolOutput):
+        return value
+
+    content: list[dict[str, Any]] = []
+    for part in value.content:
+        if isinstance(part, TextPart):
+            content.append({"type": "text", "text": part.text})
+            continue
+
+        raw_value = part.image if isinstance(part, ImagePart) else part.data
+        if isinstance(raw_value, bytes):
+            raw_value = {
+                _TOOL_OUTPUT_BYTES_MARKER: base64.b64encode(raw_value).decode("ascii")
+            }
+        part_dict: dict[str, Any] = {
+            "type": part.type,
+            "image" if isinstance(part, ImagePart) else "data": raw_value,
+        }
+        if part.media_type:
+            part_dict["media_type"] = part.media_type
+        if isinstance(part, FilePart) and part.filename:
+            part_dict["filename"] = part.filename
+        content.append(part_dict)
+
+    return {_TOOL_OUTPUT_MARKER: {"content": content}}
+
+
+def _tool_output_value_from_dict(value: Any) -> Any:
+    if not isinstance(value, dict) or set(value) != {_TOOL_OUTPUT_MARKER}:
+        return value
+    payload = value[_TOOL_OUTPUT_MARKER]
+    if not isinstance(payload, dict) or not isinstance(payload.get("content"), list):
+        raise ValueError("Invalid serialized ToolOutput")
+
+    content: list[ToolOutputPart] = []
+    for item in payload["content"]:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid serialized ToolOutput part")
+        part_type = item.get("type")
+        if part_type == "text":
+            content.append(TextPart(text=item.get("text", "")))
+            continue
+        if part_type not in {"image", "file"}:
+            raise ValueError(f"Invalid serialized ToolOutput part type: {part_type!r}")
+
+        key = "image" if part_type == "image" else "data"
+        raw_value = item.get(key, b"")
+        if isinstance(raw_value, dict) and set(raw_value) == {_TOOL_OUTPUT_BYTES_MARKER}:
+            encoded = raw_value[_TOOL_OUTPUT_BYTES_MARKER]
+            if not isinstance(encoded, str):
+                raise ValueError("Invalid encoded bytes in ToolOutput")
+            try:
+                raw_value = base64.b64decode(encoded, validate=True)
+            except ValueError as exc:
+                raise ValueError("Invalid encoded bytes in ToolOutput") from exc
+
+        if part_type == "image":
+            content.append(
+                ImagePart(image=raw_value, media_type=item.get("media_type"))
+            )
+        else:
+            content.append(
+                FilePart(
+                    data=raw_value,
+                    media_type=item.get("media_type", ""),
+                    filename=item.get("filename"),
+                )
+            )
+    return ToolOutput(content=content)
 
 
 ContentPart = Union[
@@ -880,7 +996,7 @@ class Message:
         return {
             "tool_call_id": tool_result.tool_call_id,
             "tool_name": tool_result.tool_name,
-            "result": tool_result.result,
+            "result": _tool_output_value_to_dict(tool_result.result),
             "is_error": tool_result.is_error,
         }
 
@@ -912,6 +1028,8 @@ class Message:
         elif isinstance(part, FilePart):
             part_dict["data"] = part.data
             part_dict["media_type"] = part.media_type
+            if part.filename:
+                part_dict["filename"] = part.filename
         elif isinstance(part, ToolCallPart):
             if part.tool_call:
                 part_dict["tool_call"] = cls._tool_call_to_dict(part.tool_call)
@@ -942,6 +1060,7 @@ class Message:
             return FilePart(
                 data=part.get("data", b""),
                 media_type=part.get("media_type", ""),
+                filename=part.get("filename"),
             )
         if part_type == "tool_call":
             tool_call = part.get("tool_call")
@@ -959,7 +1078,7 @@ class Message:
                 tool_result = ToolResult(
                     tool_call_id=tool_result["tool_call_id"],
                     tool_name=tool_result["tool_name"],
-                    result=tool_result.get("result"),
+                    result=_tool_output_value_from_dict(tool_result.get("result")),
                     is_error=tool_result.get("is_error", False),
                 )
             return ToolResultPart(tool_result=tool_result)
@@ -999,6 +1118,8 @@ class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_miss_tokens: int = 0
     total_tokens: int = 0
 
 
