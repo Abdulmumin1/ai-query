@@ -66,6 +66,9 @@ jobs:
           # Assuming version is in the [project] section as version = "x.y.z"
           sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" pyproject.toml
 
+          # Keep the editable package entry aligned with the released version.
+          uv lock
+
       - name: Commit and Push
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
