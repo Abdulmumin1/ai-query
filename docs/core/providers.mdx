@@ -169,6 +169,50 @@ result = await generate_text(
 
 See individual provider pages for available options.
 
+## Deterministic Tests with the Faux Provider
+
+The public `faux` provider runs the normal generation, streaming, tool, and agent
+loops without network requests or credentials. Queue one response per model step:
+
+```python
+from ai_query import Agent, Field, step_count_is, tool
+from ai_query.providers import FauxProvider, FauxResponse, faux
+from ai_query.types import ToolCall
+
+@tool(description="Read a fixture")
+def read_fixture(name: str = Field(description="Fixture name")) -> str:
+    return f"fixture:{name}"
+
+model = faux(responses=[
+    FauxResponse(
+        tool_calls=[ToolCall(
+            id="call_1",
+            name="read_fixture",
+            arguments={"name": "profile"},
+        )],
+        finish_reason="tool_calls",
+    ),
+    FauxResponse(text="The profile is ready.", chunks=["The profile ", "is ready."]),
+])
+
+agent = Agent(
+    "test",
+    model=model,
+    tools={"read_fixture": read_fixture},
+    stop_when=step_count_is(4),
+)
+result = await agent.run("Load the profile")
+
+provider = model.provider
+assert isinstance(provider, FauxProvider)
+assert provider.call_count == 2
+provider.assert_exhausted()
+```
+
+Use a response factory when the next scripted response should inspect the model,
+messages, tools, or provider options captured in `FauxCall`. Queue exhaustion is an
+error by design, and `assert_exhausted()` catches unused scripted steps.
+
 ## OpenAI-Compatible Providers
 
 OpenRouter, DeepSeek, Groq, and Workers AI use OpenAI-compatible APIs internally. This means:

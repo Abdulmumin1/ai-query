@@ -10,6 +10,14 @@ from ai_query.providers.llama import llama
 from ai_query.providers.xai import xai
 from ai_query.providers.bedrock import bedrock
 from ai_query.providers.workers_ai import workers_ai
+from ai_query.providers.faux import (
+    FauxCall,
+    FauxProvider,
+    FauxResponse,
+    FauxResponseFactory,
+    FauxResponseStep,
+    faux,
+)
 
 __all__ = [
     "openai",
@@ -22,4 +30,10 @@ __all__ = [
     "xai",
     "bedrock",
     "workers_ai",
+    "FauxCall",
+    "FauxProvider",
+    "FauxResponse",
+    "FauxResponseFactory",
+    "FauxResponseStep",
+    "faux",
 ]
