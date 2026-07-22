@@ -383,10 +383,32 @@ class GoogleProvider(BaseProvider):
                 {
                     "name": name,
                     "description": tool.description,
-                    "parameters": tool.parameters,
+                    "parameters": self._normalize_tool_schema(tool.parameters),
                 }
             )
         return [{"functionDeclarations": function_declarations}]
+
+    def _normalize_tool_schema(
+        self,
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the subset of JSON Schema accepted by Gemini tools."""
+        normalized: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "additionalProperties":
+                continue
+            if isinstance(value, dict):
+                normalized[key] = self._normalize_tool_schema(value)
+            elif isinstance(value, list):
+                normalized[key] = [
+                    self._normalize_tool_schema(item)
+                    if isinstance(item, dict)
+                    else item
+                    for item in value
+                ]
+            else:
+                normalized[key] = value
+        return normalized
 
     def _build_request_body(
         self,
