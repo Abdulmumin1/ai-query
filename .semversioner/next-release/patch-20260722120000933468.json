@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Normalize Google tool schemas to Gemini's supported subset so free-form object parameters do not reject the entire model request."
+}

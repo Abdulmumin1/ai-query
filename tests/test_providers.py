@@ -1840,6 +1840,52 @@ class TestGoogleProvider:
         assert len(converted[0]["functionDeclarations"]) == 1
         assert converted[0]["functionDeclarations"][0]["name"] == "calculate"
 
+    def test_google_convert_tools_removes_nested_additional_properties(self):
+        """Gemini tool schemas must omit unsupported additionalProperties fields."""
+        from ai_query.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key="test")
+        parameters = {
+            "type": "object",
+            "properties": {
+                "arguments": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "additionalProperties": False,
+        }
+        tools = {
+            "mcp": Tool(
+                description="Call an MCP tool",
+                parameters=parameters,
+                execute=lambda **arguments: arguments,
+            )
+        }
+
+        converted = provider._convert_tools(tools)
+
+        declaration = converted[0]["functionDeclarations"][0]
+        assert declaration["parameters"] == {
+            "type": "object",
+            "properties": {
+                "arguments": {"type": "object"},
+                "items": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                },
+            },
+        }
+        assert parameters["additionalProperties"] is False
+        assert parameters["properties"]["arguments"]["additionalProperties"] is True
+
 
 # =============================================================================
 # Provider Integration Tests (Mocked HTTP)
