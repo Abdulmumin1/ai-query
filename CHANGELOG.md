@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.9.4
+
+- patch: Normalize Google tool schemas to Gemini's supported subset so free-form object parameters do not reject the entire model request.
+
 ## 1.9.3
 
 - patch: Persist replay events incrementally with bounded retention, preserve event IDs across restarts, and return structured JSON for invalid agent actions.
