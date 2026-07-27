@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.9.5
+
+- patch: Preserve OpenAI-compatible tool-call extension metadata across streamed agent turns so Gemini thought signatures survive function-call loops.
+
 ## 1.9.4
 
 - patch: Normalize Google tool schemas to Gemini's supported subset so free-form object parameters do not reject the entire model request.
