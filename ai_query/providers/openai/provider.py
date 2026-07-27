@@ -44,6 +44,8 @@ _default_provider: OpenAIProvider | None = None
 # Cached embedding provider instance
 _default_embedding_provider: OpenAIProvider | None = None
 
+OPENAI_CHAT_TOOL_CALL_EXTRA_CONTENT = "openai_chat_tool_call_extra_content"
+
 
 class _OpenAINamespace:
     """Namespace for OpenAI provider functions.
@@ -182,8 +184,27 @@ class OpenAIProvider(BaseProvider):
                     if isinstance(part, ToolCallPart):
                         tc = part.tool_call
                         if tc:
-                            tool_calls.append(
-                                {
+                            converted_tool_call = {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments),
+                                },
+                            }
+                            extra_content = tc.metadata.get(
+                                OPENAI_CHAT_TOOL_CALL_EXTRA_CONTENT
+                            )
+                            if isinstance(extra_content, dict):
+                                converted_tool_call["extra_content"] = extra_content
+                            tool_calls.append(converted_tool_call)
+                    elif isinstance(part, TextPart):
+                        content_text += part.text
+                    elif isinstance(part, dict):
+                        if part.get("type") == "tool_call":
+                            tc = part.get("tool_call")
+                            if tc:
+                                converted_tool_call = {
                                     "id": tc.id,
                                     "type": "function",
                                     "function": {
@@ -191,23 +212,12 @@ class OpenAIProvider(BaseProvider):
                                         "arguments": json.dumps(tc.arguments),
                                     },
                                 }
-                            )
-                    elif isinstance(part, TextPart):
-                        content_text += part.text
-                    elif isinstance(part, dict):
-                        if part.get("type") == "tool_call":
-                            tc = part.get("tool_call")
-                            if tc:
-                                tool_calls.append(
-                                    {
-                                        "id": tc.id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": tc.name,
-                                            "arguments": json.dumps(tc.arguments),
-                                        },
-                                    }
+                                extra_content = tc.metadata.get(
+                                    OPENAI_CHAT_TOOL_CALL_EXTRA_CONTENT
                                 )
+                                if isinstance(extra_content, dict):
+                                    converted_tool_call["extra_content"] = extra_content
+                                tool_calls.append(converted_tool_call)
                         elif part.get("type") == "text":
                             content_text += part.get("text", "")
 
@@ -823,11 +833,16 @@ class OpenAIProvider(BaseProvider):
                     arguments = json.loads(function.get("arguments") or "{}")
                 except json.JSONDecodeError:
                     arguments = {}
+                metadata = {}
+                extra_content = tc.get("extra_content")
+                if isinstance(extra_content, dict):
+                    metadata[OPENAI_CHAT_TOOL_CALL_EXTRA_CONTENT] = extra_content
                 tool_calls.append(
                     ToolCall(
                         id=tc.get("id", ""),
                         name=function.get("name", ""),
                         arguments=arguments,
+                        metadata=metadata,
                     )
                 )
 
@@ -1033,6 +1048,7 @@ class OpenAIProvider(BaseProvider):
                                     "id": "",
                                     "name": "",
                                     "arguments": "",
+                                    "extra_content": None,
                                 }
 
                             id_delta = tc.get("id") or ""
@@ -1041,6 +1057,9 @@ class OpenAIProvider(BaseProvider):
                                 fn = {}
                             name_delta = fn.get("name") or ""
                             arguments_delta = fn.get("arguments") or ""
+                            extra_content = tc.get("extra_content")
+                            if isinstance(extra_content, dict):
+                                current_tool_calls[idx]["extra_content"] = extra_content
 
                             current_tool_calls[idx]["id"] += id_delta
                             current_tool_calls[idx]["name"] += name_delta
@@ -1078,6 +1097,11 @@ class OpenAIProvider(BaseProvider):
                             id=call_data["id"],
                             name=call_data["name"],
                             arguments=arguments,
+                            metadata={
+                                OPENAI_CHAT_TOOL_CALL_EXTRA_CONTENT: call_data["extra_content"]
+                            }
+                            if isinstance(call_data["extra_content"], dict)
+                            else {},
                         )
                     )
                 except json.JSONDecodeError:

@@ -6,7 +6,16 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from ai_query.types import Message, Usage, ToolCall, Tool, ImagePart, ReasoningPart, TextPart
+from ai_query.types import (
+    ImagePart,
+    Message,
+    ReasoningPart,
+    TextPart,
+    Tool,
+    ToolCall,
+    ToolCallPart,
+    Usage,
+)
 from ai_query.model import LanguageModel
 
 
@@ -255,6 +264,35 @@ class TestOpenAIProvider:
         assert len(converted) == 2
         assert converted[0] == {"role": "system", "content": "You are helpful."}
         assert converted[1] == {"role": "user", "content": "Hello!"}
+
+    @pytest.mark.asyncio
+    async def test_openai_convert_messages_preserves_tool_call_extra_content(self):
+        """OpenAI-compatible extension metadata must survive a tool round trip."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        provider = OpenAIProvider(api_key="test")
+        signature = {"google": {"thought_signature": "signed-thought"}}
+        messages = [
+            Message(
+                role="assistant",
+                content=[
+                    ToolCallPart(
+                        tool_call=ToolCall(
+                            id="call_1",
+                            name="greet",
+                            arguments={"name": "Ada"},
+                            metadata={
+                                "openai_chat_tool_call_extra_content": signature
+                            },
+                        )
+                    )
+                ],
+            )
+        ]
+
+        converted = await provider._convert_messages(messages)
+
+        assert converted[0]["tool_calls"][0]["extra_content"] == signature
 
     @pytest.mark.asyncio
     async def test_openai_convert_messages_for_responses_with_image_part(self):
@@ -659,6 +697,43 @@ class TestGoogleProvider:
         assert chunks[0].reasoning_events[0].data == {"field": "reasoning.summary"}
         assert chunks[1].text == "Hello from a tool-capable reasoning response."
         assert chunks[-1].is_final is True
+
+    @pytest.mark.asyncio
+    async def test_openai_stream_preserves_tool_call_extra_content(self):
+        """Streaming adapters must retain Gemini thought signatures for the next turn."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        signature = {"google": {"thought_signature": "signed-thought"}}
+
+        class FakeTransport:
+            async def post(self, url, json, headers=None):
+                raise AssertionError("streaming request should not use post")
+
+            async def stream(self, url, json, headers=None):
+                yield (
+                    b'data: {"choices":[{"index":0,"delta":{"tool_calls":['
+                    b'{"index":0,"id":"call_1","type":"function",'
+                    b'"function":{"name":"greet","arguments":"{\\"name\\":\\"Ada\\"}"},'
+                    b'"extra_content":{"google":{"thought_signature":"signed-thought"}}}]},'
+                    b'"finish_reason":"tool_calls"}]}\n\n'
+                )
+                yield b"data: [DONE]\n\n"
+
+            async def get(self, url, headers=None):
+                return b"", "application/octet-stream"
+
+        provider = OpenAIProvider(api_key="test", transport=FakeTransport())
+        chunks = []
+        async for chunk in provider.stream(
+            model="gemini-3.6-flash",
+            messages=[Message(role="user", content="Greet Ada")],
+        ):
+            chunks.append(chunk)
+
+        assert chunks[-1].tool_calls is not None
+        assert chunks[-1].tool_calls[0].metadata == {
+            "openai_chat_tool_call_extra_content": signature
+        }
 
     @pytest.mark.asyncio
     async def test_openai_generate_ignores_malformed_choice_and_usage(self):
