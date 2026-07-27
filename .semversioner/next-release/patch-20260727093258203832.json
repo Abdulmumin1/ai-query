@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Preserve OpenAI-compatible tool-call extension metadata across streamed agent turns so Gemini thought signatures survive function-call loops."
+}
