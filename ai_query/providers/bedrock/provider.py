@@ -95,6 +95,13 @@ class BedrockProvider(BaseProvider):
 
     name = "bedrock"
 
+    def supports_native_tool_output(self, model: str) -> bool:
+        return (
+            "amazon.nova" in model
+            or "anthropic.claude-3" in model
+            or "anthropic.claude-4" in model
+        )
+
     def __init__(
         self,
         region: str | None = None,
@@ -211,11 +218,7 @@ class BedrockProvider(BaseProvider):
                                         for item in tr.result.content
                                     )
                                     and model is not None
-                                    and not (
-                                        "amazon.nova" in model
-                                        or "anthropic.claude-3" in model
-                                        or "anthropic.claude-4" in model
-                                    )
+                                    and not self.supports_native_tool_output(model)
                                 ):
                                     raise unsupported(self.name, model)
                                 tool_content = (

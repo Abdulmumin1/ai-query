@@ -6,18 +6,33 @@ import base64
 import binascii
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
+from ai_query.model import LanguageModel
 from ai_query.types import (
+    ContentPart,
     FilePart,
     ImagePart,
+    Message,
     TextPart,
     ToolOutput,
+    ToolOutputPart,
+    ToolResultPart,
     UnsupportedToolOutputError,
 )
 
 
 FetchResource = Callable[[str], Awaitable[tuple[str, str]]]
+
+NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)"
+NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)"
+NON_FILE_USER_PLACEHOLDER = "(file omitted: model does not support files)"
+NON_FILE_TOOL_PLACEHOLDER = "(tool file omitted: model does not support files)"
+CHAT_FILE_TOOL_PLACEHOLDER = (
+    "(tool file omitted: provider endpoint does not support file tool results)"
+)
+CHAT_TOOL_IMAGE_PROMPT = "Attached image(s) from tool result:"
 
 
 def has_tool_output(messages: list[Any]) -> bool:
@@ -29,6 +44,132 @@ def has_tool_output(messages: list[Any]) -> bool:
             if tool_result is not None and isinstance(tool_result.result, ToolOutput):
                 return True
     return False
+
+
+def transform_messages_for_model(
+    messages: list[Message], model: LanguageModel
+) -> list[Message]:
+    """Project canonical history into the target model and endpoint capabilities."""
+    modalities = model.input_modalities
+    if modalities is None:
+        return messages
+
+    projected: list[Message] = []
+    pending_images: list[ImagePart] = []
+    native_tool_output = model.provider.supports_native_tool_output(model.model_id)
+
+    for message in messages:
+        if message.role != "tool" and pending_images:
+            projected.append(_tool_images_message(pending_images))
+            pending_images = []
+
+        message, images = _project_message(
+            message,
+            modalities=modalities,
+            native_tool_output=native_tool_output,
+        )
+        projected.append(message)
+        if message.role == "tool":
+            pending_images.extend(images)
+        elif images:
+            projected.append(_tool_images_message(images))
+
+    if pending_images:
+        projected.append(_tool_images_message(pending_images))
+
+    return projected
+
+
+def _project_message(
+    message: Message,
+    *,
+    modalities: tuple[str, ...],
+    native_tool_output: bool,
+) -> tuple[Message, list[ImagePart]]:
+    if isinstance(message.content, str):
+        return message, []
+
+    changed = False
+    images: list[ImagePart] = []
+    content: list[ContentPart] = []
+    for part in message.content:
+        replacement: ContentPart = part
+        if isinstance(part, ImagePart) and "image" not in modalities:
+            replacement = TextPart(text=NON_VISION_USER_IMAGE_PLACEHOLDER)
+        elif isinstance(part, FilePart) and "file" not in modalities:
+            replacement = TextPart(text=NON_FILE_USER_PLACEHOLDER)
+        elif (
+            isinstance(part, ToolResultPart)
+            and part.tool_result is not None
+            and isinstance(part.tool_result.result, ToolOutput)
+        ):
+            output = part.tool_result.result
+            if native_tool_output:
+                result = _project_native_tool_output(output, modalities)
+            else:
+                result, output_images = _project_chat_tool_output(output, modalities)
+                images.extend(output_images)
+            if result is not output:
+                replacement = replace(
+                    part,
+                    tool_result=replace(part.tool_result, result=result),
+                )
+        changed = changed or replacement is not part
+        content.append(replacement)
+
+    if changed:
+        return replace(message, content=content), images
+    return message, images
+
+
+def _project_native_tool_output(
+    output: ToolOutput, modalities: tuple[str, ...]
+) -> ToolOutput:
+    content: list[ToolOutputPart] = []
+    changed = False
+    for part in output.content:
+        replacement: ToolOutputPart = part
+        if isinstance(part, ImagePart) and "image" not in modalities:
+            replacement = TextPart(text=NON_VISION_TOOL_IMAGE_PLACEHOLDER)
+        elif isinstance(part, FilePart) and "file" not in modalities:
+            replacement = TextPart(text=NON_FILE_TOOL_PLACEHOLDER)
+        changed = changed or replacement is not part
+        content.append(replacement)
+    return ToolOutput(content=content) if changed else output
+
+
+def _project_chat_tool_output(
+    output: ToolOutput, modalities: tuple[str, ...]
+) -> tuple[str, list[ImagePart]]:
+    text: list[str] = []
+    images: list[ImagePart] = []
+    for part in output.content:
+        if isinstance(part, TextPart) and part.text:
+            text.append(part.text)
+        elif isinstance(part, ImagePart):
+            if "image" in modalities:
+                images.append(part)
+            else:
+                text.append(NON_VISION_TOOL_IMAGE_PLACEHOLDER)
+        elif isinstance(part, FilePart):
+            if "file" in modalities:
+                text.append(CHAT_FILE_TOOL_PLACEHOLDER)
+            else:
+                text.append(NON_FILE_TOOL_PLACEHOLDER)
+
+    if not text and images:
+        text.append("(see attached image)")
+    return "\n".join(text) or "(no tool output)", images
+
+
+def _tool_images_message(images: list[ImagePart]) -> Message:
+    return Message(
+        role="user",
+        content=[
+            TextPart(text=CHAT_TOOL_IMAGE_PROMPT),
+            *images,
+        ],
+    )
 
 
 def unsupported(provider: str, endpoint: str) -> UnsupportedToolOutputError:

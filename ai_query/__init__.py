@@ -36,6 +36,7 @@ __all__ = [
     "Field",
     # Common types
     "LanguageModel",
+    "InputModality",
     "EmbeddingModel",
     "HTTPStatusError",
     "GenerateTextResult",
@@ -125,6 +126,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "Field": ("ai_query.types", "Field"),
     # Common types
     "LanguageModel": ("ai_query.model", "LanguageModel"),
+    "InputModality": ("ai_query.model", "InputModality"),
     "EmbeddingModel": ("ai_query.model", "EmbeddingModel"),
     "HTTPStatusError": ("ai_query.transport", "HTTPStatusError"),
     "GenerateTextResult": ("ai_query.types", "GenerateTextResult"),

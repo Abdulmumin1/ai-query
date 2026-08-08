@@ -21,6 +21,7 @@ from ai_query.providers.anthropic import AnthropicProvider
 from ai_query.providers.bedrock.provider import BedrockProvider
 from ai_query.providers.google import GoogleProvider
 from ai_query.providers.openai import OpenAIProvider
+from ai_query.providers.tool_output import transform_messages_for_model
 from ai_query.types import (
     Message,
     ToolCall,
@@ -135,6 +136,40 @@ async def test_generate_text_preserves_tool_output_into_second_request() -> None
 
 
 @pytest.mark.asyncio
+async def test_generate_text_projects_tool_output_for_target_model() -> None:
+    @tool(description="Render a report")
+    def render() -> ToolOutput:
+        return rich_output()
+
+    provider = MockProvider(
+        responses=[
+            make_response(
+                text="",
+                finish_reason="tool_use",
+                tool_calls=[make_tool_call("render", {}, id="call_1")],
+            ),
+            make_response(text="The text report is ready.", finish_reason="stop"),
+        ]
+    )
+    result = await generate_text(
+        model=LanguageModel(
+            provider=provider,
+            model_id="text-only",
+            input_modalities=("text",),
+        ),
+        prompt="Render it",
+        tools={"render": render},
+        stop_when=step_count_is(3),
+    )
+
+    projected_result = provider.last_messages[-1].content[0].tool_result.result
+    assert result.text == "The text report is ready."
+    assert isinstance(projected_result, str)
+    assert "tool image omitted" in projected_result
+    assert isinstance(result.steps[0].tool_results[0].result, ToolOutput)
+
+
+@pytest.mark.asyncio
 async def test_openai_responses_sends_rich_output_on_second_request() -> None:
     class CaptureTransport:
         def __init__(self) -> None:
@@ -221,6 +256,74 @@ async def test_openai_chat_and_compatible_providers_fail_without_stringifying() 
     deepseek = DeepSeekProvider(api_key="test")
     with pytest.raises(UnsupportedToolOutputError, match="deepseek chat/completions"):
         await deepseek._convert_messages([tool_message(rich_output())])
+
+
+def test_text_only_model_projects_rich_history_without_mutating_it() -> None:
+    from ai_query.providers.deepseek import DeepSeekProvider
+
+    output = rich_output()
+    messages = [tool_message(output)]
+    model = LanguageModel(
+        provider=DeepSeekProvider(api_key="test"),
+        model_id="deepseek-v4-flash",
+        input_modalities=("text",),
+    )
+
+    projected = transform_messages_for_model(messages, model)
+
+    result = projected[0].content[0].tool_result.result
+    assert isinstance(result, str)
+    assert "chart generated" in result
+    assert "tool image omitted" in result
+    assert "tool file omitted" in result
+    assert messages[0].content[0].tool_result.result is output
+
+
+@pytest.mark.asyncio
+async def test_chat_vision_model_receives_tool_images_as_follow_up_user_content() -> None:
+    class ChatVisionProvider(OpenAIProvider):
+        name = "chat_vision"
+
+    output = ToolOutput(
+        content=[
+            TextPart(text="chart generated"),
+            ImagePart(image=b"png-bytes", media_type="image/png"),
+        ]
+    )
+    model = LanguageModel(
+        provider=ChatVisionProvider(api_key="test"),
+        model_id="chat-compatible-vision-model",
+        input_modalities=("text", "image"),
+    )
+
+    projected = transform_messages_for_model([tool_message(output)], model)
+    converted = await model.provider._convert_messages(projected)
+
+    assert converted[0] == {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "chart generated",
+    }
+    assert converted[1]["role"] == "user"
+    assert converted[1]["content"][0]["text"] == "Attached image(s) from tool result:"
+    assert converted[1]["content"][1]["image_url"]["url"].startswith(
+        "data:image/png;base64,"
+    )
+
+
+def test_native_gemini_keeps_rich_tool_output_inline() -> None:
+    output = rich_output()
+    messages = [tool_message(output)]
+    model = LanguageModel(
+        provider=GoogleProvider(api_key="test"),
+        model_id="gemini-3.6-flash",
+        input_modalities=("text", "image", "file"),
+    )
+
+    projected = transform_messages_for_model(messages, model)
+
+    assert projected == messages
+    assert projected[0].content[0].tool_result.result is output
 
 
 @pytest.mark.asyncio

@@ -112,6 +112,9 @@ class GoogleProvider(BaseProvider):
 
     name = "google"
 
+    def supports_native_tool_output(self, model: str) -> bool:
+        return google_supports_multimodal_tool_output(model)
+
     def __init__(self, api_key: str | None = None, **kwargs: Any):
         """Initialize Google provider.
 
