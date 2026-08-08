@@ -142,6 +142,10 @@ class BaseProvider(ABC):
         """Describe normalized reasoning support for this provider."""
         return ReasoningCapabilities()
 
+    def supports_native_tool_output(self, model: str) -> bool:
+        """Whether this provider endpoint accepts rich content inside tool results."""
+        return False
+
     def apply_reasoning(
         self,
         provider_options: ProviderOptions | None,

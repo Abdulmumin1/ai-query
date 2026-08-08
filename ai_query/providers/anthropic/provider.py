@@ -74,6 +74,9 @@ class AnthropicProvider(BaseProvider):
 
     name = "anthropic"
 
+    def supports_native_tool_output(self, model: str) -> bool:
+        return True
+
     def __init__(self, api_key: str | None = None, **kwargs: Any):
         """Initialize Anthropic provider.
 

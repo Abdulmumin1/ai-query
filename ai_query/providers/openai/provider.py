@@ -116,6 +116,9 @@ class OpenAIProvider(BaseProvider):
     name = "openai"
     _upstream_max_tokens_param = "max_completion_tokens"
 
+    def supports_native_tool_output(self, model: str) -> bool:
+        return self.name == "openai"
+
     def __init__(self, api_key: str | None = None, **kwargs: Any):
         """Initialize OpenAI provider.
 

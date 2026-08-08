@@ -150,6 +150,27 @@ async def generate_response(prompt: str, use_openai: bool = True):
     return result.text
 ```
 
+### Model input capabilities
+
+Declare input modalities when conversation history can contain images or files:
+
+```python
+model = workers_ai("@cf/moonshotai/kimi-k2.6")
+model.input_modalities = ("text", "image")
+```
+
+Before each provider request, ai-query projects the canonical conversation history
+into the target model's capabilities without mutating stored messages:
+
+- Native endpoints such as Gemini 3 keep rich tool results inline.
+- Vision models on chat-compatible endpoints receive tool-result images in a
+  follow-up multimodal user message.
+- Text-only models receive explicit omission placeholders instead of image bytes.
+
+Leave `input_modalities` unspecified to retain provider behavior when capabilities
+are not known. Provider catalogs and applications should set this metadata whenever
+it is available.
+
 ## Provider Options
 
 Each provider supports specific options through the `provider_options` parameter:

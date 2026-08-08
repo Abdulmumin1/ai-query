@@ -1,0 +1,4 @@
+{
+  "type": "minor",
+  "description": "Add model input capability metadata and project rich tool-result history at request boundaries, preserving native multimodal results, adapting chat-compatible vision models, and explicitly omitting unsupported content for text-only models."
+}

@@ -71,6 +71,7 @@ from ai_query.types import (
 )
 from ai_query.transport import HTTPStatusError
 from ai_query.model import LanguageModel, EmbeddingModel
+from ai_query.providers.tool_output import transform_messages_for_model
 
 
 _RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
@@ -774,7 +775,7 @@ async def generate_text(
                 result = await _await_with_abort(
                     model.provider.generate(
                         model=model.model_id,
-                        messages=current_messages,
+                        messages=transform_messages_for_model(current_messages, model),
                         tools=tools,
                         provider_options=_apply_reasoning(model, provider_options, reasoning),
                         **kwargs,
@@ -1070,7 +1071,7 @@ def stream_text(
                 try:
                     stream = model.provider.stream(
                         model=model.model_id,
-                        messages=current_messages,
+                        messages=transform_messages_for_model(current_messages, model),
                         tools=tools,
                         provider_options=_apply_reasoning(model, provider_options, reasoning),
                         **kwargs,

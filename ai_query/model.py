@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from ai_query.providers.base import BaseProvider
+
+
+InputModality = Literal["text", "image", "file"]
 
 
 @dataclass
@@ -18,6 +21,7 @@ class LanguageModel:
 
     provider: BaseProvider
     model_id: str
+    input_modalities: tuple[InputModality, ...] | None = None
 
     def __repr__(self) -> str:
         return f"LanguageModel({self.provider.name}/{self.model_id})"
