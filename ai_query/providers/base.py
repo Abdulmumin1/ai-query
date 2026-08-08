@@ -58,6 +58,11 @@ class BaseProvider(ABC):
         self.api_key = api_key
         self.config = kwargs
         self._transport = transport
+        # Stable session identifier for providers that support prefix-cache
+        # affinity routing.  Set by the caller (e.g. an agent) to a value that
+        # stays constant across all requests in a session.  Each provider
+        # adapter decides how (or whether) to forward this to its API.
+        self.cache_key: str | None = None
 
     @property
     def transport(self) -> HTTPTransport:

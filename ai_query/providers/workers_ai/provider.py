@@ -113,6 +113,12 @@ class WorkersAIProvider(OpenAIProvider):
         super().__init__(api_key=resolved_api_key, base_url=resolved_base_url, **kwargs)
         self.account_id = resolved_account_id
 
+    def _get_headers(self) -> dict[str, str]:
+        headers = super()._get_headers()
+        if self.cache_key:
+            headers["x-session-affinity"] = self.cache_key
+        return headers
+
     async def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         converted: list[dict[str, Any]] = []
 

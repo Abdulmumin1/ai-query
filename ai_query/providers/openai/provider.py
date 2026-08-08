@@ -602,6 +602,9 @@ class OpenAIProvider(BaseProvider):
         if token_entries:
             request_options[self._upstream_max_tokens_param] = token_entries[-1][1]
 
+        if self.cache_key:
+            request_options.setdefault("prompt_cache_key", self.cache_key)
+
         return request_options
 
     def _should_use_responses_api(
