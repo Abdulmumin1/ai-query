@@ -1,4 +1,0 @@
-{
-  "type": "minor",
-  "description": "Add provider-level cache_key for prefix-cache affinity routing: OpenAI maps to prompt_cache_key, Workers AI maps to x-session-affinity header."
-}

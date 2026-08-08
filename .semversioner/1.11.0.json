@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Add provider-level cache_key for prefix-cache affinity routing: OpenAI maps to prompt_cache_key, Workers AI maps to x-session-affinity header.",
+      "type": "minor"
+    }
+  ],
+  "created_at": "2026-08-08T17:00:17+00:00",
+  "version": "1.11.0"
+}

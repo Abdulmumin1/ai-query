@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.11.0
+
+- minor: Add provider-level cache_key for prefix-cache affinity routing: OpenAI maps to prompt_cache_key, Workers AI maps to x-session-affinity header.
+
 ## 1.10.0
 
 - minor: Add model input capability metadata and project rich tool-result history at request boundaries, preserving native multimodal results, adapting chat-compatible vision models, and explicitly omitting unsupported content for text-only models.
