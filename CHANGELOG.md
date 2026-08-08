@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.10.0
+
+- minor: Add model input capability metadata and project rich tool-result history at request boundaries, preserving native multimodal results, adapting chat-compatible vision models, and explicitly omitting unsupported content for text-only models.
+
 ## 1.9.5
 
 - patch: Preserve OpenAI-compatible tool-call extension metadata across streamed agent turns so Gemini thought signatures survive function-call loops.
