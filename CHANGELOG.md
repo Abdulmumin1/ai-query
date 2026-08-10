@@ -1,6 +1,11 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.12.1
+
+- patch: Keep cache-affinity request fields adapter-owned instead of sending OpenAI's prompt_cache_key to every compatible API.
+- patch: Make agent call aborts authoritative and close event observers at the target action boundary.
+
 ## 1.12.0
 
 - minor: Add invocation-scoped event observation for agent calls with ordered delivery and cancellation-safe cleanup.

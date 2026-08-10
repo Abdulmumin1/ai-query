@@ -1,0 +1,14 @@
+{
+  "changes": [
+    {
+      "description": "Keep cache-affinity request fields adapter-owned instead of sending OpenAI's prompt_cache_key to every compatible API.",
+      "type": "patch"
+    },
+    {
+      "description": "Make agent call aborts authoritative and close event observers at the target action boundary.",
+      "type": "patch"
+    }
+  ],
+  "created_at": "2026-08-10T16:29:59+00:00",
+  "version": "1.12.1"
+}

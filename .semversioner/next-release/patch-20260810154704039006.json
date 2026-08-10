@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Make agent call aborts authoritative and close event observers at the target action boundary."
-}
