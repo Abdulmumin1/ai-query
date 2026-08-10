@@ -113,7 +113,7 @@ class HTTPTransport(AgentTransport):
         self,
         agent_id: str,
         payload: dict[str, Any],
-        timeout: float = 30.0,
+        timeout: Union[float, None] = 30.0,
         signal: Union["AbortSignal", None] = None,
     ) -> dict[str, Any]:
         """Invoke a remote agent via HTTP POST.

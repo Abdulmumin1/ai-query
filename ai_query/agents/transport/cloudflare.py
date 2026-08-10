@@ -9,6 +9,7 @@ except ImportError:
     to_js = lambda x: x
 
 from ai_query.agents.transport.base import AgentTransport
+from ai_query.types import AbortSignal
 
 
 class DurableObjectTransport(AgentTransport):
@@ -33,9 +34,15 @@ class DurableObjectTransport(AgentTransport):
         return self.namespace.getByName(agent_id)
 
     async def invoke(
-        self, agent_id: str, payload: Dict[str, Any], timeout: float = 30.0
+        self,
+        agent_id: str,
+        payload: Dict[str, Any],
+        timeout: Union[float, None] = 30.0,
+        signal: Union[AbortSignal, None] = None,
     ) -> Dict[str, Any]:
         """Invoke a DO agent."""
+        if signal:
+            signal.throw_if_aborted()
         stub = self._get_stub(agent_id)
 
         # Prepare the standardized request body
@@ -70,6 +77,8 @@ class DurableObjectTransport(AgentTransport):
             js_options = options
 
         response = await stub.fetch(url, js_options)
+        if signal:
+            signal.throw_if_aborted()
 
         if response.status != 200:
             text = await response.text()

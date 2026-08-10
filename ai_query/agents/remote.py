@@ -67,7 +67,7 @@ class RemoteAgent:
         self,
         *,
         agent_cls: Union[type[T], None] = None,
-        timeout: float = 30.0,
+        timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
     ) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to the remote agent."""

@@ -33,7 +33,7 @@ class AgentTransport(ABC):
         self,
         agent_id: str,
         payload: dict[str, Any],
-        timeout: float = 30.0,
+        timeout: Union[float, None] = 30.0,
         signal: Union["AbortSignal", None] = None,
     ) -> dict[str, Any]:
         """Send a request to another agent and wait for response.
@@ -41,7 +41,8 @@ class AgentTransport(ABC):
         Args:
             agent_id: The target agent's identifier.
             payload: The request payload to send.
-            timeout: Maximum time to wait for response in seconds.
+            timeout: Maximum time to wait for response in seconds, or ``None``
+                to wait without a deadline.
             signal: Optional abort signal to cancel the request.
 
         Returns:
@@ -75,7 +76,7 @@ class LocalTransport(AgentTransport):
         self,
         agent_id: str,
         payload: dict[str, Any],
-        timeout: float = 30.0,
+        timeout: Union[float, None] = 30.0,
         signal: Union["AbortSignal", None] = None,
     ) -> dict[str, Any]:
         """Invoke another agent, resolving via registry."""
