@@ -131,7 +131,7 @@ class AgentCallProxy(Generic[T]):
         transport: "AgentTransport",
         target_id: str,
         *,
-        timeout: float = 30.0,
+        timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
     ):
         self._transport = transport
@@ -1106,7 +1106,7 @@ class Agent(Generic[StateT]):
         agent_id: str,
         *,
         agent_cls: type[T],
-        timeout: float = 30.0,
+        timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
     ) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to another agent."""

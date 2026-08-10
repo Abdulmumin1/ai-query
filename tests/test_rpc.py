@@ -132,7 +132,7 @@ async def test_local_agent_call_creates_target_and_routes_through_mailbox():
     result = await parent.call(
         "child",
         agent_cls=DelegatedAgent,
-        timeout=1.0,
+        timeout=None,
     ).delegate(prompt="investigate")
 
     assert result == {"agent_id": "child", "response": "INVESTIGATE"}
