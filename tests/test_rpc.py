@@ -323,6 +323,42 @@ async def test_abort_signal_bounds_an_uncooperative_local_call():
 
 
 @pytest.mark.asyncio
+async def test_abort_signal_cannot_be_overridden_by_late_target_success():
+    started = asyncio.Event()
+
+    class DelegatedAgent(Agent):
+        def __init__(self, id: str):
+            super().__init__(id, storage=MemoryStorage())
+
+        @action
+        async def delegate(self) -> str:
+            started.set()
+            await asyncio.sleep(0.05)
+            return "late success"
+
+    server = AgentServer(DelegatedAgent)
+    parent = server.get_or_create("parent")
+    await parent.start()
+    controller = AbortController()
+    call = asyncio.create_task(
+        parent.call(
+            "child",
+            agent_cls=DelegatedAgent,
+            timeout=None,
+            signal=controller.signal,
+        ).delegate()
+    )
+
+    await started.wait()
+    controller.abort("parent stopped")
+    with pytest.raises(asyncio.TimeoutError, match="parent stopped"):
+        await call
+
+    await server.evict("parent")
+    await server.evict("child")
+
+
+@pytest.mark.asyncio
 async def test_detached_task_keeps_its_originating_call_context():
     release_detached = asyncio.Event()
     detached_finished = asyncio.Event()
@@ -381,6 +417,48 @@ async def test_detached_task_keeps_its_originating_call_context():
 
     assert observed_first == []
     assert observed_second == ["second.started"]
+    await server.evict("parent")
+    await server.evict("child")
+
+
+@pytest.mark.asyncio
+async def test_immediate_detached_event_is_closed_at_target_action_boundary(
+    caplog: pytest.LogCaptureFixture,
+):
+    detached_finished = asyncio.Event()
+    observed: list[str] = []
+
+    class DelegatedAgent(Agent):
+        def __init__(self, id: str):
+            super().__init__(id, storage=MemoryStorage())
+
+        @action
+        async def start_detached(self) -> str:
+            async def detached() -> None:
+                await self.emit("detached.immediate", {})
+                detached_finished.set()
+
+            asyncio.create_task(detached())
+            return "done"
+
+    async def on_event(event: Event) -> None:
+        observed.append(event.type)
+
+    server = AgentServer(DelegatedAgent)
+    parent = server.get_or_create("parent")
+    await parent.start()
+
+    result = await parent.call(
+        "child",
+        agent_cls=DelegatedAgent,
+        timeout=None,
+        on_event=on_event,
+    ).start_detached()
+    await detached_finished.wait()
+
+    assert result == "done"
+    assert observed == []
+    assert "Agent call event handler was cancelled" not in caplog.text
     await server.evict("parent")
     await server.evict("child")
 

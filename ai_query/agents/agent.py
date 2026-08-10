@@ -1080,6 +1080,12 @@ class Agent(Generic[StateT]):
                 return await self.handle_invoke(envelope.payload)
             return None
         finally:
+            # The target owns the action completion boundary. Close before
+            # _process_mailbox resolves the caller's future so tasks detached
+            # by this invocation cannot race caller-side cleanup and emit one
+            # last observed event after the action has returned.
+            if envelope.call_observer is not None:
+                envelope.call_observer.close()
             self._call_observer_var.reset(observer_token)
             self._context_var.reset(context_token)
 

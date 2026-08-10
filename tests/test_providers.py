@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pytest
+from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from ai_query.types import (
@@ -220,6 +221,66 @@ class TestOpenAIProvider:
 
         model = openai("gpt-4o", api_key="key", base_url="https://custom.api.com")
         assert model.provider.base_url == "https://custom.api.com"
+
+    def test_openai_compatible_adapters_own_their_cache_key_mapping(self):
+        """Protocol compatibility must not imply OpenAI cache-key support."""
+        from ai_query.providers.openai import OpenAIProvider
+
+        class AutomaticCacheProvider(OpenAIProvider):
+            name = "automatic_cache"
+
+        class AlternateCacheProvider(OpenAIProvider):
+            name = "alternate_cache"
+
+            def _cache_key_request_options(
+                self,
+                model: str | None,
+            ) -> dict[str, Any]:
+                return {"cache_affinity": self.cache_key} if self.cache_key else {}
+
+        openai_provider = OpenAIProvider(api_key="test")
+        automatic_provider = AutomaticCacheProvider(api_key="test")
+        alternate_provider = AlternateCacheProvider(api_key="test")
+        for provider in (
+            openai_provider,
+            automatic_provider,
+            alternate_provider,
+        ):
+            provider.cache_key = "session-affinity"
+
+        assert openai_provider._build_request_options(
+            {},
+            {},
+            model="gpt-5.4",
+        )["prompt_cache_key"] == "session-affinity"
+        assert automatic_provider._build_request_options(
+            {},
+            {},
+            model="gemini-3.6-flash",
+        ) == {}
+        assert alternate_provider._build_request_options(
+            {},
+            {},
+            model="custom-model",
+        )["cache_affinity"] == "session-affinity"
+
+    def test_workers_ai_maps_cache_affinity_only_to_its_header(self):
+        from ai_query.providers.workers_ai import WorkersAIProvider
+
+        provider = WorkersAIProvider(
+            api_key="test",
+            base_url="https://gateway.example.test/v1",
+        )
+        provider.cache_key = "session-affinity"
+
+        request_options = provider._build_request_options(
+            {},
+            {},
+            model="@cf/example/model",
+        )
+
+        assert "prompt_cache_key" not in request_options
+        assert provider._get_headers()["x-session-affinity"] == "session-affinity"
 
     def test_openai_convert_tools(self):
         """OpenAI provider should convert tools correctly."""

@@ -573,6 +573,8 @@ class OpenAIProvider(BaseProvider):
         self,
         kwargs: dict[str, Any],
         provider_options: dict[str, Any],
+        *,
+        model: str | None = None,
     ) -> dict[str, Any]:
         token_entries: list[tuple[str, Any]] = []
         for source_name, source in (("kwargs", kwargs), (f"provider_options['{self.name}']", provider_options)):
@@ -602,10 +604,19 @@ class OpenAIProvider(BaseProvider):
         if token_entries:
             request_options[self._upstream_max_tokens_param] = token_entries[-1][1]
 
-        if self.cache_key:
-            request_options.setdefault("prompt_cache_key", self.cache_key)
+        for key, value in self._cache_key_request_options(model).items():
+            request_options.setdefault(key, value)
 
         return request_options
+
+    def _cache_key_request_options(
+        self,
+        model: str | None,
+    ) -> dict[str, Any]:
+        """Translate semantic cache affinity into adapter-owned body fields."""
+        if not self.cache_key or self.name != "openai":
+            return {}
+        return {"prompt_cache_key": self.cache_key}
 
     def _should_use_responses_api(
         self,
@@ -770,7 +781,11 @@ class OpenAIProvider(BaseProvider):
 
         url = f"{self.base_url}/chat/completions"
 
-        request_options = self._build_request_options(kwargs, openai_options)
+        request_options = self._build_request_options(
+            kwargs,
+            openai_options,
+            model=model,
+        )
         if tools and self._should_use_responses_api(
             tools=tools,
             request_options=request_options,
@@ -886,7 +901,11 @@ class OpenAIProvider(BaseProvider):
         usage = None
         current_tool_calls: dict[int, dict[str, Any]] = {}
 
-        request_options = self._build_request_options(kwargs, openai_options)
+        request_options = self._build_request_options(
+            kwargs,
+            openai_options,
+            model=model,
+        )
         if tools and self._should_use_responses_api(
             tools=tools,
             request_options=request_options,

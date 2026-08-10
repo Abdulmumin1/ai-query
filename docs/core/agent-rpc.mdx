@@ -109,7 +109,8 @@ the target action as `self.context.signal`, so delegated work can pass it to mod
 turns or other cancellable operations. Set `timeout=None` for work whose lifecycle
 is bounded by the abort signal rather than a wall-clock deadline. After that signal
 aborts, local calls allow up to one second for cooperative target cleanup before
-ending the caller-side wait.
+ending the caller-side wait. Once the signal aborts, a target success returned
+during that cleanup grace period is discarded rather than overriding the abort.
 
 ### Observe Local Call Events
 
