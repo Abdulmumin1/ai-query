@@ -96,15 +96,16 @@ class LocalTransport(AgentTransport):
 
         # Enqueue the invoke and wait for response with timeout
         future = asyncio.get_running_loop().create_future()
-        agent.enqueue("invoke", payload, future=future)
-
-        # If signal is provided, set up cancellation
-        if signal:
-            signal.add_listener(lambda: future.cancel())
+        agent.enqueue("invoke", payload, future=future, signal=signal)
 
         try:
-            return await asyncio.wait_for(future, timeout=timeout)
+            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
         except asyncio.CancelledError:
             if signal and signal.aborted:
-                raise asyncio.TimeoutError(f"Request aborted: {signal.reason}")
+                # Give a cooperative target time to observe the shared signal
+                # and persist terminal state before the caller unwinds.
+                try:
+                    await asyncio.wait_for(asyncio.shield(future), timeout=1.0)
+                except (Exception, asyncio.CancelledError):
+                    pass
             raise

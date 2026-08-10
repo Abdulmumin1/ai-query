@@ -63,7 +63,12 @@ class ManagerAgent(Agent):
     async def escalate_ticket(self, ticket_id):
         # 1. Get proxy for the target agent
         # (Pass the class for type safety and autocompletion)
-        support = self.call("support-agent-1", agent_cls=SupportAgent)
+        support = self.call(
+            "support-agent-1",
+            agent_cls=SupportAgent,
+            timeout=60,
+            signal=self.context.signal,
+        )
 
         # 2. Call the action fluently
         result = await support.resolve(
@@ -96,6 +101,12 @@ AgentServer(registry).serve()
 ```
 
 The `self.call("support-agent-1")` inside `ManagerAgent` is automatically routed over HTTP, but your business logic remains clean and unaware of the network. This is **Location Transparency**.
+
+Local calls are routed through the target agent's mailbox. The server creates and
+starts the target agent when needed, and the target handles one mailbox operation
+at a time. When a call supplies an `AbortSignal`, the same signal is available to
+the target action as `self.context.signal`, so delegated work can pass it to model
+turns or other cancellable operations.
 
 ## Multi-User Metadata (Connection State)
 

@@ -89,6 +89,7 @@ class Context:
 
     connection: Union[Connection, None] = None
     ctx: Union[ConnectionContext, None] = None
+    signal: Union[AbortSignal, None] = None
 
 
 def action(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -104,6 +105,7 @@ class _Envelope:
     connection: Union[Connection, None] = None
     ctx: Union[ConnectionContext, None] = None
     future: Union[asyncio.Future, None] = None
+    signal: Union[AbortSignal, None] = None
 
 
 @dataclass
@@ -124,24 +126,32 @@ class AgentCallProxy(Generic[T]):
     This class enables static analysis and autocompletion for remote agent calls.
     """
 
-    def __init__(self, agent: "Agent", target_id: str):
-        self._agent = agent
+    def __init__(
+        self,
+        transport: "AgentTransport",
+        target_id: str,
+        *,
+        timeout: float = 30.0,
+        signal: Union[AbortSignal, None] = None,
+    ):
+        self._transport = transport
         self._target_id = target_id
+        self._timeout = timeout
+        self._signal = signal
 
     def __getattr__(self, name: str) -> Callable[..., Awaitable[Any]]:
         """Captures the method name and returns an awaitable RPC function."""
 
         async def method_proxy(**kwargs: Any) -> Any:
             """The inner function that is awaited to perform the RPC call."""
-            if self._agent._transport is None:
-                raise RuntimeError(
-                    "No transport configured. Agents must be managed by an AgentServer "
-                    "or provided a transport manually to use call()."
-                )
-
             # The payload format is compatible with the agent's handle_invoke method
             payload = {"method": name, "params": kwargs}
-            result = await self._agent._transport.invoke(self._target_id, payload)
+            result = await self._transport.invoke(
+                self._target_id,
+                payload,
+                timeout=self._timeout,
+                signal=self._signal,
+            )
 
             if "error" in result:
                 raise RuntimeError(f"Agent call failed: {result['error']}")
@@ -976,6 +986,7 @@ class Agent(Generic[StateT]):
         # Set context for this operation
         self.context.connection = envelope.connection
         self.context.ctx = envelope.ctx
+        self.context.signal = envelope.signal
 
         try:
             if envelope.kind == "connect":
@@ -999,11 +1010,14 @@ class Agent(Generic[StateT]):
                 if asyncio.iscoroutine(res):
                     return await res
                 return res
+            elif envelope.kind == "invoke":
+                return await self.handle_invoke(envelope.payload)
             return None
         finally:
             # Clear context
             self.context.connection = None
             self.context.ctx = None
+            self.context.signal = None
 
     def enqueue(
         self,
@@ -1012,6 +1026,7 @@ class Agent(Generic[StateT]):
         connection: Union[Connection, None] = None,
         ctx: Union[ConnectionContext, None] = None,
         future: Union[asyncio.Future, None] = None,
+        signal: Union[AbortSignal, None] = None,
     ) -> None:
         """Enqueue a message for serial processing."""
         self._mailbox.put_nowait(
@@ -1021,6 +1036,7 @@ class Agent(Generic[StateT]):
                 connection=connection,
                 ctx=ctx,
                 future=future,
+                signal=signal,
             )
         )
 
@@ -1085,9 +1101,26 @@ class Agent(Generic[StateT]):
 
         return {"error": f"Unknown action: {action}"}
 
-    def call(self, agent_id: str, *, agent_cls: type[T]) -> AgentCallProxy[T]:
+    def call(
+        self,
+        agent_id: str,
+        *,
+        agent_cls: type[T],
+        timeout: float = 30.0,
+        signal: Union[AbortSignal, None] = None,
+    ) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to another agent."""
-        return AgentCallProxy(self, agent_id)
+        if self._transport is None:
+            raise RuntimeError(
+                "No transport configured. Agents must be managed by an AgentServer "
+                "or provided a transport manually to use call()."
+            )
+        return AgentCallProxy(
+            self._transport,
+            agent_id,
+            timeout=timeout,
+            signal=signal,
+        )
 
     async def handle_invoke(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle an incoming call from another agent."""
@@ -1100,12 +1133,8 @@ class Agent(Generic[StateT]):
         # 1. Check if it's a registered action
         if method in self._action_map:
             try:
-                # Enqueue to ensure sequential execution
-                future = asyncio.get_running_loop().create_future()
-                self.enqueue(
-                    "action", {"name": method, "params": params}, future=future
-                )
-                result = await future
+                res = self._action_map[method](**params)
+                result = await res if asyncio.iscoroutine(res) else res
                 return {"result": result}
             except Exception as e:
                 return {"error": str(e)}
