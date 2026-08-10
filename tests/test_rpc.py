@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from aiohttp import web
 
+from ai_query import AbortController, AbortError
 from ai_query.agents import Agent, action, AgentServer, MemoryStorage
 
 
@@ -109,3 +110,130 @@ async def test_websocket_action_call(rpc_server):
             ) as resp:
                 data = await resp.json()
                 assert data["reputation"]["alice"] == 10
+
+
+@pytest.mark.asyncio
+async def test_local_agent_call_creates_target_and_routes_through_mailbox():
+    calls: list[tuple[str, str]] = []
+
+    class DelegatedAgent(Agent):
+        def __init__(self, id: str):
+            super().__init__(id, storage=MemoryStorage())
+
+        @action
+        async def delegate(self, prompt: str) -> dict[str, str]:
+            calls.append((self.id, prompt))
+            return {"agent_id": self.id, "response": prompt.upper()}
+
+    server = AgentServer(DelegatedAgent)
+    parent = server.get_or_create("parent")
+    await parent.start()
+
+    result = await parent.call(
+        "child",
+        agent_cls=DelegatedAgent,
+        timeout=1.0,
+    ).delegate(prompt="investigate")
+
+    assert result == {"agent_id": "child", "response": "INVESTIGATE"}
+    assert calls == [("child", "investigate")]
+    assert server.list_agents() == ["parent", "child"]
+    await server.evict("parent")
+    await server.evict("child")
+
+
+@pytest.mark.asyncio
+async def test_local_agent_call_propagates_abort_signal_to_target_context():
+    started = asyncio.Event()
+
+    class CancellableAgent(Agent):
+        def __init__(self, id: str):
+            super().__init__(
+                id,
+                storage=MemoryStorage(),
+                initial_state={"status": "idle"},
+            )
+
+        @action
+        async def delegate(self) -> None:
+            signal = self.context.signal
+            assert signal is not None
+            await self.update_state(status="running")
+            started.set()
+            try:
+                await signal.wait()
+                signal.throw_if_aborted()
+            except AbortError:
+                await self.update_state(status="aborted")
+                raise
+
+    server = AgentServer(CancellableAgent)
+    parent = server.get_or_create("parent")
+    await parent.start()
+    controller = AbortController()
+    call = asyncio.create_task(
+        parent.call(
+            "child",
+            agent_cls=CancellableAgent,
+            timeout=1.0,
+            signal=controller.signal,
+        ).delegate()
+    )
+
+    await started.wait()
+    controller.abort("parent turn aborted")
+
+    with pytest.raises(RuntimeError, match="parent turn aborted"):
+        await call
+    assert server.get_or_create("child").state["status"] == "aborted"
+    await server.evict("parent")
+    await server.evict("child")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_local_call_waits_for_target_abort_cleanup():
+    started = asyncio.Event()
+
+    class CancellableAgent(Agent):
+        def __init__(self, id: str):
+            super().__init__(
+                id,
+                storage=MemoryStorage(),
+                initial_state={"status": "idle"},
+            )
+
+        @action
+        async def delegate(self) -> None:
+            signal = self.context.signal
+            assert signal is not None
+            await self.update_state(status="running")
+            started.set()
+            try:
+                await signal.wait()
+                signal.throw_if_aborted()
+            except AbortError:
+                await self.update_state(status="aborted")
+                raise
+
+    server = AgentServer(CancellableAgent)
+    parent = server.get_or_create("parent")
+    await parent.start()
+    controller = AbortController()
+    call = asyncio.create_task(
+        parent.call(
+            "child",
+            agent_cls=CancellableAgent,
+            timeout=1.0,
+            signal=controller.signal,
+        ).delegate()
+    )
+
+    await started.wait()
+    controller.abort("parent turn aborted")
+    call.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert server.get_or_create("child").state["status"] == "aborted"
+    await server.evict("parent")
+    await server.evict("child")

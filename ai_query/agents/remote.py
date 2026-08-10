@@ -63,24 +63,20 @@ class RemoteAgent:
         ):
             yield event
 
-    def call(self, *, agent_cls: Union[type[T], None] = None) -> AgentCallProxy[T]:
+    def call(
+        self,
+        *,
+        agent_cls: Union[type[T], None] = None,
+        timeout: float = 30.0,
+        signal: Union[AbortSignal, None] = None,
+    ) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to the remote agent."""
-        # We need to construct a fake "Agent" object because AgentCallProxy expects one.
-        # But AgentCallProxy only needs `_transport` and `_target_id` (conceptually).
-        # However, the current AgentCallProxy implementation takes an `agent` instance
-        # and accesses `agent._transport`.
-
-        # We can create a lightweight wrapper to satisfy AgentCallProxy's contract.
-
-        class _TransportWrapper:
-            def __init__(self, transport):
-                self._transport = transport
-
-        # This is a bit of a hack to reuse AgentCallProxy.
-        # Ideally AgentCallProxy should take a Transport directly.
-        # But for now:
-        wrapper = _TransportWrapper(self._transport)
-        return AgentCallProxy(wrapper, self._agent_id)  # type: ignore
+        return AgentCallProxy(
+            self._transport,
+            self._agent_id,
+            timeout=timeout,
+            signal=signal,
+        )
 
     async def close(self) -> None:
         """Close the underlying transport."""
