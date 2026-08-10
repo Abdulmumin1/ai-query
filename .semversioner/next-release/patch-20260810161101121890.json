@@ -1,0 +1,4 @@
+{
+  "type": "patch",
+  "description": "Keep cache-affinity request fields adapter-owned instead of sending OpenAI's prompt_cache_key to every compatible API."
+}

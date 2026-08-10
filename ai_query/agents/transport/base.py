@@ -53,7 +53,15 @@ class _AgentCallEventObserver:
         delivery_task = asyncio.create_task(deliver())
         self._delivery_task = delivery_task
         try:
-            await delivery_task
+            try:
+                await delivery_task
+            except asyncio.CancelledError:
+                # Invocation cleanup may close the observer while detached work
+                # is still attempting delivery. That is a normal lifecycle
+                # boundary, not a handler failure to surface through emit().
+                if self._handler is None:
+                    return
+                raise
         finally:
             if self._delivery_task is delivery_task:
                 self._delivery_task = None
@@ -191,14 +199,16 @@ class LocalTransport(AgentTransport):
                     (future, abort_task),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                if future in done:
+                if abort_task not in done:
                     return future.result()
 
                 # Preserve terminal state and events from cooperative abort
                 # cleanup, but do not let an uncooperative target hold the
-                # caller or its observer indefinitely.
+                # caller or its observer indefinitely. A target that ignores
+                # the signal may still return during this grace period; that
+                # late success must not override the caller's abort.
                 try:
-                    return await asyncio.wait_for(
+                    terminal_response = await asyncio.wait_for(
                         asyncio.shield(future),
                         timeout=1.0,
                     )
@@ -206,6 +216,9 @@ class LocalTransport(AgentTransport):
                     raise asyncio.TimeoutError(
                         f"Agent call aborted: {signal.reason}"
                     ) from error
+                if "error" in terminal_response:
+                    return terminal_response
+                raise asyncio.TimeoutError(f"Agent call aborted: {signal.reason}")
             finally:
                 abort_task.cancel()
                 try:
