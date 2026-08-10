@@ -4,11 +4,65 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
+    from ai_query.agents.agent import AgentEventHandler, Event
     from ai_query.agents.server import AgentServer
     from ai_query.types import AbortSignal
+
+
+_active_call_observer: ContextVar[Union["_AgentCallEventObserver", None]] = (
+    ContextVar("active_agent_call_event_observer", default=None)
+)
+
+
+def _consume_future_exception(future: asyncio.Future[Any]) -> None:
+    """Retrieve late target failures after a timed-out caller has detached."""
+    if not future.cancelled():
+        future.exception()
+
+
+class _AgentCallEventObserver:
+    """Invocation-owned observer that can be detached by its caller."""
+
+    def __init__(self, handler: "AgentEventHandler") -> None:
+        self._handler: Union["AgentEventHandler", None] = handler
+        self._delivery_task: Union[asyncio.Task[None], None] = None
+
+    def raise_if_reentrant(self) -> None:
+        if _active_call_observer.get() is self:
+            raise RuntimeError(
+                "agent call event handlers cannot re-enter emit() on the target agent"
+            )
+
+    async def notify(self, event: "Event") -> None:
+        handler = self._handler
+        if handler is None:
+            return
+        self.raise_if_reentrant()
+
+        async def deliver() -> None:
+            token = _active_call_observer.set(self)
+            try:
+                await handler(event)
+            finally:
+                _active_call_observer.reset(token)
+
+        delivery_task = asyncio.create_task(deliver())
+        self._delivery_task = delivery_task
+        try:
+            await delivery_task
+        finally:
+            if self._delivery_task is delivery_task:
+                self._delivery_task = None
+
+    def close(self) -> None:
+        """Stop future delivery and release the caller-owned callback."""
+        self._handler = None
+        if self._delivery_task is not None:
+            self._delivery_task.cancel()
 
 
 class AgentTransport(ABC):
@@ -28,6 +82,8 @@ class AgentTransport(ABC):
                 ...
     """
 
+    supports_call_events = False
+
     @abstractmethod
     async def invoke(
         self,
@@ -35,6 +91,7 @@ class AgentTransport(ABC):
         payload: dict[str, Any],
         timeout: Union[float, None] = 30.0,
         signal: Union["AbortSignal", None] = None,
+        on_event: Union["AgentEventHandler", None] = None,
     ) -> dict[str, Any]:
         """Send a request to another agent and wait for response.
 
@@ -44,6 +101,8 @@ class AgentTransport(ABC):
             timeout: Maximum time to wait for response in seconds, or ``None``
                 to wait without a deadline.
             signal: Optional abort signal to cancel the request.
+            on_event: Optional handler for events emitted by the target while
+                this invocation is active.
 
         Returns:
             The response from the target agent.
@@ -64,6 +123,8 @@ class LocalTransport(AgentTransport):
     sequential processing.
     """
 
+    supports_call_events = True
+
     def __init__(self, server: "AgentServer"):
         """Initialize with reference to the AgentServer.
 
@@ -78,14 +139,27 @@ class LocalTransport(AgentTransport):
         payload: dict[str, Any],
         timeout: Union[float, None] = 30.0,
         signal: Union["AbortSignal", None] = None,
+        on_event: Union["AgentEventHandler", None] = None,
     ) -> dict[str, Any]:
         """Invoke another agent, resolving via registry."""
         target = self._server.registry.resolve(agent_id)
 
         if not isinstance(target, type):
             # Target is a remote transport, delegate to it
+            if on_event is None:
+                return await target.invoke(
+                    agent_id, payload, timeout=timeout, signal=signal
+                )
+            if not getattr(target, "supports_call_events", False):
+                raise NotImplementedError(
+                    f"{type(target).__name__} does not support observing invoke events"
+                )
             return await target.invoke(
-                agent_id, payload, timeout=timeout, signal=signal
+                agent_id,
+                payload,
+                timeout=timeout,
+                signal=signal,
+                on_event=on_event,
             )
 
         # Local execution: get or create the agent
@@ -97,16 +171,63 @@ class LocalTransport(AgentTransport):
 
         # Enqueue the invoke and wait for response with timeout
         future = asyncio.get_running_loop().create_future()
-        agent.enqueue("invoke", payload, future=future, signal=signal)
+        future.add_done_callback(_consume_future_exception)
+        call_observer = _AgentCallEventObserver(on_event) if on_event else None
+        agent.enqueue(
+            "invoke",
+            payload,
+            future=future,
+            signal=signal,
+            call_observer=call_observer,
+        )
+
+        async def wait_for_result_or_abort() -> dict[str, Any]:
+            if signal is None:
+                return await asyncio.shield(future)
+
+            abort_task = asyncio.create_task(signal.wait())
+            try:
+                done, _pending = await asyncio.wait(
+                    (future, abort_task),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if future in done:
+                    return future.result()
+
+                # Preserve terminal state and events from cooperative abort
+                # cleanup, but do not let an uncooperative target hold the
+                # caller or its observer indefinitely.
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.shield(future),
+                        timeout=1.0,
+                    )
+                except asyncio.TimeoutError as error:
+                    raise asyncio.TimeoutError(
+                        f"Agent call aborted: {signal.reason}"
+                    ) from error
+            finally:
+                abort_task.cancel()
+                try:
+                    await abort_task
+                except asyncio.CancelledError:
+                    pass
 
         try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
-        except asyncio.CancelledError:
-            if signal and signal.aborted:
-                # Give a cooperative target time to observe the shared signal
-                # and persist terminal state before the caller unwinds.
-                try:
-                    await asyncio.wait_for(asyncio.shield(future), timeout=1.0)
-                except (Exception, asyncio.CancelledError):
-                    pass
-            raise
+            try:
+                return await asyncio.wait_for(
+                    wait_for_result_or_abort(),
+                    timeout=timeout,
+                )
+            except asyncio.CancelledError:
+                if signal and signal.aborted:
+                    # Give a cooperative target time to observe the shared signal
+                    # and persist terminal state before the caller unwinds.
+                    try:
+                        await asyncio.wait_for(asyncio.shield(future), timeout=1.0)
+                    except (Exception, asyncio.CancelledError):
+                        pass
+                raise
+        finally:
+            if call_observer is not None:
+                call_observer.close()

@@ -9,7 +9,7 @@ from ai_query.agents.transport.http import HTTPTransport
 from ai_query.types import AbortSignal
 
 if TYPE_CHECKING:
-    from ai_query.agents.agent import Agent
+    from ai_query.agents.agent import Agent, AgentEventHandler
     from ai_query.agents.turn import TurnEvent
 
 T = TypeVar("T", bound="Agent")
@@ -69,6 +69,7 @@ class RemoteAgent:
         agent_cls: Union[type[T], None] = None,
         timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
+        on_event: Union["AgentEventHandler", None] = None,
     ) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to the remote agent."""
         return AgentCallProxy(
@@ -76,6 +77,7 @@ class RemoteAgent:
             self._agent_id,
             timeout=timeout,
             signal=signal,
+            on_event=on_event,
         )
 
     async def close(self) -> None:

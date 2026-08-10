@@ -1,5 +1,5 @@
 import json
-from typing import Any, AsyncIterator, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Optional, Union
 
 try:
     import js
@@ -10,6 +10,9 @@ except ImportError:
 
 from ai_query.agents.transport.base import AgentTransport
 from ai_query.types import AbortSignal
+
+if TYPE_CHECKING:
+    from ai_query.agents.agent import AgentEventHandler
 
 
 class DurableObjectTransport(AgentTransport):
@@ -39,8 +42,14 @@ class DurableObjectTransport(AgentTransport):
         payload: Dict[str, Any],
         timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
+        on_event: Union["AgentEventHandler", None] = None,
     ) -> Dict[str, Any]:
         """Invoke a DO agent."""
+        if on_event is not None:
+            raise NotImplementedError(
+                "DurableObjectTransport does not support observing invoke events"
+            )
+
         if signal:
             signal.throw_if_aborted()
         stub = self._get_stub(agent_id)

@@ -13,6 +13,7 @@ __all__ = [
     # Agents
     "Agent",
     "Event",
+    "AgentEventHandler",
     "action",
     "AgentHooks",
     "BeforeStepContext",
@@ -103,6 +104,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # Agents
     "Agent": ("ai_query.agents.agent", "Agent"),
     "Event": ("ai_query.agents.agent", "Event"),
+    "AgentEventHandler": ("ai_query.agents.agent", "AgentEventHandler"),
     "action": ("ai_query.agents.agent", "action"),
     "AgentHooks": ("ai_query.agents.hooks", "AgentHooks"),
     "BeforeStepContext": ("ai_query.agents.hooks", "BeforeStepContext"),
