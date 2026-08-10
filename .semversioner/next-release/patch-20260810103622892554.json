@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Allow agent RPC calls to opt out of wall-clock timeouts while retaining abort-signal cancellation."
-}

@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.11.2
+
+- patch: Allow agent RPC calls to opt out of wall-clock timeouts while retaining abort-signal cancellation.
+
 ## 1.11.1
 
 - patch: Route local agent-to-agent calls through target mailboxes and propagate timeout and abort configuration through RPC proxies.
