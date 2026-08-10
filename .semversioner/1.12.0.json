@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "description": "Add invocation-scoped event observation for agent calls with ordered delivery and cancellation-safe cleanup.",
+      "type": "minor"
+    }
+  ],
+  "created_at": "2026-08-10T14:50:33+00:00",
+  "version": "1.12.0"
+}

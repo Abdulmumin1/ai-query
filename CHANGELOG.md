@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.12.0
+
+- minor: Add invocation-scoped event observation for agent calls with ordered delivery and cancellation-safe cleanup.
+
 ## 1.11.2
 
 - patch: Allow agent RPC calls to opt out of wall-clock timeouts while retaining abort-signal cancellation.
