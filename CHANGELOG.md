@@ -1,6 +1,10 @@
 # Changelog
 Note: version releases in the 0.x.y range may introduce breaking changes.
 
+## 1.11.1
+
+- patch: Route local agent-to-agent calls through target mailboxes and propagate timeout and abort configuration through RPC proxies.
+
 ## 1.11.0
 
 - minor: Add provider-level cache_key for prefix-cache affinity routing: OpenAI maps to prompt_cache_key, Workers AI maps to x-session-affinity header.

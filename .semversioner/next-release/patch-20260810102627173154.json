@@ -1,4 +1,0 @@
-{
-  "type": "patch",
-  "description": "Route local agent-to-agent calls through target mailboxes and propagate timeout and abort configuration through RPC proxies."
-}
