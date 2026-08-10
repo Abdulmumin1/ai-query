@@ -13,6 +13,7 @@ from ai_query.transport.tls import certifi_ca_bundle
 from .base import AgentTransport
 
 if TYPE_CHECKING:
+    from ai_query.agents.agent import AgentEventHandler
     from ai_query.agents.turn import TurnEvent
     from ai_query.types import AbortSignal
 
@@ -115,6 +116,7 @@ class HTTPTransport(AgentTransport):
         payload: dict[str, Any],
         timeout: Union[float, None] = 30.0,
         signal: Union["AbortSignal", None] = None,
+        on_event: Union["AgentEventHandler", None] = None,
     ) -> dict[str, Any]:
         """Invoke a remote agent via HTTP POST.
 
@@ -125,6 +127,11 @@ class HTTPTransport(AgentTransport):
             "payload": { ... }
         }
         """
+        if on_event is not None:
+            raise NotImplementedError(
+                "HTTPTransport does not support observing invoke events"
+            )
+
         client = await self._get_client()
         url = self._get_url(agent_id)
 

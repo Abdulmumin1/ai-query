@@ -8,6 +8,7 @@ __all__ = [
     # Core
     "Agent",
     "Event",
+    "AgentEventHandler",
     "action",
     "AgentHooks",
     "BeforeStepContext",
@@ -40,6 +41,7 @@ __all__ = [
 _EXPORTS: dict[str, tuple[str, str]] = {
     "Agent": ("ai_query.agents.agent", "Agent"),
     "Event": ("ai_query.agents.agent", "Event"),
+    "AgentEventHandler": ("ai_query.agents.agent", "AgentEventHandler"),
     "action": ("ai_query.agents.agent", "action"),
     "AgentHooks": ("ai_query.agents.hooks", "AgentHooks"),
     "BeforeStepContext": ("ai_query.agents.hooks", "BeforeStepContext"),

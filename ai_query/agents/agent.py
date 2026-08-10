@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from copy import deepcopy
 import inspect
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -59,6 +61,7 @@ from ai_query.types import (
 if TYPE_CHECKING:
     from ai_query.agents.events import EventBus
     from ai_query.agents.transport import AgentTransport
+    from ai_query.agents.transport.base import _AgentCallEventObserver
     from ai_query.agents.turn import AgentTurn, TurnOptions
     from ai_query.types import (
         OnReasoningEvent,
@@ -75,6 +78,8 @@ Content = Union[str, List[Any]]
 
 # Type alias for emit handler callback
 EmitHandler = Callable[[str, Dict[str, Any], int], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 # Generic TypeVar for the Agent's state. Defaults to Dict[str, Any].
 StateT = TypeVar("StateT", bound=Union[Dict[str, Any], "BaseModel"])
@@ -106,6 +111,7 @@ class _Envelope:
     ctx: Union[ConnectionContext, None] = None
     future: Union[asyncio.Future, None] = None
     signal: Union[AbortSignal, None] = None
+    call_observer: Union["_AgentCallEventObserver", None] = None
 
 
 @dataclass
@@ -118,6 +124,9 @@ class Event:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"id": self.id, "type": self.type, "data": self.data}
+
+
+AgentEventHandler = Callable[[Event], Awaitable[None]]
 
 
 class AgentCallProxy(Generic[T]):
@@ -133,11 +142,13 @@ class AgentCallProxy(Generic[T]):
         *,
         timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
+        on_event: Union[AgentEventHandler, None] = None,
     ):
         self._transport = transport
         self._target_id = target_id
         self._timeout = timeout
         self._signal = signal
+        self._on_event = on_event
 
     def __getattr__(self, name: str) -> Callable[..., Awaitable[Any]]:
         """Captures the method name and returns an awaitable RPC function."""
@@ -146,12 +157,26 @@ class AgentCallProxy(Generic[T]):
             """The inner function that is awaited to perform the RPC call."""
             # The payload format is compatible with the agent's handle_invoke method
             payload = {"method": name, "params": kwargs}
-            result = await self._transport.invoke(
-                self._target_id,
-                payload,
-                timeout=self._timeout,
-                signal=self._signal,
-            )
+            if self._on_event is None:
+                result = await self._transport.invoke(
+                    self._target_id,
+                    payload,
+                    timeout=self._timeout,
+                    signal=self._signal,
+                )
+            else:
+                if not getattr(self._transport, "supports_call_events", False):
+                    raise NotImplementedError(
+                        f"{type(self._transport).__name__} does not support "
+                        "observing invoke events"
+                    )
+                result = await self._transport.invoke(
+                    self._target_id,
+                    payload,
+                    timeout=self._timeout,
+                    signal=self._signal,
+                    on_event=self._on_event,
+                )
 
             if "error" in result:
                 raise RuntimeError(f"Agent call failed: {result['error']}")
@@ -281,8 +306,18 @@ class Agent(Generic[StateT]):
         self._running = False
         self._start_lock = asyncio.Lock()
 
-        # Current context (only valid during message processing)
-        self.context = Context()
+        # Invocation state is task-local so detached work cannot read the
+        # context or observer belonging to a later mailbox operation.
+        self._context_var: ContextVar[Context] = ContextVar(
+            f"agent_context_{self._id}",
+            default=Context(),
+        )
+        self._call_observer_var: ContextVar[
+            Union["_AgentCallEventObserver", None]
+        ] = ContextVar(
+            f"agent_call_observer_{self._id}",
+            default=None,
+        )
 
         # Action registry
         self._action_map: Dict[str, Callable[..., Awaitable[Any]]] = {}
@@ -310,6 +345,11 @@ class Agent(Generic[StateT]):
     def messages(self) -> List[Message]:
         return self._messages
 
+    @property
+    def context(self) -> Context:
+        """Context for the current task's mailbox invocation."""
+        return self._context_var.get()
+
     # ─── Event Emission (The Core API) ─────────────────────────────────────
 
     async def emit(
@@ -320,6 +360,12 @@ class Agent(Generic[StateT]):
         replay: bool = True,
     ) -> int:
         """Emit an event. Returns the event ID."""
+        call_observer = self._call_observer_var.get()
+        if call_observer is not None:
+            # A handler that re-enters this agent would otherwise wait forever
+            # on the delivery lock already held by its outer emit().
+            call_observer.raise_if_reentrant()
+
         async with self._event_delivery_lock:
             # Assign ID
             self._event_counter += 1
@@ -345,6 +391,22 @@ class Agent(Generic[StateT]):
             if self._emit_handler:
                 delivered_data = event_record["data"] if replay else data
                 await self._emit_handler(event, delivered_data, event_id)
+
+            if call_observer is not None:
+                observed_data = deepcopy(event_record["data"] if replay else data)
+                try:
+                    await call_observer.notify(
+                        Event(id=event_id, type=event, data=observed_data)
+                    )
+                except asyncio.CancelledError:
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise
+                    logger.exception(
+                        "Agent call event handler was cancelled for %s", self.id
+                    )
+                except Exception:
+                    logger.exception("Agent call event handler failed for %s", self.id)
 
             return event_id
 
@@ -983,10 +1045,14 @@ class Agent(Generic[StateT]):
                 self._mailbox.task_done()
 
     async def _handle_envelope(self, envelope: _Envelope) -> Any:
-        # Set context for this operation
-        self.context.connection = envelope.connection
-        self.context.ctx = envelope.ctx
-        self.context.signal = envelope.signal
+        context_token = self._context_var.set(
+            Context(
+                connection=envelope.connection,
+                ctx=envelope.ctx,
+                signal=envelope.signal,
+            )
+        )
+        observer_token = self._call_observer_var.set(envelope.call_observer)
 
         try:
             if envelope.kind == "connect":
@@ -1014,10 +1080,8 @@ class Agent(Generic[StateT]):
                 return await self.handle_invoke(envelope.payload)
             return None
         finally:
-            # Clear context
-            self.context.connection = None
-            self.context.ctx = None
-            self.context.signal = None
+            self._call_observer_var.reset(observer_token)
+            self._context_var.reset(context_token)
 
     def enqueue(
         self,
@@ -1027,6 +1091,7 @@ class Agent(Generic[StateT]):
         ctx: Union[ConnectionContext, None] = None,
         future: Union[asyncio.Future, None] = None,
         signal: Union[AbortSignal, None] = None,
+        call_observer: Union["_AgentCallEventObserver", None] = None,
     ) -> None:
         """Enqueue a message for serial processing."""
         self._mailbox.put_nowait(
@@ -1037,6 +1102,7 @@ class Agent(Generic[StateT]):
                 ctx=ctx,
                 future=future,
                 signal=signal,
+                call_observer=call_observer,
             )
         )
 
@@ -1108,6 +1174,7 @@ class Agent(Generic[StateT]):
         agent_cls: type[T],
         timeout: Union[float, None] = 30.0,
         signal: Union[AbortSignal, None] = None,
+        on_event: Union[AgentEventHandler, None] = None,
     ) -> AgentCallProxy[T]:
         """Returns a type-safe proxy for making fluent calls to another agent."""
         if self._transport is None:
@@ -1120,6 +1187,7 @@ class Agent(Generic[StateT]):
             agent_id,
             timeout=timeout,
             signal=signal,
+            on_event=on_event,
         )
 
     async def handle_invoke(self, payload: Dict[str, Any]) -> Dict[str, Any]:

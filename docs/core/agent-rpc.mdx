@@ -107,7 +107,39 @@ starts the target agent when needed, and the target handles one mailbox operatio
 at a time. When a call supplies an `AbortSignal`, the same signal is available to
 the target action as `self.context.signal`, so delegated work can pass it to model
 turns or other cancellable operations. Set `timeout=None` for work whose lifecycle
-is bounded by the abort signal rather than a wall-clock deadline.
+is bounded by the abort signal rather than a wall-clock deadline. After that signal
+aborts, local calls allow up to one second for cooperative target cleanup before
+ending the caller-side wait.
+
+### Observe Local Call Events
+
+Local calls can observe the target agent's emitted events while its action is
+running. The handler receives each `Event` in emission order, and each handler call
+finishes before the delegated action can complete:
+
+```python
+from ai_query import Event
+
+async def forward_progress(event: Event) -> None:
+    await progress_sink.send(event)
+
+result = await self.call(
+    "support-agent-1",
+    agent_cls=SupportAgent,
+    timeout=None,
+    signal=self.context.signal,
+    on_event=forward_progress,
+).resolve(ticket_id=ticket_id, reason="Escalated by manager.")
+```
+
+The observer is scoped to that mailbox invocation and is deactivated on success,
+failure, timeout, or cancellation. Detached tasks retain their originating
+invocation context and cannot leak events into a later call. Observer exceptions
+are logged and do not replace the action's primary result. Event handlers must
+not re-enter `emit()` on the target agent; attempted re-entry is rejected instead
+of deadlocking. Transports opt into this API with `supports_call_events = True`.
+`HTTPTransport`, `DurableObjectTransport`, and legacy custom transports do not
+support `on_event`; they raise `NotImplementedError` when it is requested.
 
 ## Multi-User Metadata (Connection State)
 

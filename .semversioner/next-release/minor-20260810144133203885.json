@@ -1,0 +1,4 @@
+{
+  "type": "minor",
+  "description": "Add invocation-scoped event observation for agent calls with ordered delivery and cancellation-safe cleanup."
+}
